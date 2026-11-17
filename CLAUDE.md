@@ -1,0 +1,27 @@
+# Bowerbird: notes for agents working on this repo
+
+An embeddable, agent-first visual page editor. Read `docs/plan.md` for decisions and the roadmap; `docs/research/` holds the landscape research.
+
+## Commands
+
+- `pnpm build`: TypeScript project build (`tsc -b packages/*/tsconfig.json`). Needed before running the MCP CLI or smoke script.
+- `pnpm test`: Vitest. Tests import `@bowerbirdjs/*` from `src` through aliases in `vitest.config.ts`, so no build is needed.
+- `pnpm lint` / `pnpm format`: Biome.
+- `node packages/mcp/scripts/smoke.mjs [--screenshots <dir>]`: end-to-end MCP check (build first).
+
+## Architecture rules
+
+- `core`, `css` and `html` are pure TypeScript: no DOM, no Node-only APIs. They must run in browsers, Node, edge and workers.
+- **Every document change goes through `Store.apply` ops.** Don't mutate `SiteDoc` directly; add a new op (Zod schema in `core/src/ops.ts`, handler in `core/src/apply.ts`, policy level in `core/src/policy.ts`) if needed.
+- Transactions are all-or-nothing. Handlers report problems with `fail(ctx, issue)` and never throw for user or agent errors.
+- **Error messages are part of the API.** Say what's wrong, where (node id and path), and how to fix it (`hint`, `didYouMean`). Agents read them.
+- Ids are readable and stable (`hero-1/heading`). Only section roots and keyed items (`item-2`, `tier-pro`) add an id scope.
+- Styles are CSS declarations validated against design tokens; raw values need policy permission. Never store Tailwind classes.
+- Published HTML is light DOM, escaped and URL-sanitised; no scripts in output.
+- Keep dependencies MIT/BSD/Apache. No AGPL/GPL. Section content must be original (Tailwind Plus and Relume licences forbid builder use).
+
+## Conventions
+
+- ESM, TypeScript `NodeNext`: relative imports end in `.js`.
+- Tests live in `packages/<name>/test/*.test.ts`.
+- Agent-facing text (tool descriptions, `AGENT_GUIDE`) should be short and concrete: agents pay for every token.

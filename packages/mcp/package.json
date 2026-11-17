@@ -1,0 +1,37 @@
+{
+  "name": "@bowerbirdjs/mcp",
+  "version": "0.0.0",
+  "description": "MCP server and live preview for Bowerbird: lets any MCP-capable agent build and edit pages.",
+  "license": "MIT",
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist",
+    "src"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/bowerbirdjs/bowerbird.git",
+    "directory": "packages/mcp"
+  },
+  "dependencies": {
+    "@bowerbirdjs/core": "workspace:*",
+    "@bowerbirdjs/css": "workspace:*",
+    "@bowerbirdjs/html": "workspace:*",
+    "@bowerbirdjs/blocks": "workspace:*",
+    "@bowerbirdjs/agent": "workspace:*",
+    "@modelcontextprotocol/sdk": "^1.32.2",
+    "zod": "^4.6.7"
+  },
+  "bin": {
+    "bowerbird-mcp": "./dist/cli.js"
+  }
+}

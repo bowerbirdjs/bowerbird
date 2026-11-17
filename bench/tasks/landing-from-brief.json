@@ -1,0 +1,17 @@
+{
+  "id": "landing-from-brief",
+  "category": "build",
+  "start": "empty",
+  "prompt": "Build a landing page for 'Clockwise', a time-tracking app for freelancers: navigation, a split hero with a clear headline, a feature grid with three to six features, pricing with three plans, a dark call to action and a footer.",
+  "checks": [
+    {
+      "type": "sectionOrder",
+      "page": "home",
+      "sections": ["nav", "hero", "features", "pricing", "cta", "footer"]
+    },
+    { "type": "variant", "id": "hero-1", "variant": { "layout": "split" } },
+    { "type": "variant", "id": "cta-1", "variant": { "tone": "dark" } },
+    { "type": "textIncludes", "id": "nav-1/brand", "anyOf": ["Clockwise"] },
+    { "type": "noPlaceholderText", "ids": ["hero-1/heading", "hero-1/subheading"] }
+  ]
+}

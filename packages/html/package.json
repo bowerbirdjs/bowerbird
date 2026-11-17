@@ -1,0 +1,29 @@
+{
+  "name": "@bowerbirdjs/html",
+  "version": "0.0.0",
+  "description": "Renders Bowerbird pages to framework-free semantic HTML and CSS.",
+  "license": "MIT",
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist",
+    "src"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/bowerbirdjs/bowerbird.git",
+    "directory": "packages/html"
+  },
+  "dependencies": {
+    "@bowerbirdjs/core": "workspace:*",
+    "@bowerbirdjs/css": "workspace:*"
+  }
+}

@@ -1,0 +1,29 @@
+{
+  "name": "@bowerbirdjs/core",
+  "version": "0.0.0",
+  "description": "Headless page document engine: typed nodes, validated operations, transactions, per-actor undo.",
+  "license": "MIT",
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist",
+    "src"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/bowerbirdjs/bowerbird.git",
+    "directory": "packages/core"
+  },
+  "dependencies": {
+    "zod": "^4.6.7",
+    "fractional-indexing": "^4.0.0"
+  }
+}

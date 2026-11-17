@@ -1,0 +1,13 @@
+{
+  "name": "@bowerbirdjs/bench",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "description": "PageBench: page-editing tasks for measuring how reliably agents edit Bowerbird documents.",
+  "dependencies": {
+    "@bowerbirdjs/core": "workspace:*",
+    "@bowerbirdjs/blocks": "workspace:*",
+    "@bowerbirdjs/agent": "workspace:*"
+  }
+}

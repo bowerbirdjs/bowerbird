@@ -1,0 +1,13 @@
+{
+  "id": "precise-pricing-edit",
+  "category": "precise",
+  "start": "fixtures/saas-landing.site.json",
+  "prompt": "Raise the Pro plan to $39, add 'SSO' as its last feature, and move the 'Most popular' badge to the Team plan. Don't change anything else.",
+  "checks": [
+    { "type": "propEquals", "id": "pricing-1/tier-pro/price", "prop": "text", "value": "$39" },
+    { "type": "lastChildText", "id": "pricing-1/tier-pro/features", "value": "SSO" },
+    { "type": "exists", "id": "pricing-1/tier-team/badge" },
+    { "type": "notExists", "id": "pricing-1/tier-pro/badge" },
+    { "type": "unchangedExcept", "ids": ["pricing-1/tier-pro", "pricing-1/tier-team"] }
+  ]
+}
