@@ -152,6 +152,54 @@ export interface StyleCheckContext {
   vars: ReadonlySet<string>;
   /** Whether raw values (px, hex colours, …) are allowed by policy. */
   allowRaw: boolean;
+  /** Final values of token variables, used to suggest the closest token for a raw value. */
+  tokenValues?: ReadonlyMap<string, string>;
+}
+
+function toPx(value: string): number | undefined {
+  const m = /^(-?\d*\.?\d+)(px|rem|em)$/.exec(value.trim());
+  if (!m) return undefined;
+  const n = Number(m[1]);
+  return m[2] === 'px' ? n : n * 16;
+}
+
+function hexToRgb(value: string): [number, number, number] | undefined {
+  const m = /^#([0-9a-f]{3}|[0-9a-f]{4}|[0-9a-f]{6}|[0-9a-f]{8})$/i.exec(value.trim());
+  if (!m) return undefined;
+  let hex = m[1]!;
+  if (hex.length <= 4) hex = [...hex].map((c) => c + c).join('');
+  return [0, 2, 4].map((i) => Number.parseInt(hex.slice(i, i + 2), 16)) as [number, number, number];
+}
+
+/** Tokens whose value is closest to a raw length or hex colour, e.g. 24px → var(--space-lg). */
+export function closestTokens(
+  prop: string,
+  raw: string,
+  ctx: StyleCheckContext,
+  limit = 3,
+): string[] {
+  if (!ctx.tokenValues) return [];
+  const px = toPx(raw);
+  const rgb = px === undefined ? hexToRgb(raw) : undefined;
+  if (px === undefined && !rgb) return [];
+  const family =
+    FAMILY_BY_PROP.find(([re]) => re.test(prop))?.[1] ?? (rgb ? '--color-' : undefined);
+  const scored: { name: string; value: string; d: number }[] = [];
+  for (const [name, value] of ctx.tokenValues) {
+    if (family && !name.startsWith(family)) continue;
+    if (px !== undefined) {
+      const v = toPx(value);
+      if (v !== undefined) scored.push({ name, value, d: Math.abs(v - px) });
+    } else if (rgb) {
+      const v = hexToRgb(value);
+      if (v)
+        scored.push({ name, value, d: Math.hypot(v[0] - rgb[0], v[1] - rgb[1], v[2] - rgb[2]) });
+    }
+  }
+  return scored
+    .sort((a, b) => a.d - b.d)
+    .slice(0, limit)
+    .map((s) => `var(${s.name}) = ${s.value}`);
 }
 
 /** Validates one CSS value. `prop` is a CSS property or a custom property name. */
@@ -184,14 +232,17 @@ export function checkValue(prop: string, value: string, ctx: StyleCheckContext):
   if (!ctx.allowRaw) {
     const raw = findRawValue(prop, value);
     if (raw) {
+      const nearest = closestTokens(prop, raw, ctx);
       const examples = tokensForProperty(prop, ctx.vars, 4).map((v) => `var(${v})`);
       issues.push({
         code: 'raw_value',
         message: `"${prop}: ${value}" uses the raw value ${raw}; this site only allows design tokens.`,
         path: prop,
-        hint: examples.length
-          ? `Use a token instead, e.g. ${examples.join(', ')}.`
-          : 'Use a design token, e.g. var(--space-md), instead of a raw value.',
+        hint: nearest.length
+          ? `Closest tokens: ${nearest.join(', ')}.`
+          : examples.length
+            ? `Use a token instead, e.g. ${examples.join(', ')}.`
+            : 'Use a design token, e.g. var(--space-md), instead of a raw value.',
       });
     }
   }

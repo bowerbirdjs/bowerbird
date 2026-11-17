@@ -180,4 +180,31 @@ export function resolveVariant(
   return { variant, errors };
 }
 
+/** One addressable part of a section template. */
+export interface TemplatePart {
+  /** Path relative to the section root, e.g. `heading` or `tier-pro/price`. */
+  path: string;
+  input: NodeInput;
+}
+
+/**
+ * The addressable parts a section template creates, with the same id rules the store uses:
+ * a part's id is `<section id>/<path>`, and only keyed parts add a level to the path.
+ */
+export function templateParts(def: SectionDef, variant?: Record<string, string>): TemplatePart[] {
+  const resolved = resolveVariant(def, variant).variant;
+  const out: TemplatePart[] = [];
+  const walk = (input: NodeInput, scope: string) => {
+    let childScope = scope;
+    if (input.part) {
+      const path = scope + slugify(input.key ? `${input.part}-${input.key}` : input.part);
+      out.push({ path, input });
+      if (input.key) childScope = `${path}/`;
+    }
+    for (const child of input.children ?? []) walk(child, childScope);
+  };
+  for (const child of def.template({ variant: resolved }).children ?? []) walk(child, '');
+  return out;
+}
+
 export type { Props };

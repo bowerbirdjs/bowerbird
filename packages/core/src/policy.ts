@@ -77,6 +77,7 @@ function touchedNodes(op: Op): string[] {
       return [op.id, ...(op.parent ? [op.parent] : [])];
     case 'node.remove':
     case 'node.duplicate':
+    case 'section.variant':
     case 'props.set':
     case 'text.edit':
     case 'style.set':

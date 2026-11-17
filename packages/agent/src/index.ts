@@ -6,15 +6,16 @@ import {
   describeNode,
   flattenTokens,
   formatIssue,
-  type NodeInput,
+  type LintIssue,
+  lintPage,
   OpSchema,
   outline,
-  resolveVariant,
   type SectionDef,
   STATE_PSEUDO,
   type Store,
-  slugify,
+  templateParts,
 } from '@bowerbirdjs/core';
+import { htmlToNodes } from '@bowerbirdjs/import';
 import { z } from 'zod';
 import { AGENT_GUIDE } from './guide.js';
 
@@ -60,31 +61,28 @@ export function sectionParts(
   def: SectionDef,
   variant?: Record<string, string>,
 ): { path: string; summary: string }[] {
-  const { variant: v } = resolveVariant(def, variant);
-  const out: { path: string; summary: string }[] = [];
-  const walk = (input: NodeInput, scope: string) => {
-    let childScope = scope;
-    if (input.part) {
-      const path = scope + slugify(input.key ? `${input.part}-${input.key}` : input.part);
-      const fake = {
-        id: path,
-        type: input.type,
-        parent: 'x',
-        order: 'a0',
-        props: (input.props ?? {}) as BNode['props'],
-      };
-      out.push({
-        path,
-        summary: describeNode(fake as BNode, 40)
-          .slice(path.length)
-          .trim(),
-      });
-      if (input.key) childScope = `${path}/`;
-    }
-    for (const child of input.children ?? []) walk(child, childScope);
-  };
-  for (const child of def.template({ variant: v }).children ?? []) walk(child, '');
-  return out;
+  return templateParts(def, variant).map(({ path, input }) => {
+    const node = { id: path, type: input.type, parent: 'x', order: 'a0', props: input.props ?? {} };
+    return {
+      path,
+      summary: describeNode(node as BNode, 40)
+        .slice(path.length)
+        .trim(),
+    };
+  });
+}
+
+/** Formats lint results for an agent. */
+export function formatLint(pageId: string, issues: LintIssue[]): string {
+  if (!issues.length) return `page ${pageId}: no issues found.`;
+  const count = (s: string) => issues.filter((i) => i.severity === s).length;
+  return [
+    `page ${pageId}: ${count('error')} errors, ${count('warning')} warnings, ${count('info')} notes`,
+    ...issues.map(
+      (i) =>
+        `- [${i.severity}] ${i.rule}${i.nodeId ? ` ${i.nodeId}` : ''}: ${i.message}${i.hint ? ` (${i.hint})` : ''}`,
+    ),
+  ].join('\n');
 }
 
 function describeSection(def: SectionDef, detailed: boolean): string {
@@ -421,6 +419,87 @@ export function createAgentTools(options: AgentToolsOptions): AgentTool[] {
       ApplyRuntime,
     ),
     tool({
+      name: 'import_html',
+      title: 'Import HTML',
+      description:
+        'Converts an HTML fragment into editable nodes and inserts them as one change. Use it for layouts no section covers. style="…" attributes become node CSS and must use design tokens; class attributes, scripts, forms and SVG are dropped.',
+      input: z.object({
+        html: z.string().min(1).max(100_000),
+        parent: z.string().optional().describe('Parent node id (default: the page root).'),
+        page: z
+          .string()
+          .optional()
+          .describe('Page id, when the site has several pages and no parent is given.'),
+        before: z.string().optional(),
+        after: z.string().optional(),
+        label: z.string().optional(),
+        dryRun: z.boolean().optional(),
+      }),
+      annotations: { destructiveHint: false },
+      run: (input) => {
+        let parent = input.parent;
+        if (!parent) {
+          const pages = Object.values(store.doc.pages);
+          const page = input.page
+            ? store.doc.pages[input.page]
+            : pages.length === 1
+              ? pages[0]
+              : undefined;
+          if (!page) {
+            return {
+              isError: true,
+              text: input.page
+                ? `No page "${input.page}". Pages: ${pages.map((p) => p.id).join(', ')}.`
+                : 'The site has several pages; give "page" or "parent".',
+            };
+          }
+          parent = page.rootId;
+        }
+        const { nodes, warnings } = htmlToNodes(input.html);
+        if (!nodes.length)
+          return { isError: true, text: ['The HTML produced no nodes.', ...warnings].join('\n') };
+        // Keep document order and id order the same: insert each node before the anchor's next sibling.
+        let position: { before?: string; after?: string } = {};
+        if (input.before) position = { before: input.before };
+        else if (input.after) {
+          const siblings = store.view.children(parent);
+          const i = siblings.findIndex((s) => s.id === input.after);
+          const next = siblings[i + 1];
+          position = i < 0 ? { after: input.after } : next ? { before: next.id } : {};
+        }
+        const ops = nodes.map((node) => ({ op: 'node.insert', parent, ...position, node }));
+        const result = store.apply({
+          ops,
+          actor: actor(),
+          label: input.label ?? 'Import HTML',
+          ...(input.dryRun ? { dryRun: true } : {}),
+        });
+        const formatted = formatApplyResult(store, result, ops.length);
+        return {
+          ...formatted,
+          text: [formatted.text, ...warnings.map((w) => `Note: ${w}`)].join('\n'),
+        };
+      },
+    }),
+    tool({
+      name: 'lint',
+      title: 'Check pages',
+      description:
+        'Checks pages for problems: missing or extra h1, skipped heading levels, links without text or destination, empty alt text, unsafe URLs and example copy left from section templates. Run it before telling the user you are done.',
+      input: z.object({
+        page: z.string().optional().describe('Page id; omit to check all pages.'),
+      }),
+      annotations: { readOnlyHint: true },
+      run: ({ page }) => {
+        const ids = page ? [page] : Object.keys(store.doc.pages);
+        return {
+          text: ids
+            .map((id) => formatLint(id, lintPage(store.view, store.registry, id)))
+            .join('\n\n'),
+        };
+      },
+    }),
+    tool({
       name: 'undo',
       title: 'Undo my last change',
       description: "Reverts your most recent apply. Other people's later edits are kept.",
@@ -439,7 +518,9 @@ export function toolDefinitions(tools: AgentTool[]) {
   return tools.map((t) => ({
     name: t.name,
     description: t.description,
-    input_schema: z.toJSONSchema(t.input, { io: 'input' }) as Record<string, unknown>,
+    input_schema: (({ $schema: _, ...schema }) => schema)(
+      z.toJSONSchema(t.input, { io: 'input' }) as Record<string, unknown>,
+    ),
   }));
 }
 

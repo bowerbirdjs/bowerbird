@@ -1,4 +1,4 @@
-export { sectionVarNames, tokenVarSet } from './apply.js';
+export { sectionVarNames, tokenValueMap, tokenVarSet } from './apply.js';
 export {
   ancestors,
   buildChildIndex,
@@ -21,6 +21,7 @@ export {
   type IssueCode,
 } from './errors.js';
 export { duplicateId, ID_PATTERN, isValidId, nextId, slugify } from './ids.js';
+export { type LintIssue, type LintSeverity, lintPage } from './lint.js';
 export { NodeInputSchema, OP_NAMES, type Op, type OpName, OpSchema, parseOps } from './ops.js';
 export { compareOrder, keyBetween } from './order.js';
 export { describeNode, type OutlineOptions, outline } from './outline.js';
@@ -46,6 +47,8 @@ export {
   type SectionDef,
   type SectionVar,
   type SectionVarType,
+  type TemplatePart,
+  templateParts,
 } from './registry.js';
 export {
   type ApplyResult,
@@ -63,6 +66,7 @@ export {
 export {
   BUILTIN_VARS,
   checkValue,
+  closestTokens,
   findRawValue,
   parseDeclarations,
   STATE_PSEUDO,
@@ -75,6 +79,7 @@ export {
   type FlatToken,
   flattenTokens,
   getTokenLeaf,
+  resolvedTokenValues,
   toCssValue,
   tokenVar,
 } from './tokens.js';

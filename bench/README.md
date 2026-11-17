@@ -1,4 +1,4 @@
-# PageBench (planned)
+# PageBench
 
 A benchmark of page-editing tasks that measures how reliably agents edit Bowerbird documents, and which edit formats work best. No published benchmark compares edit formats for pages yet. See `docs/plan.md`, Phase 0.
 
@@ -24,18 +24,31 @@ Each task in `tasks/` is a JSON file:
 }
 ```
 
-`start` names a fixture document: `empty`, or a saved site file. `checks` are deterministic assertions on the final document. LLM-as-judge is used only where nothing else works.
+`start` names a fixture document (`empty` or `saas-landing`). `checks` are deterministic assertions on the final document. LLM-as-judge is used only where nothing else works.
 
-## Runner (to do)
+## Running it
 
-For each model and each edit format (ops, HTML import, script mode) the runner will:
+```bash
+pnpm build
+pnpm bench                                  # all tasks, claude-opus-5-5, effort high
+pnpm bench -- --task precise-pricing-edit --effort medium --out results.json
+```
 
-1. Load the start document into a store.
-2. Give the agent the tools from `@bowerbirdjs/agent` and the task prompt.
-3. Run the tool loop until the agent stops or hits the turn limit.
-4. Score the checks. Record success, number of turns, tokens, cost and latency.
+For each task the runner:
 
-The model API key is supplied by whoever runs the benchmark.
+1. Loads a fresh fixture document (`empty` or `saas-landing`, see `src/fixtures.ts`).
+2. Gives Claude the tools from `@bowerbirdjs/agent` and the task prompt, and runs a manual tool loop until the model stops or hits the turn limit.
+3. Scores the checks and records turns, tool calls, tool errors, tokens (including cache reads), estimated cost and wall time.
+
+The system prompt and tool definitions are identical for every task, so they're served from the prompt cache after the first request. Server-side refusal fallbacks are on by default. If a fallback model answers a task, the result is marked `served by …`, so it can be left out of a model comparison. Turn fallbacks off with `--no-fallbacks`.
+
+Credentials come from `ANTHROPIC_API_KEY` or an `ant auth login` profile.
+
+`scriptedAgent` replays fixed tool calls without a model. The tests use it to check the harness and the checks themselves.
+
+## Check types
+
+`sectionOrder`, `variant`, `textIncludes`, `propEquals`, `lastChildText`, `exists` / `notExists`, `hasPart` / `lacksPart` (part names, because ids stay the same when nodes move), `noPlaceholderText` (template example copy left in place), `unchangedExcept` (nothing outside the given subtrees changed), `noLintErrors`.
 
 ## Categories
 

@@ -50,6 +50,17 @@ export const OpSchema = z.discriminatedUnion('op', [
     })
     .describe('Insert a prebuilt section, optionally filling its parts in the same op.'),
   z
+    .object({
+      op: z.literal('section.variant'),
+      id: Id.describe('Section root id, e.g. "hero-1".'),
+      variant: z
+        .record(z.string(), z.string())
+        .describe('Axes to change, e.g. {"layout": "split"}.'),
+    })
+    .describe(
+      'Switch a section to other variant values. Parts present in both variants keep their content, styles and variables; nodes you added are kept.',
+    ),
+  z
     .object({ op: z.literal('node.insert'), parent: Id, ...position, node: NodeInputSchema })
     .describe('Insert a node (with optional children) under a parent.'),
   z
@@ -136,6 +147,10 @@ export const OpSchema = z.discriminatedUnion('op', [
         .optional()
         .describe('Set the value for a theme (e.g. "dark") instead of the base.'),
       type: z.string().optional(),
+      force: z
+        .boolean()
+        .optional()
+        .describe('Remove a token even though nodes or sections still reference it.'),
     })
     .describe('Create, change or remove a design token.'),
 ]);

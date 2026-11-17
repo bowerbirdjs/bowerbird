@@ -7,9 +7,11 @@ const pkg = (name: string) =>
 export default defineConfig({
   resolve: {
     // Tests run against package sources, so no build is needed first.
-    alias: [{ find: /^@bowerbirdjs\/(core|css|html|blocks|agent|mcp)$/, replacement: pkg('$1') }],
+    alias: [
+      { find: /^@bowerbirdjs\/(core|css|html|blocks|agent|mcp|import)$/, replacement: pkg('$1') },
+    ],
   },
   test: {
-    include: ['packages/*/test/**/*.test.ts'],
+    include: ['packages/*/test/**/*.test.ts', 'bench/test/**/*.test.ts'],
   },
 });

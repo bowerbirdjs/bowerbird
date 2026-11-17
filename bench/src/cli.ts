@@ -1,0 +1,81 @@
+#!/usr/bin/env node
+import { writeFile } from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
+import { parseArgs } from 'node:util';
+import Anthropic from '@anthropic-ai/sdk';
+import { claudeAgent } from './agents.js';
+import { formatResults, loadTasks, runTask } from './runner.js';
+import type { TaskResult } from './types.js';
+
+const USAGE = `pagebench: run page-editing tasks against Claude
+
+Options:
+  --model <id>        Model (default claude-opus-5-5)
+  --effort <level>    low | medium | high | xhigh | max (default high)
+  --task <id>         Run only these tasks (repeatable)
+  --max-turns <n>     Turn limit per task (default 40)
+  --no-fallbacks      Disable server-side refusal fallbacks
+  --out <file>        Write full results as JSON
+
+Credentials come from ANTHROPIC_API_KEY or an \`ant auth login\` profile.`;
+
+const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'] as const;
+
+async function main() {
+  const { values } = parseArgs({
+    options: {
+      model: { type: 'string', default: 'claude-opus-5-5' },
+      effort: { type: 'string', default: 'high' },
+      task: { type: 'string', multiple: true },
+      'max-turns': { type: 'string', default: '40' },
+      'no-fallbacks': { type: 'boolean', default: false },
+      out: { type: 'string' },
+      help: { type: 'boolean', short: 'h', default: false },
+    },
+  });
+  if (values.help) {
+    console.log(USAGE);
+    return;
+  }
+  const effort = values.effort as (typeof EFFORTS)[number];
+  if (!EFFORTS.includes(effort)) throw new Error(`--effort must be one of ${EFFORTS.join(', ')}.`);
+
+  const tasksDir = fileURLToPath(new URL('../tasks', import.meta.url));
+  const tasks = loadTasks(tasksDir).filter(
+    (t) => !values.task?.length || values.task.includes(t.id),
+  );
+  if (!tasks.length) throw new Error('No tasks matched.');
+
+  const agent = claudeAgent({
+    model: values.model,
+    effort,
+    maxTurns: Number(values['max-turns']),
+    fallbacks: !values['no-fallbacks'],
+  });
+  const results: TaskResult[] = [];
+  for (const task of tasks) {
+    console.error(`running ${task.id}…`);
+    results.push(await runTask(task, agent));
+  }
+  console.log(formatResults(agent.name, results));
+  if (values.out)
+    await writeFile(values.out, `${JSON.stringify({ agent: agent.name, results }, null, 2)}\n`);
+  if (results.some((r) => r.run.servedBy)) {
+    console.log(
+      'Note: some tasks were answered by a fallback model; exclude them when comparing models.',
+    );
+  }
+}
+
+main().catch((error) => {
+  if (error instanceof Anthropic.AuthenticationError) {
+    console.error('Authentication failed: set ANTHROPIC_API_KEY or run `ant auth login`.');
+  } else if (error instanceof Anthropic.RateLimitError) {
+    console.error('Rate limited; try again later.');
+  } else if (error instanceof Anthropic.APIError) {
+    console.error(`API error ${error.status}: ${error.message}`);
+  } else {
+    console.error(error instanceof Error ? error.message : error);
+  }
+  process.exit(1);
+});

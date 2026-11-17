@@ -1,11 +1,17 @@
-import { ancestors, type DocView, descendants } from './doc.js';
-import type { Draft } from './draft.js';
+import { ancestors, type DocView, descendants, sectionRootOf } from './doc.js';
+import { Draft } from './draft.js';
 import { didYouMean, type Issue, listPreview } from './errors.js';
 import { duplicateId, isValidId, nextId, PAGE_ID_PATTERN, slugify } from './ids.js';
 import type { Op } from './ops.js';
 import { keyBetween } from './order.js';
 import type { Policy } from './policy.js';
-import { type ComponentDef, type NodeInput, type Registry, resolveVariant } from './registry.js';
+import {
+  type ComponentDef,
+  type NodeInput,
+  type Registry,
+  resolveVariant,
+  type SectionDef,
+} from './registry.js';
 import {
   BUILTIN_VARS,
   checkValue,
@@ -13,9 +19,16 @@ import {
   STATE_PSEUDO,
   type StyleCheckContext,
 } from './styles.js';
-import { aliasesIn, flattenTokens, getTokenLeaf, TOKEN_PATH } from './tokens.js';
+import {
+  aliasesIn,
+  flattenTokens,
+  getTokenLeaf,
+  resolvedTokenValues,
+  TOKEN_PATH,
+  tokenVar,
+} from './tokens.js';
 import type { Actor, BNode, NodeId, NodeStyles, Props, SectionRef, TokenTree } from './types.js';
-import { clone, ensure, isPlainObject, pruneEmpty } from './util.js';
+import { clone, deepEqual, ensure, isPlainObject, pruneEmpty } from './util.js';
 
 export interface OpContext {
   draft: Draft;
@@ -45,6 +58,16 @@ export function tokenVarSet(tokens: TokenTree): Set<string> {
     tokenVarCache.set(tokens, set);
   }
   return set;
+}
+
+const tokenValueCache = new WeakMap<TokenTree, Map<string, string>>();
+export function tokenValueMap(tokens: TokenTree): Map<string, string> {
+  let map = tokenValueCache.get(tokens);
+  if (!map) {
+    map = resolvedTokenValues(flattenTokens(tokens).tokens);
+    tokenValueCache.set(tokens, map);
+  }
+  return map;
 }
 
 /** Variable names declared by the sections that enclose `startId` (and by `own`, if given). */
@@ -79,6 +102,7 @@ function styleContext(
       ...sectionVarNames(ctx.draft, ctx.registry, startId, own),
     ]),
     allowRaw: ctx.policy.allowRawValues(ctx.actor),
+    tokenValues: tokenValueMap(ctx.draft.tokens()),
   };
 }
 
@@ -785,7 +809,25 @@ function tokenSet(ctx: OpContext, op: OpOf<'token.set'>) {
   if (value === null) {
     if (existing === undefined)
       return fail(ctx, { code: 'not_found', path: op.path, message: `No token "${op.path}".` });
+    const users = tokenUsers(ctx, op.path);
+    if (users.length && !op.force) {
+      return fail(ctx, {
+        code: 'token_in_use',
+        path: op.path,
+        message: `Token "${op.path}" is still used by ${listPreview(users, 8)}.`,
+        hint: 'Change those references first, or pass "force": true to remove it anyway.',
+      });
+    }
     delete group[last];
+    const themes = clone(draft.themes());
+    let themesChanged = false;
+    for (const theme of Object.values(themes)) {
+      if (op.path in theme) {
+        delete theme[op.path];
+        themesChanged = true;
+      }
+    }
+    if (themesChanged) draft.setThemes(themes);
   } else {
     if (isPlainObject(existing) && !('$value' in existing)) {
       return fail(ctx, {
@@ -802,6 +844,145 @@ function tokenSet(ctx: OpContext, op: OpOf<'token.set'>) {
   draft.setTokens(tokens);
 }
 
+/** Nodes, sections and tokens that reference a token. */
+function tokenUsers(ctx: OpContext, path: string): string[] {
+  const cssVar = tokenVar(path);
+  const ref = new RegExp(`var\\(\\s*${cssVar.replace(/[-]/g, '\\-')}\\s*[,)]`);
+  const users: string[] = [];
+  for (const id of ctx.draft.nodeIds()) {
+    const n = ctx.draft.node(id)!;
+    const values = [
+      ...Object.values(n.vars ?? {}),
+      ...Object.values(n.styles ?? {}).flatMap((states) =>
+        Object.values(states).flatMap((decls) => Object.values(decls)),
+      ),
+    ];
+    if (values.some((v) => ref.test(v))) users.push(`node "${id}"`);
+  }
+  for (const def of ctx.registry.listSections()) {
+    const usesDefault = Object.values(def.vars ?? {}).some((v) => ref.test(v.default));
+    if (usesDefault || ref.test(def.css ?? '')) users.push(`section "${def.name}"`);
+  }
+  for (const t of flattenTokens(ctx.draft.tokens()).tokens) {
+    if (t.path !== path && ref.test(t.value)) users.push(`token "${t.path}"`);
+  }
+  return users;
+}
+
+/** Ids a section template creates under `rootId`, found by expanding it in a scratch document. */
+function templateIds(
+  ctx: OpContext,
+  def: SectionDef,
+  variant: Record<string, string>,
+  rootId: string,
+): Set<string> | undefined {
+  const scratchRoot: BNode = {
+    id: 'scratch-root',
+    type: 'root',
+    parent: null,
+    order: 'a0',
+    props: {},
+  };
+  const scratch = new Draft({
+    ...ctx.draft.base,
+    nodes: { [scratchRoot.id]: scratchRoot },
+    pages: {},
+    tokens: ctx.draft.tokens(),
+  });
+  const sctx: OpContext = { ...ctx, draft: scratch, issues: [], warnings: [] };
+  const section = { name: def.name, version: def.version, variant };
+  const root = createTree(sctx, def.template({ variant }), scratchRoot, 'a0', '', {
+    id: rootId,
+    section,
+  });
+  if (!root) {
+    for (const issue of sctx.issues) fail(ctx, issue);
+    return undefined;
+  }
+  return new Set(descendants(scratch, rootId).map((n) => n.id));
+}
+
+function sectionVariant(ctx: OpContext, op: OpOf<'section.variant'>) {
+  const { draft, registry } = ctx;
+  const root = requireNode(ctx, op.id);
+  if (!root) return;
+  if (!root.section) {
+    const owner = sectionRootOf(draft, root.id);
+    return fail(ctx, {
+      code: 'invalid_op',
+      nodeId: root.id,
+      message: `"${root.id}" is not a section root.`,
+      ...(owner ? { hint: `It belongs to section "${owner.id}".` } : {}),
+    });
+  }
+  const def = registry.section(root.section.name);
+  if (!def) {
+    return fail(ctx, {
+      code: 'unknown_section',
+      nodeId: root.id,
+      message: `Unknown section "${root.section.name}".`,
+    });
+  }
+  const { variant, errors } = resolveVariant(def, { ...root.section.variant, ...op.variant });
+  for (const message of errors) fail(ctx, { code: 'invalid_variant', nodeId: root.id, message });
+  if (errors.length || deepEqual(variant, root.section.variant)) return;
+  const oldIds = templateIds(ctx, def, root.section.variant, root.id);
+  const newIds = templateIds(ctx, def, variant, root.id);
+  if (!oldIds || !newIds) return;
+
+  const old = descendants(draft, root.id);
+  const oldById = new Map(old.map((n) => [n.id, n]));
+  for (const n of old) draft.deleteNode(n.id);
+  let prev: string | undefined;
+  for (const child of def.template({ variant }).children ?? []) {
+    const order = keyBetween(prev, undefined);
+    prev = order;
+    if (!createTree(ctx, child, root, order, `${root.id}/`)) return;
+  }
+  // Parts present in both variants keep their content, styles and variables.
+  for (const id of newIds) {
+    const before = oldById.get(id);
+    const now = draft.node(id);
+    if (!before || !now || before.type !== now.type) continue;
+    const next: BNode = { ...now, props: before.props };
+    if (before.styles) next.styles = before.styles;
+    if (before.vars) next.vars = before.vars;
+    if (before.name) next.name = before.name;
+    draft.setNode(next);
+  }
+  // Parts someone deleted stay deleted.
+  for (const id of newIds) {
+    if (oldIds.has(id) && !oldById.has(id) && draft.has(id)) {
+      for (const d of descendants(draft, id)) draft.deleteNode(d.id);
+      draft.deleteNode(id);
+    }
+  }
+  // Nodes added by people or agents come back under the same parent, or the nearest one left.
+  const dropped: string[] = [];
+  for (const n of old) {
+    if (oldIds.has(n.id)) {
+      if (!newIds.has(n.id) && !dropped.some((d) => n.id.startsWith(`${d}/`))) dropped.push(n.id);
+      continue;
+    }
+    let parentId = n.parent!;
+    while (!draft.has(parentId) && oldById.has(parentId)) parentId = oldById.get(parentId)!.parent!;
+    if (!draft.has(parentId)) parentId = root.id;
+    const restored: BNode = { ...n, parent: parentId };
+    if (parentId !== n.parent)
+      restored.order = keyBetween(draft.children(parentId).at(-1)?.order, undefined);
+    draft.setNode(restored);
+  }
+  if (dropped.length) {
+    ctx.warnings.push({
+      code: 'parts_removed',
+      opIndex: ctx.opIndex,
+      nodeId: root.id,
+      message: `The new variant has no ${listPreview(dropped)}; their content was removed (undo restores it).`,
+    });
+  }
+  draft.setNode({ ...draft.node(root.id)!, section: { ...root.section, variant } });
+}
+
 function propsSet(ctx: OpContext, op: OpOf<'props.set'>) {
   const node = requireNode(ctx, op.id);
   if (node) setProps(ctx, node, op.props);
@@ -809,6 +990,7 @@ function propsSet(ctx: OpContext, op: OpOf<'props.set'>) {
 
 const HANDLERS: { [K in Op['op']]: (ctx: OpContext, op: OpOf<K>) => unknown } = {
   'section.insert': sectionInsert,
+  'section.variant': sectionVariant,
   'node.insert': nodeInsert,
   'node.move': nodeMove,
   'node.remove': nodeRemove,

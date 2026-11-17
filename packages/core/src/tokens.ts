@@ -131,3 +131,20 @@ export function getTokenLeaf(tree: TokenTree, path: string): Record<string, unkn
   if (typeof node === 'string' || typeof node === 'number') return { $value: node };
   return undefined;
 }
+
+/** Token CSS variables mapped to their final values, following `var(--…)` aliases. */
+export function resolvedTokenValues(tokens: FlatToken[]): Map<string, string> {
+  const raw = new Map(tokens.map((t) => [t.cssVar, t.value]));
+  const out = new Map<string, string>();
+  for (const [name, value] of raw) {
+    let current = value;
+    for (let depth = 0; depth < 10; depth++) {
+      const alias = /^var\((--[A-Za-z0-9_-]+)\)$/.exec(current.trim());
+      const next = alias && raw.get(alias[1]!);
+      if (!next) break;
+      current = next;
+    }
+    out.set(name, current);
+  }
+  return out;
+}

@@ -81,6 +81,39 @@ describe('agent tools', () => {
     expect(run('nope').text).toContain('Unknown tool');
   });
 
+  it('imports HTML after an anchor, in order, with notes', () => {
+    const { run, store } = setup();
+    run('apply', {
+      ops: [
+        { op: 'section.insert', section: 'hero' },
+        { op: 'section.insert', section: 'cta' },
+      ],
+    });
+    const res = run('import_html', {
+      after: 'hero-1',
+      html: '<section class="x"><h2>Story</h2></section><section><h2>Team</h2></section>',
+    });
+    expect(res.isError).toBeFalsy();
+    expect(res.text).toContain('Note: class attributes were ignored');
+    expect(store.view.children('root-home').map((n) => n.id)).toEqual([
+      'hero-1',
+      'box-1',
+      'box-2',
+      'cta-1',
+    ]);
+    const raw = run('import_html', { html: '<p style="padding: 13px">x</p>' });
+    expect(raw.isError).toBe(true);
+    expect(raw.text).toContain('Closest tokens: var(--space-sm)');
+  });
+
+  it('lints pages', () => {
+    const { run } = setup();
+    run('apply', { ops: [{ op: 'section.insert', section: 'hero' }] });
+    const text = run('lint').text;
+    expect(text).toMatch(/^page home: 0 errors, \d+ warnings, \d+ notes/);
+    expect(text).toContain('template-text hero-1/heading');
+  });
+
   it('undoes only its own changes', () => {
     const { run, store } = setup();
     run('apply', { ops: [{ op: 'section.insert', section: 'hero' }] });
@@ -107,6 +140,8 @@ describe('agent tools', () => {
       'list_sections',
       'list_tokens',
       'apply',
+      'import_html',
+      'lint',
       'undo',
     ]);
   });

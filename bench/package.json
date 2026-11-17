@@ -6,8 +6,15 @@
   "license": "MIT",
   "description": "PageBench: page-editing tasks for measuring how reliably agents edit Bowerbird documents.",
   "dependencies": {
-    "@bowerbirdjs/core": "workspace:*",
+    "@anthropic-ai/sdk": "^1.10.0",
+    "@bowerbirdjs/agent": "workspace:*",
     "@bowerbirdjs/blocks": "workspace:*",
-    "@bowerbirdjs/agent": "workspace:*"
+    "@bowerbirdjs/core": "workspace:*"
+  },
+  "scripts": {
+    "bench": "node dist/cli.js"
+  },
+  "bin": {
+    "pagebench": "./dist/cli.js"
   }
 }

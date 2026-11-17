@@ -1,0 +1,30 @@
+{
+  "name": "@bowerbirdjs/import",
+  "version": "0.0.0",
+  "description": "Converts HTML (and later other formats) into Bowerbird nodes.",
+  "license": "MIT",
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist",
+    "src"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/bowerbirdjs/bowerbird.git",
+    "directory": "packages/import"
+  },
+  "dependencies": {
+    "@bowerbirdjs/core": "workspace:*",
+    "domhandler": "^6.0.1",
+    "htmlparser2": "^12.0.0"
+  }
+}

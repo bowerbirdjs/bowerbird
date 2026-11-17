@@ -26,7 +26,9 @@ export type IssueCode =
   | 'conflict'
   | 'nothing_to_undo'
   | 'no_change'
-  | 'integrity';
+  | 'integrity'
+  | 'token_in_use'
+  | 'parts_removed';
 
 /**
  * A structured problem report. Messages are written for both humans and agents: they say what is
