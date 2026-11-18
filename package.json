@@ -11,7 +11,7 @@
   "scripts": {
     "build": "tsc -b tsconfig.build.json",
     "clean": "tsc -b tsconfig.build.json --clean",
-    "typecheck": "tsc -b tsconfig.build.json && tsc -p tsconfig.test.json",
+    "typecheck": "tsc -b tsconfig.build.json && tsc -p tsconfig.test.json && tsc -p apps/showcase/tsconfig.json && tsc -p apps/wedding/tsconfig.json",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "pnpm build && vitest run -c vitest.e2e.config.ts",

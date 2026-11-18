@@ -9,6 +9,7 @@ An embeddable, agent-first visual page editor. Read `docs/plan.md` for decisions
 - `pnpm test:e2e`: builds `examples/*` and `apps/showcase` with Vite and drives them with Playwright (skipped if Playwright isn't installed). Tests live in `e2e/`.
 - `pnpm lint` / `pnpm format`: Biome.
 - `pnpm --filter @bowerbirdjs/showcase dev`: the showcase (build the packages first).
+- `pnpm --filter @bowerbirdjs/wedding dev`: the wedding planner POC (`apps/wedding`, structured event-site editor; see its README).
 - `node packages/mcp/scripts/smoke.mjs [--screenshots <dir>]`: end-to-end MCP check (build first).
 
 ## Architecture rules
@@ -20,6 +21,7 @@ An embeddable, agent-first visual page editor. Read `docs/plan.md` for decisions
 - Ids are readable and stable (`hero-1/heading`). Only section roots, keyed items (`item-2`, `tier-pro`) and symbol roots add an id scope.
 - Transactions run in this order (`Store.run`): ops → human-edit protection (agents) → symbol instance sync (`core/src/symbols.ts`) → provenance stamps (`core/src/provenance.ts`) on commit. Undo/redo replay record changes and are checked with `Policy.checkChanges`.
 - Symbol instances are linked copies (`BNode.link`); their structure only changes through the definition (ops refuse with code `instance`).
+- Shared facts (e.g. an event's schedule) are site data: groups declared with `defineData` and changed with `data.set`; components read them in `render(node, ctx)` via `ctx.data`. Generated elements go through the same escaping and URL rules; colours only via `ElementSpec.vars`.
 - Translations live in `BNode.l10n[locale]` (content props only); render with `{ locale }`. Rich text (`rich-text`, prop `html`) must go through `sanitizeRichText` when written and rendered.
 - Sync (`packages/sync`) is server-authoritative: clients never change the server's document directly, only send ops. Anything new that changes a document must be an op so it syncs.
 - Styles are CSS declarations validated against design tokens; raw values need policy permission. Never store Tailwind classes.

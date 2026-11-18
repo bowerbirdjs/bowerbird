@@ -141,6 +141,7 @@ describe('agent tools', async () => {
     expect(JSON.stringify(apply.input_schema)).toContain('section.insert');
     expect(defs.map((d) => d.name)).toEqual([
       'get_context',
+      'get_data',
       'get_outline',
       'get_nodes',
       'list_sections',

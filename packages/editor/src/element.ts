@@ -115,7 +115,7 @@ export interface EditorChangeDetail {
  * `assets` (image uploads). Attribute `preset` (`full`, `layout`, `content`) is a shorthand for
  * `ui.preset`.
  * Events (bubbling, composed): `bb-change`, `bb-transaction`, `bb-selection`, `bb-page`,
- * `bb-error`.
+ * `bb-error`, `bb-data-click` (text shown from site data was clicked: `{ path, node }`).
  * Methods: `apply(ops, label)`, `select(id)`, `undo()`, `redo()`.
  * Slots: `toolbar-start`, `toolbar-end` (your own controls in the top bar).
  * Parts (for `::part()`): `toolbar`, `structure`, `inspector`, `tabs`, `tab`, `panel-section`,
@@ -329,6 +329,9 @@ export class BowerbirdEditor extends LitElement {
         this.showError(event.errors);
         this.emit('bb-error', { errors: event.errors, label: event.label });
         break;
+      case 'data':
+        this.emit('bb-data-click', { path: event.path, node: event.node });
+        break;
     }
     this.tick++;
   }
@@ -392,14 +395,18 @@ export class BowerbirdEditor extends LitElement {
     const onCanvas = !!target && (target === this || !!this.canvasHost?.contains(target));
     const onLayer = !!target?.closest?.('[role="treeitem"]');
     if (c.readOnly || !c.selected || !(onCanvas || onLayer)) return;
-    if ((e.key === 'Delete' || e.key === 'Backspace') && c.can('delete')) {
+    const allowed = c.selectionActions();
+    if ((e.key === 'Delete' || e.key === 'Backspace') && allowed.delete) {
       e.preventDefault();
       c.removeSelected();
       if (onLayer) this.focusRow(c.selected);
-    } else if (mod && e.key.toLowerCase() === 'd' && c.can('duplicate')) {
+    } else if (mod && e.key.toLowerCase() === 'd' && allowed.duplicate) {
       e.preventDefault();
       c.duplicateSelected();
-    } else if (e.altKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown') && c.can('move')) {
+    } else if (
+      e.altKey &&
+      ((e.key === 'ArrowUp' && allowed.up) || (e.key === 'ArrowDown' && allowed.down))
+    ) {
       e.preventDefault();
       c.nudge(e.key === 'ArrowUp' ? -1 : 1);
     } else if (e.key === 'Enter' && onCanvas) {
@@ -1077,8 +1084,9 @@ export class BowerbirdEditor extends LitElement {
   }
 
   private renderActions(c: EditorController): TemplateResult | typeof nothing {
-    const duplicate = c.can('duplicate');
-    const remove = c.can('delete');
+    const allowed = c.selectionActions();
+    const duplicate = allowed.duplicate;
+    const remove = allowed.delete;
     // "Select parent" only makes sense next to things you can do with the parent.
     if (!duplicate && !remove && !c.can('move')) return nothing;
     return html`<div class="section row-inline" part="panel-section">

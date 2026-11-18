@@ -479,7 +479,7 @@ function createTree(
   parent: BNode,
   order: string,
   scope: string,
-  opts: { id?: string; section?: SectionRef } = {},
+  opts: { id?: string; section?: SectionRef; template?: boolean } = {},
 ): BNode | undefined {
   const { draft, registry } = ctx;
   const def = registry.component(input.type);
@@ -501,7 +501,8 @@ function createTree(
         : `Types: ${insertable.map((c) => c.name).join(', ')}.`,
     });
   }
-  if (def.insertable === false) {
+  // Section templates are code, so they may use components people and agents can't insert.
+  if (def.insertable === false && !opts.template) {
     return fail(ctx, { code: 'unknown_type', message: `"${def.name}" nodes can't be inserted.` });
   }
   if (!registry.accepts(parent.type, def.name)) {
@@ -614,7 +615,8 @@ function createTree(
   for (const child of input.children ?? []) {
     const childOrder = keyBetween(prev, undefined);
     prev = childOrder;
-    if (!createTree(ctx, child, node, childOrder, childScope)) return undefined;
+    if (!createTree(ctx, child, node, childOrder, childScope, { template: !!opts.template }))
+      return undefined;
   }
   return node;
 }
@@ -708,6 +710,7 @@ function sectionInsert(ctx: OpContext, op: OpOf<'section.insert'>) {
     });
   }
   const root = createTree(ctx, template, parent, order, '', {
+    template: true,
     id,
     section: { name: def.name, version: def.version, variant },
   });
@@ -932,6 +935,89 @@ function setTranslation(
   const next: BNode = { ...node, l10n };
   if (!Object.keys(l10n).length) delete next.l10n;
   ctx.draft.setNode(next);
+}
+
+/** Largest JSON size of one data group. */
+const MAX_DATA = 200_000;
+
+function dataSet(ctx: OpContext, op: OpOf<'data.set'>) {
+  const def = ctx.registry.dataDef(op.key);
+  if (!def) {
+    const keys = ctx.registry.listData().map((d) => d.key);
+    return fail(ctx, {
+      code: 'not_found',
+      path: op.key,
+      message: `No data group "${op.key}".${didYouMean(op.key, keys)}`,
+      hint: keys.length ? `Data groups: ${keys.join(', ')}.` : 'This site has no data groups.',
+    });
+  }
+  const unsafe = op.path?.find((s) => typeof s === 'string' && !isSafeKey(s));
+  if (unsafe !== undefined) {
+    return fail(ctx, {
+      code: 'invalid_props',
+      path: op.key,
+      message: `"${String(unsafe)}" can't be used as a data key.`,
+    });
+  }
+  const current = ctx.draft.data(op.key);
+  let next: unknown;
+  if (!op.path?.length) next = op.value === null ? undefined : op.value;
+  else {
+    // Copy the group, then walk to the parent of the target, creating containers as needed.
+    const root: unknown =
+      current === undefined ? (typeof op.path[0] === 'number' ? [] : {}) : clone(current);
+    let at = root as Record<string | number, unknown>;
+    for (const [i, segment] of op.path.slice(0, -1).entries()) {
+      const child = at[segment];
+      if (child === undefined || child === null) {
+        at[segment] = typeof op.path[i + 1] === 'number' ? [] : {};
+      } else if (typeof child !== 'object') {
+        return fail(ctx, {
+          code: 'invalid_props',
+          path: [op.key, ...op.path.slice(0, i + 1)].join('.'),
+          message: `"${[op.key, ...op.path.slice(0, i + 1)].join('.')}" is ${JSON.stringify(child)}, not a list or object.`,
+        });
+      }
+      at = at[segment] as Record<string | number, unknown>;
+    }
+    const last = op.path.at(-1)!;
+    if (Array.isArray(at) && typeof last === 'number') {
+      if (last > at.length) {
+        return fail(ctx, {
+          code: 'invalid_props',
+          path: [op.key, ...op.path].join('.'),
+          message: `Index ${last} is past the end of the list (${at.length} items).`,
+          hint: `Use ${at.length} to add an item at the end.`,
+        });
+      }
+      if (op.value === null) at.splice(last, 1);
+      else at[last] = op.value;
+    } else if (op.value === null) delete at[last];
+    else at[last] = op.value;
+    next = root;
+  }
+  if (next !== undefined) {
+    const parsed = def.schema.safeParse(next);
+    if (!parsed.success) {
+      const issue = parsed.error.issues[0]!;
+      const where = [op.key, ...issue.path.map(String)].join('.');
+      return fail(ctx, {
+        code: 'invalid_props',
+        path: where,
+        message: `${def.title}: ${where} ${issue.message.charAt(0).toLowerCase()}${issue.message.slice(1)}.`,
+        hint: def.description,
+      });
+    }
+    next = parsed.data;
+    if (JSON.stringify(next).length > MAX_DATA) {
+      return fail(ctx, {
+        code: 'invalid_props',
+        path: op.key,
+        message: `${def.title} is too large (over ${MAX_DATA / 1000} kB).`,
+      });
+    }
+  }
+  ctx.draft.setData(op.key, next);
 }
 
 function localeSet(ctx: OpContext, op: OpOf<'locale.set'>) {
@@ -1435,7 +1521,11 @@ function expandTemplate(
     });
     return undefined;
   }
-  const root = createTree(sctx, template, scratchRoot, 'a0', '', { id: rootId, section });
+  const root = createTree(sctx, template, scratchRoot, 'a0', '', {
+    id: rootId,
+    section,
+    template: true,
+  });
   if (!root) {
     for (const issue of sctx.issues) fail(ctx, issue);
     return undefined;
@@ -1625,6 +1715,7 @@ const HANDLERS: { [K in Op['op']]: (ctx: OpContext, op: OpOf<K>) => unknown } = 
   'page.remove': pageRemove,
   'token.set': tokenSet,
   'locale.set': localeSet,
+  'data.set': dataSet,
   'symbol.create': symbolCreate,
   'symbol.insert': symbolInsert,
   'symbol.detach': symbolDetach,

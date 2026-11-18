@@ -4,6 +4,7 @@ export {
   type EditorEvent,
   type GhostPreview,
   type Position,
+  type SelectionActions,
 } from './controller.js';
 export {
   currentDrag,

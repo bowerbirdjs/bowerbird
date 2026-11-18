@@ -7,6 +7,7 @@ import {
   localizedProps,
   type Page,
   type Registry,
+  type RenderContext,
   type SiteDoc,
   sanitizeRichText,
   sanitizeUrl,
@@ -104,6 +105,58 @@ interface Ctx {
   mode: CssMode;
   nodeIds: NonNullable<RenderOptions['nodeIds']>;
   locale?: string;
+  /** What components' `render` functions see. */
+  render: RenderContext;
+}
+
+function renderContext(view: DocView, mode: CssMode, locale?: string): RenderContext {
+  return {
+    data: (key) => view.data?.(key),
+    mode: mode === 'editor' ? 'editor' : 'published',
+    view,
+    ...(locale ? { locale } : {}),
+  };
+}
+
+/** Attributes as written, minus editor-only marks outside the editor, with URLs sanitized. */
+function cleanAttrs(ctx: Ctx, attrs: Record<string, unknown>): Record<string, unknown> {
+  const out = { ...attrs };
+  if (ctx.mode !== 'editor') delete out['data-bb-data'];
+  if (typeof out.href === 'string') out.href = sanitizeUrl(out.href, 'href');
+  if (typeof out.src === 'string') out.src = sanitizeUrl(out.src, 'src');
+  return out;
+}
+
+const VAR_NAME = /^--[a-z][a-z0-9-]*$/;
+const VAR_VALUE = /^(#[0-9a-fA-F]{3,8}|-?\d+(\.\d+)?(px|rem|em|%|deg)?)$/;
+
+/** `ElementSpec.vars` as a style attribute; anything that isn't a colour or number is dropped. */
+function varsAttr(vars: ElementSpec['vars']): string {
+  const decls = Object.entries(vars ?? {}).filter(
+    ([name, value]) => VAR_NAME.test(name) && VAR_VALUE.test(value),
+  );
+  return decls.length
+    ? ` style="${escapeAttr(decls.map(([n, v]) => `${n}: ${v}`).join('; '))}"`
+    : '';
+}
+
+/** Elements a component generated from data (see `ElementSpec.children`). */
+function renderSpec(ctx: Ctx, spec: ElementSpec | string, depth: number, inLink: boolean): string {
+  if (typeof spec === 'string') return escapeHtml(spec);
+  if (depth > 200) return '';
+  const tag = TAG_RE.test(spec.tag) && !DENIED_TAGS.has(spec.tag) ? spec.tag : 'div';
+  const open = `<${tag}${attrString(cleanAttrs(ctx, spec.attrs ?? {}))}${varsAttr(spec.vars)}>`;
+  if (spec.void || VOID.has(tag)) return open;
+  const linked = inLink || tag === 'a';
+  return `${open}${specInner(ctx, spec, depth, linked)}</${tag}>`;
+}
+
+function specInner(ctx: Ctx, spec: ElementSpec, depth: number, linked: boolean): string {
+  if (spec.children?.length)
+    return spec.children.map((c) => renderSpec(ctx, c, depth + 1, linked)).join('');
+  if (spec.html !== undefined)
+    return linked ? stripRichTextLinks(sanitizeRichText(spec.html)) : sanitizeRichText(spec.html);
+  return escapeHtml(spec.text ?? '');
 }
 
 function renderNode(
@@ -118,7 +171,7 @@ function renderNode(
   const def = ctx.registry.component(node.type);
   const props = localizedProps(node, ctx.locale);
   let spec: ElementSpec;
-  if (def?.render) spec = def.render(props === node.props ? node : { ...node, props });
+  if (def?.render) spec = def.render(props === node.props ? node : { ...node, props }, ctx.render);
   else if (def?.kind === 'code' && def.tag)
     spec = { tag: def.tag, attrs: codeComponentAttrs(props) };
   else spec = { tag: 'div', attrs: { 'data-bb-missing': node.type } };
@@ -142,10 +195,8 @@ function renderNode(
   if (ctx.mode === 'editor' && node.section) attrs['data-bb-section'] = node.section.name;
   // Host code components keep the host's own styling inside the editor canvas (see the reset).
   if (ctx.mode === 'editor' && def?.kind === 'code') attrs['data-bb-code'] = node.type;
-  if (typeof attrs.href === 'string') attrs.href = sanitizeUrl(attrs.href, 'href');
-  if (typeof attrs.src === 'string') attrs.src = sanitizeUrl(attrs.src, 'src');
 
-  const open = `<${tag}${attrString(attrs)}>`;
+  const open = `<${tag}${attrString(cleanAttrs(ctx, attrs))}>`;
   if (spec.void || VOID.has(tag)) return open;
   const children = ctx.view.children(node.id);
   // Links can't nest (browsers split them apart), so rich text inside a link loses its own links.
@@ -154,11 +205,7 @@ function renderNode(
     ? children
         .map((c) => renderNode(ctx, c, scope, depth + 1, linked))
         .join(node.parent === null ? '\n' : '')
-    : spec.html !== undefined
-      ? linked
-        ? stripRichTextLinks(sanitizeRichText(spec.html))
-        : sanitizeRichText(spec.html)
-      : escapeHtml(spec.text ?? '');
+    : specInner(ctx, spec, depth, linked);
   return node.parent === null ? `${open}\n${inner}\n</${tag}>` : `${open}${inner}</${tag}>`;
 }
 
@@ -181,6 +228,7 @@ export function renderPage(
     mode,
     nodeIds: options.nodeIds ?? (mode === 'editor' ? 'all' : 'styled'),
     ...(options.locale ? { locale: options.locale } : {}),
+    render: renderContext(view, mode, options.locale),
   };
   const html = renderNode(ctx, root, undefined);
   const css = compileCss(doc, registry, {
@@ -211,6 +259,7 @@ export function renderSubtree(
     mode,
     nodeIds: options.nodeIds ?? (mode === 'editor' ? 'all' : 'styled'),
     ...(options.locale ? { locale: options.locale } : {}),
+    render: renderContext(view, mode, options.locale),
   };
   const html = `<div class="bb-page">\n${renderNode(ctx, root, undefined)}\n</div>`;
   const css = compileCss(doc, registry, {

@@ -119,6 +119,9 @@ export function requiredLevel(op: Op, view: DocView, registry: Registry): Freedo
       );
       return designProps ? 'design' : 'layout';
     }
+    // Site data is content: what the event is, where and when.
+    case 'data.set':
+      return 'content';
     case 'style.set':
     case 'vars.set':
     case 'token.set':
@@ -209,6 +212,7 @@ export function requiredLevelForChanges(changes: Change[], registry: Registry): 
     if (RANK[l] > RANK[level]) level = l;
   };
   for (const c of changes) {
+    if (c.kind === 'data') continue;
     if (c.kind === 'tokens' || c.kind === 'themes' || c.kind === 'symbol') raise('design');
     else if (c.kind === 'page' || c.kind === 'locales') raise('layout');
     else {

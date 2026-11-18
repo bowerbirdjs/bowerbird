@@ -18,6 +18,7 @@ export type Change =
   | { kind: 'page'; id: PageId; before?: Page; after?: Page }
   | { kind: 'symbol'; id: string; before?: SymbolDef; after?: SymbolDef }
   | { kind: 'locales'; id: 'locales'; before?: Locales; after?: Locales }
+  | { kind: 'data'; id: string; before?: unknown; after?: unknown }
   | { kind: 'tokens'; id: 'tokens'; before: TokenTree; after: TokenTree }
   | { kind: 'themes'; id: 'themes'; before: SiteDoc['themes']; after: SiteDoc['themes'] };
 
@@ -29,6 +30,7 @@ export class Draft implements DocView {
   private readonly nodeOverlay = new Map<NodeId, BNode | null>();
   private readonly pageOverlay = new Map<PageId, Page | null>();
   private readonly symbolOverlay = new Map<string, SymbolDef | null>();
+  private readonly dataOverlay = new Map<string, unknown>();
   /** Ids of nodes created in this draft, in creation order (used to pin ids in proposals). */
   readonly created: NodeId[] = [];
   private readonly counterOverlay = new Map<string, number>();
@@ -93,6 +95,23 @@ export class Draft implements DocView {
   symbols(): SymbolDef[] {
     const ids = new Set([...Object.keys(this.base.symbols ?? {}), ...this.symbolOverlay.keys()]);
     return [...ids].map((id) => this.symbol(id)).filter((s): s is SymbolDef => !!s);
+  }
+
+  /** A site data group (see `SiteDoc.data`). */
+  data(key: string): unknown {
+    if (this.dataOverlay.has(key)) return this.dataOverlay.get(key) ?? undefined;
+    return own(this.base.data ?? {}, key);
+  }
+
+  dataKeys(): string[] {
+    const keys = new Set([...Object.keys(this.base.data ?? {}), ...this.dataOverlay.keys()]);
+    return [...keys].filter((k) => this.data(k) !== undefined);
+  }
+
+  /** Sets a data group; `undefined` removes it. */
+  setData(key: string, value: unknown): void {
+    this.dataOverlay.set(key, value === undefined ? null : value);
+    this.version++;
   }
 
   setSymbol(symbol: SymbolDef): void {
@@ -191,6 +210,17 @@ export class Draft implements DocView {
       if (deepEqual(before, after ?? undefined)) continue;
       out.push({ kind: 'symbol', id, ...(before ? { before } : {}), ...(after ? { after } : {}) });
     }
+    for (const [id, value] of this.dataOverlay) {
+      const before = own(this.base.data ?? {}, id);
+      const after = value ?? undefined;
+      if (deepEqual(before, after)) continue;
+      out.push({
+        kind: 'data',
+        id,
+        ...(before !== undefined ? { before } : {}),
+        ...(after !== undefined ? { after } : {}),
+      });
+    }
     if (!deepEqual(this.base.locales, this.localeSettings)) {
       out.push({
         kind: 'locales',
@@ -239,6 +269,15 @@ export class Draft implements DocView {
       }
       if (Object.keys(symbols).length) next.symbols = symbols;
       else delete next.symbols;
+    }
+    if (this.dataOverlay.size) {
+      const data = { ...(this.base.data ?? {}) };
+      for (const [key, value] of this.dataOverlay) {
+        if (value === null || value === undefined) delete data[key];
+        else data[key] = value;
+      }
+      if (Object.keys(data).length) next.data = data;
+      else delete next.data;
     }
     if (this.counterOverlay.size) {
       next.counters = { ...(this.base.counters ?? {}), ...Object.fromEntries(this.counterOverlay) };

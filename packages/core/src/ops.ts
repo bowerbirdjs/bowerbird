@@ -165,6 +165,20 @@ export const OpSchema = z.discriminatedUnion('op', [
   z.object({ op: z.literal('page.remove'), id: z.string() }).describe('Remove a page.'),
   z
     .object({
+      op: z.literal('data.set'),
+      key: z.string().describe('Data group, e.g. "schedule" (get_context lists them).'),
+      path: z
+        .array(z.union([z.string(), z.number().int().min(0)]))
+        .max(8)
+        .optional()
+        .describe('Where inside the group, e.g. [0, "time"]; omit to replace the whole group.'),
+      value: z
+        .unknown()
+        .describe('New value (JSON); null removes it (an array item is spliced out).'),
+    })
+    .describe('Change site data (facts sections show, e.g. the schedule or venues).'),
+  z
+    .object({
       op: z.literal('locale.set'),
       default: z
         .string()
@@ -331,6 +345,8 @@ export function describeOp(op: Op): string {
       return `page ${op.id}${op.locale ? ` (${op.locale})` : ''}: ${[op.title && `title ${short(op.title)}`, op.path && `path ${op.path}`, op.description !== undefined && 'description'].filter(Boolean).join(', ')}`;
     case 'page.remove':
       return `remove page ${op.id}`;
+    case 'data.set':
+      return `${[op.key, ...(op.path ?? [])].join('.')} = ${op.value === null ? 'removed' : short(JSON.stringify(op.value) ?? '')}`;
     case 'locale.set':
       return `languages: ${[
         op.default && `default ${op.default}`,

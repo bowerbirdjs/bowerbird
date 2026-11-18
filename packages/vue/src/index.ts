@@ -21,6 +21,7 @@ const EVENTS = {
   'bb-selection': 'selection',
   'bb-page': 'page-change',
   'bb-error': 'error',
+  'bb-data-click': 'data-click',
 } as const;
 
 /**
@@ -40,7 +41,7 @@ export const BowerbirdEditor = defineComponent({
     /** Shorthand for `ui.preset`. */
     preset: { type: String as PropType<EditorPreset | 'auto'>, default: undefined },
   },
-  emits: ['change', 'transaction', 'selection', 'page-change', 'error'],
+  emits: ['change', 'transaction', 'selection', 'page-change', 'error', 'data-click'],
   setup(props, { emit, expose }) {
     const element = ref<EditorElement | null>(null);
     const listeners = Object.entries(EVENTS).map(

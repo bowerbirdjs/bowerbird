@@ -48,6 +48,12 @@ export function applyChanges(
     } else if (c.kind === 'locales') {
       if (c.after) next.locales = c.after;
       else delete next.locales;
+    } else if (c.kind === 'data') {
+      const data = { ...(next.data ?? {}) };
+      if (c.after === undefined) delete data[c.id];
+      else data[c.id] = c.after;
+      if (Object.keys(data).length) next.data = data;
+      else delete next.data;
     } else if (c.kind === 'tokens') next.tokens = c.after;
     else next.themes = c.after;
   }

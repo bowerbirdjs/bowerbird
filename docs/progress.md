@@ -47,6 +47,9 @@ The working log for building Bowerbird phase by phase. Each phase ends with a re
 
 - [x] Windows: build scripts without shell globs (`tsconfig.build.json`)
 - [x] Editor UI customization: every part of the editor can be turned off (`ui.features`, keys in `EDITOR_FEATURES`); presets `full` / `layout` / `content`, and by default the editor offers what the store policy allows its actor (`Policy.level`, `Store.onPolicy`); allowlists for insertable sections and elements and for style properties; `toolbar-start`/`toolbar-end` slots and `::part()` styling; React/Vue `ui` and `preset` props; showcase roles show the three levels
+- [x] Site data: `SiteDoc.data` groups declared with `defineData` (zod schemas), the `data.set` op (content level; undo, sync, diffs), data-aware rendering (`render(node, ctx)` with `ctx.data`, generated elements, validated custom properties), `bb-data-click` in the editor, `get_data` for agents
+- [x] Policy-aware editor actions: delete, duplicate and move are offered only when the policy would allow them (dry runs)
+- [x] Wedding planner POC (`apps/wedding`): event facts, the brief's 18 blocks, three designs with contrast-safe accents, a structured-editing policy, Details and Design panels, preview and publish
 
 ## Notes
 
