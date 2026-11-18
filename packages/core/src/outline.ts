@@ -1,24 +1,9 @@
 import { type DocView, descendants, isInstanceRoot } from './doc.js';
-import { localizedProps } from './l10n.js';
+import { checkReadLocale, localizedProps, untranslatedProps } from './l10n.js';
+import { PRIMITIVES } from './primitives.js';
+import type { Registry } from './registry.js';
 import { richTextToPlain } from './richtext.js';
 import { instancesOf, overridesOf } from './symbols.js';
-
-/** Whether a text-bearing node lacks a translation for `locale`. */
-function untranslated(n: BNode, locale: string): boolean {
-  const key =
-    n.type === 'rich-text'
-      ? 'html'
-      : n.type === 'text' || n.type === 'button' || n.type === 'link'
-        ? 'text'
-        : undefined;
-  return (
-    !!key &&
-    typeof n.props[key] === 'string' &&
-    (n.props[key] as string).trim() !== '' &&
-    !(n.l10n?.[locale] && key in n.l10n[locale])
-  );
-}
-
 import type { BNode, NodeId, PageId } from './types.js';
 
 export interface OutlineOptions {
@@ -29,9 +14,16 @@ export interface OutlineOptions {
   depth?: number;
   /** Maximum characters of text shown per node. Default 60. */
   maxText?: number;
-  /** Show this language's translations; untranslated text is marked. */
+  /**
+   * Show this language's translations; untranslated content is marked. The default language
+   * shows the content itself; an unknown language gives an error line.
+   */
   locale?: string;
+  /** Knows the content props of code components (for untranslated marks). */
+  registry?: Registry;
 }
+
+const PRIMITIVE_CONTENT = new Map(PRIMITIVES.map((p) => [p.name, p.contentProps ?? []]));
 
 /** Symbol and provenance notes for one node: instance roots, overrides, people's edits. */
 export function nodeNotes(view: DocView, n: BNode): string[] {
@@ -92,12 +84,21 @@ export function outline(view: DocView, options: OutlineOptions = {}): string {
   const depth = options.depth ?? 3;
   const maxText = options.maxText ?? 60;
   const lines: string[] = [];
+  let locale: string | undefined;
+  if (options.locale) {
+    const checked = checkReadLocale(view.locales?.(), options.locale);
+    if (checked.error) return checked.error;
+    if (checked.note) lines.push(checked.note);
+    locale = checked.locale;
+  }
+  const content = (type: string) =>
+    options.registry?.component(type)?.contentProps ?? PRIMITIVE_CONTENT.get(type) ?? [];
   const walk = (node: BNode, level: number) => {
     const notes = nodeNotes(view, node);
-    if (options.locale && untranslated(node, options.locale))
-      notes.push(`untranslated ${options.locale}`);
+    if (locale && untranslatedProps(node, content(node.type), locale).length)
+      notes.push(`untranslated ${locale}`);
     lines.push(
-      `${'  '.repeat(level)}${describeNode(node, maxText, options.locale)}${notes.length ? `  [${notes.join('; ')}]` : ''}`,
+      `${'  '.repeat(level)}${describeNode(node, maxText, locale)}${notes.length ? `  [${notes.join('; ')}]` : ''}`,
     );
     const children = view.children(node.id);
     if (!children.length) return;
@@ -122,7 +123,8 @@ export function outline(view: DocView, options: OutlineOptions = {}): string {
   if (!pages.length)
     return options.page ? `No page "${options.page}".` : 'The site has no pages yet.';
   for (const page of pages) {
-    lines.push(`page ${page.id}  "${page.path}"  title=${JSON.stringify(page.title)}`);
+    const title = (locale && page.l10n?.[locale]?.title) || page.title;
+    lines.push(`page ${page.id}  "${page.path}"  title=${JSON.stringify(title)}`);
     const children = view.children(page.rootId);
     if (!children.length) lines.push('  (empty)');
     for (const child of children) walk(child, 1);

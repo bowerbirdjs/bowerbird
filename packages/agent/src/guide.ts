@@ -1,3 +1,7 @@
+import { RICH_TEXT_TAGS } from '@bowerbirdjs/core';
+
+const RICH_TAGS = RICH_TEXT_TAGS.map((t) => (t === 'a' ? '<a href>' : `<${t}>`)).join(' ');
+
 /** Instructions for agents, returned by `get_context`. Keep it short: agents pay for every token. */
 export const AGENT_GUIDE = `## How to edit this site
 1. Read first: get_outline shows one line per node (id first). Use get_nodes for full detail.
@@ -16,8 +20,8 @@ export const AGENT_GUIDE = `## How to edit this site
 - Outline marks "[edited by <name>]" where a person changed something. Don't overwrite their words or styling unless they asked; propose: true lets them review the change.
 
 ## Text
-- text nodes hold plain text. For inline formatting use a rich-text node: props.html with <strong> <em> <a href> <code> <br> only; anything else is stripped.
-- Other languages: {"op":"locale.set","add":["de"]}, then props.set with "locale":"de" on content props (text, html, href, alt…). Untranslated content falls back to the default language.
+- text nodes hold plain text. For inline formatting use a rich-text node: props.html with ${RICH_TAGS} only; other tags are stripped (paragraphs become <br>).
+- Other languages: {"op":"locale.set","default":"en","add":["de"]} (default = the language of the current content), then props.set with "locale":"de" on content props (text, html, href, alt…) and page.update with "locale" for titles. Untranslated content falls back to the default language. get_nodes shows existing translations (l10n).
 
 ## Styling
 - Use design tokens, not raw values: var(--space-lg), var(--color-accent), var(--text-2xl). Call list_tokens to see them.
@@ -41,6 +45,6 @@ export const AGENT_GUIDE = `## How to edit this site
 {"op":"token.set","path":"color.brand.600","value":"#0d9488"}
 {"op":"page.create","path":"/about","title":"About us"}
 {"op":"props.set","id":"hero-1/heading","locale":"de","props":{"text":"Planen Sie gemeinsam"}}
-{"op":"node.insert","parent":"features-1/header","node":{"type":"rich-text","props":{"html":"Free for <strong>small teams</strong>. <a href="/pricing">See pricing</a>."}}}
+{"op":"node.insert","parent":"features-1/header","node":{"type":"rich-text","props":{"html":"Free for <strong>small teams</strong>. <a href='/pricing'>See pricing</a>."}}}
 {"op":"symbol.create","id":"footer-1","name":"Site footer"}
 {"op":"symbol.insert","symbol":"site-footer","page":"about"}`;

@@ -20,7 +20,48 @@ describe.skipIf(!apps)('rich text and languages', () => {
     await page.keyboard.press('Control+b');
     await page.keyboard.type('bold');
     await page.keyboard.press('Enter');
-    await expect.poll(() => rich.innerHTML()).toBe('Plain then <b>bold</b>');
+    await expect.poll(() => rich.innerHTML()).toBe('Plain then <strong>bold</strong>');
+
+    // Pasted paragraphs and lists keep their line breaks.
+    await rich.dblclick();
+    await page.keyboard.press('Control+End');
+    await rich.evaluate((el) => {
+      const data = new DataTransfer();
+      data.setData(
+        'text/html',
+        '<p>First pasted para</p><p>Second para</p><ul><li>item one</li><li>item two</li></ul>',
+      );
+      el.dispatchEvent(
+        new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true }),
+      );
+    });
+    await page.keyboard.press('Enter');
+    await expect
+      .poll(() => rich.innerHTML())
+      .toBe(
+        'Plain then <strong>bold</strong>First pasted para<br>Second para<br>item one<br>item two',
+      );
+
+    // Bold inside a heading (already bold by CSS) is still <strong>, not a style that gets lost.
+    await page.evaluate(() =>
+      (
+        document.querySelector('bowerbird-editor') as unknown as { apply(ops: unknown[]): unknown }
+      ).apply([
+        { op: 'props.set', id: 'hero-1/rich-text-1', props: { tag: 'h2', html: 'Make it pop' } },
+      ]),
+    );
+    await rich.dblclick();
+    await rich.evaluate((el) => {
+      const text = el.firstChild!;
+      const range = document.createRange();
+      range.setStart(text, 8);
+      range.setEnd(text, 11);
+      getSelection()!.removeAllRanges();
+      getSelection()!.addRange(range);
+    });
+    await page.keyboard.press('Control+b');
+    await page.keyboard.press('Enter');
+    await expect.poll(() => rich.innerHTML()).toBe('Make it <strong>pop</strong>');
 
     // Languages: add German, switch, and edit the heading in German only.
     await page.evaluate(() =>

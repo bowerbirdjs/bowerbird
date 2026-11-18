@@ -41,13 +41,16 @@ export interface PuckImportOptions {
   parent?: string;
 }
 
+const isObject = (v: unknown): v is Record<string, unknown> =>
+  !!v && typeof v === 'object' && !Array.isArray(v);
+
 const isItem = (v: unknown): v is PuckItem =>
-  !!v &&
-  typeof v === 'object' &&
-  typeof (v as PuckItem).type === 'string' &&
-  typeof (v as PuckItem).props === 'object';
+  isObject(v) && typeof v.type === 'string' && isObject(v.props);
 
 const HEADING_KEYS = /^(title|heading|headline|name)$/i;
+
+/** Nesting deeper than this is cut off (Bowerbird documents are limited in depth anyway). */
+const MAX_NESTING = 40;
 
 /**
  * Converts Puck data into Bowerbird ops (`section.insert` and `node.insert`) for one transaction,
@@ -60,22 +63,38 @@ export function importPuck(
   const warnings: string[] = [];
   const map = options.map ?? {};
   const unmapped = new Set<string>();
+  const zones = isObject(data.zones) ? data.zones : {};
+  /** Ids of the components being converted (zones can point back at an ancestor). */
+  const active: string[] = [];
 
+  /** Items in the legacy zone `<id>:<name>`. */
+  const zoneItems = (item: PuckItem, name: string): unknown[] => {
+    const key = `${item.props.id}:${name}`;
+    const items = Object.hasOwn(zones, key) ? zones[key] : undefined;
+    return Array.isArray(items) ? items : [];
+  };
+
+  const convertChildren = (items: unknown[]): NodeInput[] =>
+    items.flatMap((child) => {
+      if (!isItem(child)) {
+        warnings.push('Skipped an entry that is not a Puck component.');
+        return [];
+      }
+      const target = convert(child);
+      if (!target) return [];
+      if ('node' in target) return [target.node];
+      warnings.push(`"${child.type}" maps to a section, which can't be nested; it was skipped.`);
+      return [];
+    });
+
+  /** A component's slot (a prop holding components) or, failing that, its legacy zone. */
   const childrenOf =
     (item: PuckItem) =>
     (zone: string): NodeInput[] => {
-      const slot = item.props[zone];
-      const items =
-        Array.isArray(slot) && slot.every(isItem)
-          ? slot
-          : (data.zones?.[`${item.props.id}:${zone}`] ?? []);
-      return items.flatMap((child) => {
-        const target = convert(child);
-        if (!target) return [];
-        if ('node' in target) return [target.node];
-        warnings.push(`"${child.type}" maps to a section, which can't be nested; it was skipped.`);
-        return [];
-      });
+      const slot = Object.hasOwn(item.props, zone) ? item.props[zone] : undefined;
+      return convertChildren(
+        Array.isArray(slot) && slot.every(isItem) ? slot : zoneItems(item, zone),
+      );
     };
 
   /** Fallback: keep the text of an unknown component, and its nested components, in a box. */
@@ -89,29 +108,43 @@ export function importPuck(
           props: { tag: HEADING_KEYS.test(key) ? 'h2' : 'p', text: value.slice(0, 5000) },
         });
       } else if (Array.isArray(value) && value.every(isItem)) {
-        children.push(...childrenOf(item)(key));
+        children.push(...convertChildren(value));
       }
     }
-    for (const zone of Object.keys(data.zones ?? {})) {
-      const [owner, name] = zone.split(':');
-      if (owner === item.props.id && name) children.push(...childrenOf(item)(name));
+    // Legacy zones are separate from slots, even when a slot has the same name.
+    for (const zone of Object.keys(zones)) {
+      const at = zone.indexOf(':');
+      if (at > 0 && zone.slice(0, at) === item.props.id)
+        children.push(...convertChildren(zoneItems(item, zone.slice(at + 1))));
     }
     return { type: 'box', name: item.type, props: {}, children };
   };
 
   const convert = (item: PuckItem): PuckTarget => {
-    const mapper = map[item.type];
-    if (!mapper) {
-      unmapped.add(item.type);
-      return { node: generic(item) };
+    const id = typeof item.props.id === 'string' ? item.props.id : undefined;
+    if (id && active.includes(id)) {
+      warnings.push(`"${item.type}" (${id}) contains itself through its zones; the loop was cut.`);
+      return null;
     }
+    if (active.length >= MAX_NESTING) {
+      warnings.push(`Components nested deeper than ${MAX_NESTING} levels were skipped.`);
+      return null;
+    }
+    active.push(id ?? '');
     try {
+      const mapper = Object.hasOwn(map, item.type) ? map[item.type] : undefined;
+      if (!mapper) {
+        unmapped.add(item.type);
+        return { node: generic(item) };
+      }
       return mapper(item.props, childrenOf(item));
     } catch (error) {
       warnings.push(
         `Mapping "${item.type}" failed: ${error instanceof Error ? error.message : String(error)}`,
       );
       return null;
+    } finally {
+      active.pop();
     }
   };
 

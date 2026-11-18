@@ -6,6 +6,7 @@ export {
 } from './catalog.js';
 export { componentName, exportReact, type ReactExportOptions } from './react.js';
 export {
+  checkOutputPaths,
   type ExportedFile,
   exportStaticSite,
   pageFile,

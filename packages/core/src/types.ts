@@ -87,6 +87,8 @@ export interface Page {
   title: string;
   description?: string;
   rootId: NodeId;
+  /** Translated title and description per language (`page.update` with `locale`). */
+  l10n?: Record<string, { title?: string; description?: string }>;
 }
 
 export interface Breakpoint {

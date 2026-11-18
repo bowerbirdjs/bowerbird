@@ -183,6 +183,15 @@ function touched(op: Op, view: DocView): { nodes: string[]; subtrees: string[] }
       const roots = [def.rootId, ...instancesOf(view, def.id).map((n) => n.id)];
       return { nodes: roots, subtrees: roots };
     }
+    case 'locale.set': {
+      // Removing a language deletes its translations from every node that has one.
+      const removed = op.remove ?? [];
+      if (!removed.length) return { nodes: [], subtrees: [] };
+      const nodes = view
+        .nodeIds()
+        .filter((id) => removed.some((l) => view.node(id)?.l10n?.[l] !== undefined));
+      return { nodes, subtrees: [] };
+    }
     default:
       return { nodes: [], subtrees: [] };
   }

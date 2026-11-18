@@ -3,6 +3,7 @@ import {
   type ApplyResult,
   type BNode,
   type ComponentDef,
+  checkReadLocale,
   DocIndex,
   describeNode,
   flattenTokens,
@@ -141,9 +142,10 @@ function describeComponent(def: ComponentDef): string {
   return `${def.name}: ${def.description}`;
 }
 
-function compactNode(store: Store, n: BNode) {
+function compactNode(store: Store, n: BNode, locale?: string) {
   const overrides = n.link ? overridesOf(store.view, n) : [];
   const edited = Object.entries(n.edited ?? {}).filter(([field]) => field !== 'node');
+  const l10n = locale ? (n.l10n?.[locale] ? { [locale]: n.l10n[locale] } : undefined) : n.l10n;
   return {
     id: n.id,
     type: n.type,
@@ -151,6 +153,7 @@ function compactNode(store: Store, n: BNode) {
     ...(n.part ? { part: n.part } : {}),
     ...(n.key ? { key: n.key } : {}),
     props: n.props,
+    ...(l10n ? { l10n } : {}),
     ...(n.styles ? { styles: n.styles } : {}),
     ...(n.vars ? { vars: n.vars } : {}),
     ...(n.symbol ? { definitionOf: n.symbol } : {}),
@@ -575,27 +578,37 @@ export function createAgentTools(options: AgentToolsOptions): AgentTool[] {
         locale: z.string().optional().describe('Show this language’s translations.'),
       }),
       annotations: { readOnlyHint: true },
-      run: (input) => ({
-        text: `revision ${store.doc.revision}\n${outline(store.view, {
-          ...(input.page ? { page: input.page } : {}),
-          ...(input.root ? { root: input.root } : {}),
-          ...(input.depth ? { depth: input.depth } : {}),
-          ...(input.locale ? { locale: input.locale } : {}),
-        })}`,
-      }),
+      run: (input) => {
+        const error = input.locale && checkReadLocale(store.doc.locales, input.locale).error;
+        if (error) return { text: error, isError: true };
+        return {
+          text: `revision ${store.doc.revision}\n${outline(store.view, {
+            registry: store.registry,
+            ...(input.page ? { page: input.page } : {}),
+            ...(input.root ? { root: input.root } : {}),
+            ...(input.depth ? { depth: input.depth } : {}),
+            ...(input.locale ? { locale: input.locale } : {}),
+          })}`,
+        };
+      },
     }),
     tool({
       name: 'get_nodes',
       title: 'Get nodes',
       description:
-        'Full data for specific nodes: props, styles (per breakpoint/state), variables and child ids.',
-      input: z.object({ ids: z.array(z.string()).min(1).max(50) }),
+        'Full data for specific nodes: props, translations (l10n), styles (per breakpoint/state), variables and child ids.',
+      input: z.object({
+        ids: z.array(z.string()).min(1).max(50),
+        locale: z.string().optional().describe('Only include translations into this language.'),
+      }),
       annotations: { readOnlyHint: true },
-      run: ({ ids }) => {
+      run: ({ ids, locale }) => {
+        const error = locale && checkReadLocale(store.doc.locales, locale).error;
+        if (error) return { text: error, isError: true };
         const found = ids.map((id) => store.view.node(id)).filter((n): n is BNode => !!n);
         const missing = ids.filter((id) => !store.view.node(id));
         const text = JSON.stringify(
-          found.map((n) => compactNode(store, n)),
+          found.map((n) => compactNode(store, n, locale)),
           null,
           1,
         );

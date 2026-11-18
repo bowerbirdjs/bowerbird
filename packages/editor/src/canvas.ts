@@ -68,6 +68,99 @@ const TOOLBAR: [action: string, label: string, glyph: string][] = [
 
 const TEXT_TYPES = new Set(['text', 'button', 'link', 'rich-text']);
 
+/** Zero-width space: holds the caret inside an empty inline element; removed when saving. */
+const CARET_HOLDER = String.fromCharCode(0x200b);
+const NBSP = String.fromCharCode(0xa0);
+
+/**
+ * Browsers type a space at the end of a text node as &nbsp; and turn it back into a space only
+ * when more text follows in the same node. Text that continues in another node (a new <strong>)
+ * keeps the &nbsp;; this turns single ones between words back into ordinary spaces.
+ */
+function normalizeTypedSpaces(root: HTMLElement): void {
+  const walker = root.ownerDocument.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  const nodes: Text[] = [];
+  for (let n = walker.nextNode(); n; n = walker.nextNode()) nodes.push(n as Text);
+  const text = nodes.map((n) => n.data.split(CARET_HOLDER).join('')).join('');
+  let offset = 0;
+  for (const node of nodes) {
+    const chars = [...node.data];
+    let changed = false;
+    let pos = offset;
+    for (let i = 0; i < chars.length; i++) {
+      if (chars[i] === CARET_HOLDER) continue;
+      const prev = text[pos - 1];
+      const next = text[pos + 1];
+      if (chars[i] === NBSP && prev && next && !/\s/.test(prev) && !/\s/.test(next)) {
+        chars[i] = ' ';
+        changed = true;
+      }
+      pos++;
+    }
+    if (changed) node.data = chars.join('');
+    offset = pos;
+  }
+}
+
+/**
+ * Toggles inline formatting in the editable `root`, like a word processor: a selection is wrapped
+ * in a new `tag` element (or unwrapped, inside one of `names`); at a caret, what's typed next
+ * starts (or stops) being formatted.
+ */
+function toggleInline(root: HTMLElement, tag: string, names: string[]): void {
+  const doc = root.ownerDocument;
+  const selection = doc.getSelection();
+  if (!selection?.rangeCount) return;
+  const range = selection.getRangeAt(0);
+  if (!root.contains(range.commonAncestorContainer)) return;
+  let inside: Element | undefined;
+  for (let n: Node | null = range.commonAncestorContainer; n && n !== root; n = n.parentNode) {
+    if (n.nodeType === 1 && names.includes((n as Element).localName)) {
+      inside = n as Element;
+      break;
+    }
+  }
+  const caretIn = (text: Text) => {
+    const r = doc.createRange();
+    r.setStart(text, text.length);
+    selection.removeAllRanges();
+    selection.addRange(r);
+  };
+  const select = (r: Range) => {
+    selection.removeAllRanges();
+    selection.addRange(r);
+  };
+  if (range.collapsed) {
+    const holder = doc.createTextNode(CARET_HOLDER);
+    if (inside) inside.after(holder);
+    else {
+      const wrapper = doc.createElement(tag);
+      wrapper.append(holder);
+      range.insertNode(wrapper);
+    }
+    caretIn(holder);
+    return;
+  }
+  if (inside) {
+    const first = inside.firstChild;
+    const last = inside.lastChild;
+    inside.replaceWith(...inside.childNodes);
+    if (first && last) {
+      const r = doc.createRange();
+      r.setStartBefore(first);
+      r.setEndAfter(last);
+      select(r);
+    }
+    return;
+  }
+  const wrapper = doc.createElement(tag);
+  wrapper.append(range.extractContents());
+  range.insertNode(wrapper);
+  const r = doc.createRange();
+  r.selectNodeContents(wrapper);
+  select(r);
+}
+
 /**
  * The editing canvas. Renders the page into light DOM in the host document (no iframe, no shadow
  * root), so standard selection, contenteditable and hit testing work, and host components keep
@@ -513,8 +606,10 @@ export class CanvasView {
         // Inline formatting; the result is sanitized to the rich-text subset when saved.
         e.preventDefault();
         const k = e.key.toLowerCase();
-        if (k === 'b') doc.execCommand('bold');
-        else if (k === 'i') doc.execCommand('italic');
+        // Our own toggle: execCommand('bold') un-bolds headings with <span style>, which the
+        // rich-text subset can't keep.
+        if (k === 'b') toggleInline(el, 'strong', ['strong', 'b']);
+        else if (k === 'i') toggleInline(el, 'em', ['em', 'i']);
         else {
           const url = doc.defaultView?.prompt('Link to (URL or /path):', 'https://');
           if (url) doc.execCommand('createLink', false, url);
@@ -535,10 +630,26 @@ export class CanvasView {
       }
     };
     const onBlur = () => this.finishEditing(true);
+    // Pasted markup is reduced to the rich-text subset before it lands (paragraphs and list items
+    // become line breaks); plain text keeps its line breaks.
+    const onPaste = (e: ClipboardEvent) => {
+      if (!rich || !e.clipboardData) return;
+      e.preventDefault();
+      const html = e.clipboardData.getData('text/html');
+      const plain = e.clipboardData.getData('text/plain');
+      const clean = html
+        ? sanitizeRichText(html)
+        : sanitizeRichText(
+            plain.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/\r?\n/g, '<br>'),
+          );
+      el.ownerDocument.execCommand('insertHTML', false, clean);
+    };
     el.addEventListener('keydown', onKey);
+    el.addEventListener('paste', onPaste);
     el.addEventListener('blur', onBlur, { once: true });
     this.cleanupEditing = () => {
       el.removeEventListener('keydown', onKey);
+      el.removeEventListener('paste', onPaste);
       el.removeEventListener('blur', onBlur);
     };
     return true;
@@ -565,8 +676,9 @@ export class CanvasView {
       if (rich) state.el.innerHTML = sanitizeRichText(v);
       else state.el.textContent = v;
     };
+    if (rich) normalizeTypedSpaces(state.el);
     const text = rich
-      ? sanitizeRichText(state.el.innerHTML)
+      ? sanitizeRichText(state.el.innerHTML.split(CARET_HOLDER).join(''))
       : // biome-ignore lint/performance/useDomNodeTextContent: innerText keeps the typed line breaks
         normalize(state.el.innerText ?? state.el.textContent ?? '');
     state.el.removeAttribute('contenteditable');
