@@ -376,7 +376,7 @@ export function describeError(error: unknown): string {
   if (error instanceof Anthropic.APIUserAbortError) return 'Stopped.';
   if (error instanceof DOMException && error.name === 'AbortError') return 'Stopped.';
   if (error instanceof Anthropic.AuthenticationError) {
-    return 'No API key: start the showcase with ANTHROPIC_API_KEY set, or use the demo agent.';
+    return 'No valid API key: put ANTHROPIC_API_KEY in .env (repository root or apps/showcase) and restart the showcase, or use the demo agent.';
   }
   if (error instanceof Anthropic.RateLimitError) return 'Rate limited; try again in a moment.';
   if (error instanceof Anthropic.APIError)

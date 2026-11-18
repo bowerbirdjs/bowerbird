@@ -42,7 +42,7 @@ For each task the runner:
 
 The system prompt and tool definitions are identical for every task, so they're served from the prompt cache after the first request. Server-side refusal fallbacks are on by default. If a fallback model answers a task, the result is marked `served by …`, so it can be left out of a model comparison. Turn fallbacks off with `--no-fallbacks`.
 
-Credentials come from `ANTHROPIC_API_KEY` or an `ant auth login` profile.
+Credentials come from `ANTHROPIC_API_KEY` (the environment, or a `.env` file in the current directory or the repository root) or an `ant auth login` profile.
 
 `scriptedAgent` replays fixed tool calls without a model. The tests use it to check the harness and the checks themselves.
 

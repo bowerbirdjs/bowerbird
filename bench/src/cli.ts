@@ -1,7 +1,9 @@
 #!/usr/bin/env node
+import { existsSync, readFileSync } from 'node:fs';
 import { writeFile } from 'node:fs/promises';
+import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { parseArgs } from 'node:util';
+import { parseArgs, parseEnv } from 'node:util';
 import Anthropic from '@anthropic-ai/sdk';
 import { claudeAgent } from './agents.js';
 import { formatResults, loadTasks, runTask } from './runner.js';
@@ -17,11 +19,23 @@ Options:
   --no-fallbacks      Disable server-side refusal fallbacks
   --out <file>        Write full results as JSON
 
-Credentials come from ANTHROPIC_API_KEY or an \`ant auth login\` profile.`;
+Credentials come from ANTHROPIC_API_KEY (the environment, or a .env file in the current directory
+or the repository root) or an \`ant auth login\` profile.`;
+
+/** Fills in variables from .env files (the current directory's first); set ones stay as they are. */
+function loadDotEnv(): void {
+  const repo = fileURLToPath(new URL('../..', import.meta.url));
+  for (const file of new Set([resolve('.env'), resolve(repo, '.env')])) {
+    if (!existsSync(file)) continue;
+    for (const [key, value] of Object.entries(parseEnv(readFileSync(file, 'utf8'))))
+      if (process.env[key] === undefined && value !== undefined) process.env[key] = value;
+  }
+}
 
 const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'] as const;
 
 async function main() {
+  loadDotEnv();
   const { values } = parseArgs({
     options: {
       model: { type: 'string', default: 'claude-opus-5-5' },
@@ -69,7 +83,9 @@ async function main() {
 
 main().catch((error) => {
   if (error instanceof Anthropic.AuthenticationError) {
-    console.error('Authentication failed: set ANTHROPIC_API_KEY or run `ant auth login`.');
+    console.error(
+      'Authentication failed: check ANTHROPIC_API_KEY (environment or .env) or run `ant auth login`.',
+    );
   } else if (error instanceof Anthropic.RateLimitError) {
     console.error('Rate limited; try again later.');
   } else if (error instanceof Anthropic.APIError) {
