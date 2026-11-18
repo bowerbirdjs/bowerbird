@@ -11,6 +11,7 @@ import '@bowerbirdjs/editor/define';
 import type {
   AssetAdapter,
   EditorAppearance,
+  EditorDensity,
   BowerbirdEditor as EditorElement,
   EditorPreset,
   EditorUI,
@@ -28,9 +29,13 @@ import {
 
 export {
   createDefaultStore,
+  EDITOR_TOKENS,
   type EditorAppearance,
+  type EditorDensity,
   type EditorFeature,
   type EditorPreset,
+  type EditorToken,
+  type EditorTokens,
   type EditorUI,
 } from '@bowerbirdjs/editor';
 
@@ -44,14 +49,16 @@ export interface BowerbirdEditorProps {
   /** Where uploaded images go (enables "Upload image" on image fields). */
   assets?: AssetAdapter;
   /**
-   * What the editor offers (preset, features, allowlists). Keep the object stable (e.g. `useMemo`):
-   * a new object re-applies it.
+   * What the editor offers and how it looks (preset, features, allowlists, appearance, density,
+   * tokens). Keep the object stable (e.g. `useMemo`): a new object re-applies it.
    */
   ui?: EditorUI;
   /** Shorthand for `ui.preset`. */
   preset?: EditorPreset | 'auto';
-  /** Chrome colours: `light` (default), `dark` or `auto` (follows the system). */
+  /** Shorthand for `ui.appearance`: `light` (default), `dark` or `auto`. */
   appearance?: EditorAppearance;
+  /** Shorthand for `ui.density`: `comfortable` (default) or `compact`. */
+  density?: EditorDensity;
   className?: string;
   style?: CSSProperties;
   onChange?: (detail: { doc: SiteDoc }) => void;
@@ -119,6 +126,9 @@ export const BowerbirdEditor = forwardRef<EditorElement | null, BowerbirdEditorP
     useIsomorphicLayoutEffect(() => {
       if (element.current) element.current.appearance = props.appearance;
     }, [mounted, props.appearance]);
+    useIsomorphicLayoutEffect(() => {
+      if (element.current) element.current.density = props.density;
+    }, [mounted, props.density]);
 
     useIsomorphicLayoutEffect(() => {
       const el = element.current;

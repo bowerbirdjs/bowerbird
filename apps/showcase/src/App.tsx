@@ -5,7 +5,7 @@ import {
   outline,
   type Store,
 } from '@bowerbirdjs/core';
-import type { BowerbirdEditor as EditorElement } from '@bowerbirdjs/editor';
+import type { BowerbirdEditor as EditorElement, EditorUI } from '@bowerbirdjs/editor';
 import { renderDocument } from '@bowerbirdjs/html';
 import { BowerbirdEditor } from '@bowerbirdjs/react';
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -22,6 +22,28 @@ import { createEventStore, EVENTS, type EventInfo } from './events.js';
 const USER = { kind: 'user' as const, id: 'sam', name: 'Sam (you)' };
 
 type Role = 'designer' | 'editor' | 'marketer';
+
+/** How the editor looks: settings and design tokens a host passes in `ui`. */
+const LOOKS = {
+  light: { label: 'Light', ui: {} },
+  dark: { label: 'Dark', ui: { appearance: 'dark' } },
+  auto: { label: 'Match system', ui: { appearance: 'auto' } },
+  compact: { label: 'Compact', ui: { density: 'compact' } },
+  brand: {
+    label: 'Custom tokens',
+    ui: {
+      tokens: {
+        accent: '#0f766e',
+        panel: '#f5f7f6',
+        'canvas-bg': '#e3e9e7',
+        radius: '3px',
+        'radius-lg': '6px',
+        font: 'Georgia, "Iowan Old Style", serif',
+      },
+    },
+  },
+} satisfies Record<string, { label: string; ui: EditorUI }>;
+type Look = keyof typeof LOOKS;
 const ROLE_LEVELS = {
   designer: { user: 'code', agent: 'design' },
   editor: { user: 'layout', agent: 'design' },
@@ -99,16 +121,26 @@ export function App() {
   const [, setRevision] = useState(0);
   const [notice, setNotice] = useState<string | null>(null);
   const [askFirst, setAskFirst] = useState(false);
-  // The product's own light/dark look; the editor chrome follows it (`appearance`). The page
-  // being edited has its own themes (the editor's Theme menu).
-  const [appearance, setAppearance] = useState<'light' | 'dark'>(() =>
-    window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light',
+  // One look for the product and the editor: the editor takes `ui` (appearance, density,
+  // tokens) and the product's own chrome goes dark with it. The page being edited has its own
+  // themes (the editor's Theme menu).
+  const [look, setLook] = useState<Look>('light');
+  const [systemDark, setSystemDark] = useState(
+    () => !!window.matchMedia?.('(prefers-color-scheme: dark)').matches,
   );
   const editor = useRef<EditorElement | null>(null);
 
   useEffect(() => {
-    document.documentElement.dataset.appearance = appearance;
-  }, [appearance]);
+    const query = window.matchMedia?.('(prefers-color-scheme: dark)');
+    const update = () => setSystemDark(!!query?.matches);
+    query?.addEventListener('change', update);
+    return () => query?.removeEventListener('change', update);
+  }, []);
+  const appearance = (LOOKS[look].ui as EditorUI).appearance;
+  const dark = appearance === 'dark' || (appearance === 'auto' && systemDark);
+  useEffect(() => {
+    document.documentElement.dataset.appearance = dark ? 'dark' : 'light';
+  }, [dark]);
 
   useEffect(() => {
     for (const s of stores.values()) s.setPolicy(policyFor(role, askFirst));
@@ -181,6 +213,16 @@ export function App() {
           </select>
         </label>
         <label className="control">
+          <span className="caption">Look</span>{' '}
+          <select value={look} onChange={(e) => setLook(e.target.value as Look)}>
+            {Object.entries(LOOKS).map(([id, l]) => (
+              <option key={id} value={id}>
+                {l.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="control">
           <span className="caption">Brand</span>{' '}
           <select value="" onChange={(e) => e.target.value && applyPalette(e.target.value)}>
             <option value="" disabled>
@@ -189,16 +231,6 @@ export function App() {
             {Object.keys(PALETTES).map((p) => (
               <option key={p}>{p}</option>
             ))}
-          </select>
-        </label>
-        <label className="control">
-          <span className="caption">Look</span>{' '}
-          <select
-            value={appearance}
-            onChange={(e) => setAppearance(e.target.value as 'light' | 'dark')}
-          >
-            <option value="light">Light</option>
-            <option value="dark">Dark</option>
           </select>
         </label>
         <button type="button" className="button" onClick={exportHtml}>
@@ -238,7 +270,7 @@ export function App() {
           className="editor"
           store={store}
           actor={USER}
-          appearance={appearance}
+          ui={LOOKS[look].ui}
           onTransaction={({ entry }) => {
             setLast(entry);
             setRevision(entry.revision);
@@ -439,6 +471,7 @@ function DeveloperPanel({ store, last }: { store: Store; last: HistoryEntry | nu
 <BowerbirdEditor
   store={store}
   actor={{ kind: 'user', id: 'sam' }}
+  ui={{ appearance: 'auto', tokens: { accent: '#0f766e' } }}
   onTransaction={({ entry }) => save(entry)}
 />`}</pre>
       </section>

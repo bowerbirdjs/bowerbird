@@ -20,7 +20,6 @@ export {
   type AssetAdapter,
   BowerbirdEditor,
   createDefaultStore,
-  type EditorAppearance,
   type EditorChangeDetail,
 } from './element.js';
 export {
@@ -35,5 +34,16 @@ export {
   type FeatureSettings,
   presetForLevel,
 } from './features.js';
+export { type IconName, iconMarkup } from './icons.js';
 export { type Field, type FieldKind, fieldsFor, fieldValue } from './schema-form.js';
 export { editorStyles } from './styles.js';
+export {
+  EDITOR_TOKENS,
+  type EditorAppearance,
+  type EditorDensity,
+  type EditorToken,
+  type EditorTokenGroup,
+  type EditorTokenSpec,
+  type EditorTokens,
+  isEditorToken,
+} from './theme.js';

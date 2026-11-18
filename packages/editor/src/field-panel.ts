@@ -6,6 +6,8 @@
  * prefixed and scoped like the rest of the canvas chrome.
  */
 
+import { iconMarkup } from './icons.js';
+
 export interface PanelField {
   label: string;
   kind: 'text' | 'multiline' | 'time' | 'date' | 'url' | 'color' | 'select' | 'image';
@@ -26,18 +28,26 @@ export interface Rect {
 }
 
 export const FIELD_PANEL_CSS = `
-.bbx-host .bbx-fields { position: absolute; z-index: 3; display: grid; gap: 8px; width: 260px; padding: 10px; border-radius: 8px;
-  pointer-events: auto; background: #fff; color: #111827; box-shadow: 0 8px 28px rgb(15 23 42 / .22), 0 0 0 1px rgb(15 23 42 / .08);
-  font: 12px/1.4 system-ui, sans-serif; }
+.bbx-host .bbx-fields { position: absolute; z-index: 3; display: grid; gap: calc(var(--bbe-space) * 2.5); width: 272px;
+  padding: calc(var(--bbe-space) * 3); border-radius: var(--bbe-radius-lg); pointer-events: auto; color-scheme: inherit;
+  background: var(--bbe-surface); color: var(--bbe-fg); border: 1px solid var(--bbe-border); box-shadow: var(--bbe-shadow);
+  font: 400 calc(var(--bbe-font-size) - 1px)/1.4 var(--bbe-font); }
 .bbx-host .bbx-fields[hidden] { display: none; }
-.bbx-host .bbx-fields label { display: grid; gap: 3px; font-weight: 600; }
-.bbx-host .bbx-fields :is(input, select, textarea) { all: revert; box-sizing: border-box; width: 100%; font: 13px/1.4 system-ui, sans-serif;
-  padding: 5px 7px; border: 1px solid #d1d5db; border-radius: 6px; background: #fff; color: #111827; }
-.bbx-host .bbx-fields input[type="color"] { padding: 2px; height: 30px; }
-.bbx-host .bbx-fields textarea { min-height: 64px; resize: vertical; }
-.bbx-host .bbx-fields :is(input, select, textarea):focus { outline: 2px solid var(--bb-editor-accent, #4f46e5); outline-offset: 0; }
-.bbx-host .bbx-fields button { all: revert; justify-self: start; padding: 5px 10px; border-radius: 6px; border: 1px solid #d1d5db;
-  background: #fff; color: #111827; font: 600 12px/1.4 system-ui, sans-serif; cursor: pointer; }
+.bbx-host .bbx-fields label { display: grid; gap: 5px; font-weight: 500; color: var(--bbe-muted); }
+.bbx-host .bbx-fields :is(input, select, textarea) { all: revert; box-sizing: border-box; width: 100%; height: var(--bbe-control-height);
+  padding: 0 calc(var(--bbe-space) * 2); font: 400 var(--bbe-font-size)/1.4 var(--bbe-font);
+  border: 1px solid var(--bbe-border-strong); border-radius: var(--bbe-radius); background: var(--bbe-surface); color: var(--bbe-fg); }
+.bbx-host .bbx-fields input[type="color"] { padding: 2px; }
+.bbx-host .bbx-fields textarea { height: auto; min-height: 72px; padding: calc(var(--bbe-space) * 2); resize: vertical; }
+.bbx-host .bbx-fields :is(input, select, textarea):focus { outline: none; border-color: var(--bbe-focus);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--bbe-focus) 28%, transparent); }
+.bbx-host .bbx-fields [aria-invalid="true"] { border-color: var(--bbe-danger); }
+.bbx-host .bbx-fields button { all: revert; justify-self: start; display: inline-flex; align-items: center; gap: 6px;
+  height: calc(var(--bbe-control-height) - 4px); padding: 0 calc(var(--bbe-space) * 3); border-radius: var(--bbe-radius);
+  border: 1px solid var(--bbe-border-strong); background: var(--bbe-surface); color: var(--bbe-fg);
+  font: 500 calc(var(--bbe-font-size) - 1px)/1 var(--bbe-font); cursor: pointer; }
+.bbx-host .bbx-fields button:hover { box-shadow: inset 0 0 0 100vmax var(--bbe-hover); }
+.bbx-host .bbx-fields button:focus-visible { outline: 2px solid var(--bbe-focus); outline-offset: 1px; }
 .bbx-host .bbx-fields .bbx-file { position: absolute; width: 1px; height: 1px; opacity: 0; }
 `;
 
@@ -91,7 +101,7 @@ export class FieldPanel {
         label.textContent = field.label;
         const button = doc.createElement('button');
         button.type = 'button';
-        button.textContent = 'Replace photo…';
+        button.innerHTML = `${iconMarkup('upload', 'bbx-icon')}<span>Replace photo…</span>`;
         const file = doc.createElement('input');
         file.type = 'file';
         file.accept = 'image/*';

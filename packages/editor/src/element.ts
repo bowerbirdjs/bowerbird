@@ -19,12 +19,43 @@ import {
 import { html, LitElement, nothing, type PropertyValues, type TemplateResult } from 'lit';
 import { classMap } from 'lit/directives/class-map.js';
 import { live } from 'lit/directives/live.js';
+import { unsafeHTML } from 'lit/directives/unsafe-html.js';
 import { CanvasView } from './canvas.js';
 import { EditorController, type EditorEvent, type Position } from './controller.js';
 import { currentDrag, type DragPayload, endDrag, performDrop, startDrag } from './dnd.js';
 import type { EditorElementName, EditorPreset, EditorUI } from './features.js';
+import { type IconName, iconForType, iconMarkup } from './icons.js';
 import { type Field, fieldsFor, fieldValue } from './schema-form.js';
 import { editorStyles } from './styles.js';
+import {
+  EDITOR_TOKENS,
+  type EditorAppearance,
+  type EditorDensity,
+  type EditorTokens,
+  isEditorToken,
+} from './theme.js';
+
+/** An icon from the editor's set (static markup, see icons.ts). */
+const icon = (name: IconName) => unsafeHTML(iconMarkup(name));
+
+const ELEMENT_ICONS: Record<EditorElementName, IconName> = {
+  box: 'box',
+  text: 'text',
+  heading: 'heading',
+  'rich-text': 'paragraph',
+  link: 'link',
+  button: 'button',
+  image: 'image',
+};
+
+/** Icon for a breakpoint: by its name, else by its width. */
+function breakpointIcon(bp: { id: string; label?: string; minWidth: number }): IconName {
+  const name = `${bp.id} ${bp.label ?? ''}`;
+  if (/mobile|phone/i.test(name)) return 'mobile';
+  if (/tablet/i.test(name)) return 'tablet';
+  if (/desktop|wide|laptop/i.test(name)) return 'desktop';
+  return bp.minWidth < 600 ? 'mobile' : bp.minWidth < 1024 ? 'tablet' : 'desktop';
+}
 
 const ELEMENTS: [EditorElementName, string, NodeInput][] = [
   ['box', 'Box', { type: 'box' }],
@@ -123,9 +154,6 @@ export interface AssetAdapter {
   upload(file: File): Promise<{ src: string; alt?: string; width?: number; height?: number }>;
 }
 
-/** Colours of the editor chrome; `auto` follows the system's light or dark setting. */
-export type EditorAppearance = 'light' | 'dark' | 'auto';
-
 export interface EditorChangeDetail {
   doc: Store['doc'];
 }
@@ -135,15 +163,16 @@ export interface EditorChangeDetail {
  *
  * Properties: `store` (a Bowerbird store; one is created if omitted), `actor` (who edits, default
  * the local user), `page` (page id, reflected), `ui` (what the editor offers, see `EditorUI`),
- * `assets` (image uploads). Attribute `preset` (`full`, `layout`, `content`) is a shorthand for
- * `ui.preset`; `appearance` (`light`, `dark`, `auto`) picks the chrome's colours.
+ * `assets` (image uploads). Attributes `preset` (`full`, `layout`, `content`), `appearance`
+ * (`light`, `dark`, `auto`) and `density` (`comfortable`, `compact`) are shorthands for the same
+ * `ui` settings. The look follows the `--bb-editor-*` design tokens (see `EDITOR_TOKENS`).
  * Events (bubbling, composed): `bb-change`, `bb-transaction`, `bb-selection`, `bb-page`,
  * `bb-error`, `bb-changesets` (proposed changes waiting for review changed), `bb-data-click`
  * (text shown from site data was clicked: `{ path, node }`).
  * Methods: `apply(ops, label)`, `select(id)`, `undo()`, `redo()`.
  * Slots: `toolbar-start`, `toolbar-end` (your own controls in the top bar).
  * Parts (for `::part()`): `toolbar`, `structure`, `inspector`, `tabs`, `tab`, `panel-section`,
- * `card`, `button`, `select`, `input`, `field`, `toast`.
+ * `layer`, `card`, `button`, `field`, `input`, `select`, `toast`.
  *
  * The panels live in this element's shadow root; the page canvas is a light-DOM child, so page
  * content is never inside a shadow root (see docs/plan.md §2.1).
@@ -157,6 +186,7 @@ export class BowerbirdEditor extends LitElement {
     ui: { attribute: false },
     preset: { type: String },
     appearance: { type: String, reflect: true },
+    density: { type: String, reflect: true },
     page: { type: String, reflect: true },
     tab: { state: true },
     tick: { state: true },
@@ -171,11 +201,10 @@ export class BowerbirdEditor extends LitElement {
   declare ui: EditorUI | undefined;
   /** Shorthand for `ui.preset` (which wins when both are set). */
   declare preset: EditorPreset | 'auto' | undefined;
-  /**
-   * Colours of the editor's own chrome: `light` (default), `dark`, or `auto` (follows the system).
-   * `--bb-editor-*` variables set by the host win over either.
-   */
+  /** Light or dark editor (`auto` follows the system). `ui.appearance` wins when both are set. */
   declare appearance: EditorAppearance | undefined;
+  /** `compact` or `comfortable` (default). `ui.density` wins when both are set. */
+  declare density: EditorDensity | undefined;
   declare page: string | undefined;
   declare tab: TabName;
   declare tick: number;
@@ -199,6 +228,10 @@ export class BowerbirdEditor extends LitElement {
   private focusedRow: string | null = null;
   private collapsedRoot = false;
   private symbolName = '';
+  /** Tokens set from `ui.tokens` (see `applyTokens`). */
+  private appliedTokens = new Set<string>();
+  private tokenSheet: CSSStyleSheet | undefined;
+  private lastLook: Pick<EditorUI, 'appearance' | 'density'> = {};
   private visibleRows: {
     id: string;
     parent: string | null;
@@ -301,6 +334,53 @@ export class BowerbirdEditor extends LitElement {
     } else this.tab = 'layers';
   }
 
+  /** `ui.appearance` and `ui.density` as attributes (for the token CSS), `ui.tokens` as inline properties. */
+  private applyLook(ui: EditorUI): void {
+    // A value that came from an earlier `ui` goes away with it; attributes set directly stay.
+    const last = this.lastLook;
+    if (ui.appearance) this.appearance = ui.appearance;
+    else if (last.appearance && this.appearance === last.appearance) this.appearance = undefined;
+    if (ui.density) this.density = ui.density;
+    else if (last.density && this.density === last.density) this.density = undefined;
+    this.lastLook = { appearance: ui.appearance, density: ui.density };
+    this.applyTokens(ui.tokens ?? {});
+  }
+
+  /**
+   * `ui.tokens` live in a stylesheet of their own (`:host { --bb-editor-x: … !important }`), set
+   * through the CSSOM so values can't add rules. Important shadow declarations outrank the page's,
+   * so they win over host CSS without touching the element's own `style`.
+   */
+  private applyTokens(tokens: EditorTokens): void {
+    const style = this.tokenStyle();
+    const next = new Set<string>();
+    for (const [name, value] of Object.entries(tokens)) {
+      if (!isEditorToken(name)) {
+        console.warn(
+          `[bowerbird] ui.tokens: "${name}" is not an editor token. Tokens: ${Object.keys(EDITOR_TOKENS).join(', ')}.`,
+        );
+        continue;
+      }
+      if (typeof value !== 'string' || !value.trim()) continue;
+      style.setProperty(`--bb-editor-${name}`, value, 'important');
+      next.add(name);
+    }
+    for (const name of this.appliedTokens)
+      if (!next.has(name)) style.removeProperty(`--bb-editor-${name}`);
+    this.appliedTokens = next;
+  }
+
+  private tokenStyle(): CSSStyleDeclaration {
+    const root = this.renderRoot;
+    if (!this.tokenSheet && root instanceof ShadowRoot && 'adoptedStyleSheets' in root) {
+      this.tokenSheet = new CSSStyleSheet();
+      this.tokenSheet.replaceSync(':host {}');
+      root.adoptedStyleSheets = [...root.adoptedStyleSheets, this.tokenSheet];
+    }
+    // Without constructable stylesheets, the element's own style (which host CSS can't beat).
+    return (this.tokenSheet?.cssRules[0] as CSSStyleRule | undefined)?.style ?? this.style;
+  }
+
   private effectiveUI(): EditorUI {
     const ui = this.ui ?? {};
     return ui.preset || !this.preset ? ui : { ...ui, preset: this.preset };
@@ -317,6 +397,7 @@ export class BowerbirdEditor extends LitElement {
     if (changed.has('store') && this.store && this.store !== c.store) c.setStore(this.store);
     if (changed.has('actor') && this.actor) c.actor = this.actor;
     if (changed.has('ui') || changed.has('preset')) c.setUI(this.effectiveUI());
+    if (changed.has('ui')) this.applyLook(this.ui ?? {});
     if (this.canvas) this.canvas.assets = this.assets;
     if (requested && requested !== c.page) c.setPage(requested);
     if (this.page !== c.page) this.page = c.page;
@@ -509,8 +590,10 @@ export class BowerbirdEditor extends LitElement {
       <div class="toast" part="toast" role="status" aria-live="polite" ?hidden=${!this.toast}>
         ${
           this.toast
-            ? html`<p>${this.toast.message}</p>
-              ${this.toast.hint ? html`<p class="hint">${this.toast.hint}</p>` : nothing}`
+            ? html`${icon('warning')}<div>
+                <p>${this.toast.message}</p>
+                ${this.toast.hint ? html`<p class="hint">${this.toast.hint}</p>` : nothing}
+              </div>`
             : nothing
         }
       </div>
@@ -605,153 +688,166 @@ export class BowerbirdEditor extends LitElement {
     const themes = Object.keys(doc.themes);
     const panels = c.can('toolbar.panels');
     const switcher = c.can('toolbar.pages') && (pages.length > 1 || symbols.length > 0);
+    const undo = c.can('undo');
+    const preview = c.can('toolbar.preview');
+    const theme = themes.length > 0 && c.can('toolbar.theme');
     return html`
-      <slot name="toolbar-start"></slot>
-      ${
-        panels && this.tabs(c).length
-          ? html`<button
-              class="icon-btn"
-              part="button"
-              title="Show or hide the structure panel"
-              aria-label="Structure panel"
-              aria-pressed=${!this.hasAttribute('left-hidden')}
-              @click=${() => this.togglePanel('left')}
-            >
-              ☰
-            </button>`
-          : nothing
-      }
-      ${
-        switcher
-          ? html`<select
-              class="compact" part="select"
-              aria-label="Page"
-              @change=${(e: Event) => {
-                const value = (e.target as HTMLSelectElement).value;
-                if (value.startsWith('symbol:')) c.editSymbol(value.slice(7));
-                else c.setPage(value);
-              }}
-            >
-              <optgroup label="Pages">
-                ${pages.map((p) => html`<option value=${p.id} .selected=${live(!c.symbolView && p.id === c.page)}>${(c.locale && p.l10n?.[c.locale]?.title) || p.title} (${p.path})</option>`)}
-              </optgroup>
-              ${
-                symbols.length
-                  ? html`<optgroup label="Linked components">
-                    ${symbols.map((sym) => html`<option value=${`symbol:${sym.id}`} .selected=${live(c.symbolView === sym.id)}>${sym.name}</option>`)}
-                  </optgroup>`
-                  : nothing
-              }
-            </select>`
-          : html`<strong>${c.currentPage?.title ?? ''}</strong>`
-      }
-      ${
-        c.peers.length && c.can('toolbar.peers')
-          ? html`<ul class="peers" aria-label="Also here">
-            ${c.peers.map((p) => {
-              const who = `${p.actor.name ?? p.actor.id}${p.actor.kind === 'agent' ? ' (agent)' : ''}${p.activity ? `: ${p.activity}` : ''}`;
-              return html`<li style=${`--peer: ${p.color}`}>
-                <button
-                  part="button"
-                  title=${who}
-                  aria-label=${p.selection ? `${who}. Show their selection` : who}
-                  @click=${() => p.selection && c.select(p.selection)}
-                >
-                  ${(p.actor.name ?? p.actor.id).slice(0, 1).toUpperCase()}
-                </button>
-              </li>`;
-            })}
-          </ul>`
-          : nothing
-      }
-      <span class="spacer"></span>
-      ${
-        c.can('toolbar.breakpoints')
-          ? html`<div class="group" role="group" aria-label="Screen size">
-            ${doc.breakpoints.map(
-              (bp) => html`<button
+      <div class="zone start">
+        <slot name="toolbar-start"></slot>
+        ${
+          panels && this.tabs(c).length
+            ? html`<button
+                class="btn ghost icon"
                 part="button"
-                aria-pressed=${bp.id === c.breakpoint}
-                title=${`${bp.label ?? bp.id}: styles for ${bp.minWidth}px and wider`}
-                @click=${() => c.setBreakpoint(bp.id)}
+                title="Show or hide the structure panel"
+                aria-label="Structure panel"
+                aria-pressed=${!this.hasAttribute('left-hidden')}
+                @click=${() => this.togglePanel('left')}
               >
-                ${bp.label ?? bp.id}
-              </button>`,
-            )}
-          </div>`
-          : nothing
-      }
-      ${
-        c.can('toolbar.zoom')
-          ? html`<select
-              class="compact" part="select"
-              aria-label="Zoom"
-              @change=${(e: Event) => {
-                const v = (e.target as HTMLSelectElement).value;
-                c.setZoom(v === 'fit' ? 'fit' : Number(v));
-              }}
-            >
-              ${[
-                ['fit', 'Fit'],
-                ['0.5', '50%'],
-                ['0.75', '75%'],
-                ['1', '100%'],
-              ].map(
-                ([v, l]) =>
-                  html`<option value=${v!} .selected=${live(String(c.zoom) === v)}>${l}</option>`,
+                ${icon('panel-left')}
+              </button>`
+            : nothing
+        }
+        ${
+          switcher
+            ? html`<select
+                part="input select"
+                aria-label="Page"
+                @change=${(e: Event) => {
+                  const value = (e.target as HTMLSelectElement).value;
+                  if (value.startsWith('symbol:')) c.editSymbol(value.slice(7));
+                  else c.setPage(value);
+                }}
+              >
+                <optgroup label="Pages">
+                  ${pages.map((p) => html`<option value=${p.id} .selected=${live(!c.symbolView && p.id === c.page)}>${(c.locale && p.l10n?.[c.locale]?.title) || p.title} (${p.path})</option>`)}
+                </optgroup>
+                ${
+                  symbols.length
+                    ? html`<optgroup label="Linked components">
+                      ${symbols.map((sym) => html`<option value=${`symbol:${sym.id}`} .selected=${live(c.symbolView === sym.id)}>${sym.name}</option>`)}
+                    </optgroup>`
+                    : nothing
+                }
+              </select>`
+            : html`<span class="page-title" title=${c.currentPage?.path ?? ''}>${c.currentPage?.title ?? ''}</span>`
+        }
+        ${
+          c.peers.length && c.can('toolbar.peers')
+            ? html`<ul class="peers" aria-label="Also here">
+              ${c.peers.map((p) => {
+                const who = `${p.actor.name ?? p.actor.id}${p.actor.kind === 'agent' ? ' (agent)' : ''}${p.activity ? `: ${p.activity}` : ''}`;
+                return html`<li style=${`--peer: ${p.color}`}>
+                  <button
+                    part="button"
+                    title=${who}
+                    aria-label=${p.selection ? `${who}. Show their selection` : who}
+                    @click=${() => p.selection && c.select(p.selection)}
+                  >
+                    ${(p.actor.name ?? p.actor.id).slice(0, 1).toUpperCase()}
+                  </button>
+                </li>`;
+              })}
+            </ul>`
+            : nothing
+        }
+      </div>
+      <div class="zone middle">
+        ${
+          c.can('toolbar.breakpoints')
+            ? html`<div class="segmented" role="group" aria-label="Screen size">
+              ${doc.breakpoints.map(
+                (bp) => html`<button
+                  part="button"
+                  aria-pressed=${bp.id === c.breakpoint}
+                  aria-label=${bp.label ?? bp.id}
+                  title=${`${bp.label ?? bp.id}: styles for ${bp.minWidth}px and wider`}
+                  @click=${() => c.setBreakpoint(bp.id)}
+                >
+                  ${icon(breakpointIcon(bp))}<span class="label">${bp.label ?? bp.id}</span>
+                </button>`,
               )}
+            </div>`
+            : nothing
+        }
+        ${
+          c.can('toolbar.zoom')
+            ? html`<select
+                part="input select"
+                aria-label="Zoom"
+                @change=${(e: Event) => {
+                  const v = (e.target as HTMLSelectElement).value;
+                  c.setZoom(v === 'fit' ? 'fit' : Number(v));
+                }}
+              >
+                ${[
+                  ['fit', 'Fit'],
+                  ['0.5', '50%'],
+                  ['0.75', '75%'],
+                  ['1', '100%'],
+                ].map(
+                  ([v, l]) =>
+                    html`<option value=${v!} .selected=${live(String(c.zoom) === v)}>${l}</option>`,
+                )}
+              </select>`
+            : nothing
+        }
+        ${
+          doc.locales && c.can('toolbar.language')
+            ? html`<select
+                part="input select"
+                aria-label="Language"
+                @change=${(e: Event) => c.setLocale((e.target as HTMLSelectElement).value || null)}
+              >
+                <option value="" .selected=${live(!c.locale)}>${doc.locales.default} (default)</option>
+                ${doc.locales.others.map((l) => html`<option value=${l} .selected=${live(c.locale === l)}>${l}</option>`)}
+              </select>`
+            : nothing
+        }
+      </div>
+      <div class="zone end">
+        ${
+          undo
+            ? html`<button class="btn ghost icon" part="button" title="Undo your last change (Ctrl+Z)" aria-label="Undo" ?disabled=${!c.canUndo()} @click=${() => c.undo()}>
+                ${icon('undo')}
+              </button>
+              <button class="btn ghost icon" part="button" title="Redo (Ctrl+Shift+Z)" aria-label="Redo" ?disabled=${!c.canRedo()} @click=${() => c.redo()}>
+                ${icon('redo')}
+              </button>`
+            : nothing
+        }
+        ${undo && (theme || preview) ? html`<span class="sep"></span>` : nothing}
+        ${
+          theme
+            ? html`<select part="input select" aria-label="Theme" @change=${(e: Event) => c.setTheme((e.target as HTMLSelectElement).value || null)}>
+              <option value="" .selected=${live(!c.theme)}>Default theme</option>
+              ${themes.map((t) => html`<option value=${t} .selected=${live(c.theme === t)}>${t}</option>`)}
             </select>`
-          : nothing
-      }
-      ${
-        doc.locales && c.can('toolbar.language')
-          ? html`<select
-              class="compact" part="select"
-              aria-label="Language"
-              @change=${(e: Event) => c.setLocale((e.target as HTMLSelectElement).value || null)}
-            >
-              <option value="" .selected=${live(!c.locale)}>${doc.locales.default} (default)</option>
-              ${doc.locales.others.map((l) => html`<option value=${l} .selected=${live(c.locale === l)}>${l}</option>`)}
-            </select>`
-          : nothing
-      }
-      <span class="spacer"></span>
-      ${
-        c.can('undo')
-          ? html`<button class="icon-btn" part="button" title="Undo your last change (Ctrl+Z)" ?disabled=${!c.canUndo()} @click=${() => c.undo()}>↶ Undo</button>
-            <button class="icon-btn" part="button" title="Redo (Ctrl+Shift+Z)" aria-label="Redo" ?disabled=${!c.canRedo()} @click=${() => c.redo()}>↷</button>`
-          : nothing
-      }
-      ${
-        themes.length && c.can('toolbar.theme')
-          ? html`<select class="compact" part="select" aria-label="Theme" @change=${(e: Event) => c.setTheme((e.target as HTMLSelectElement).value || null)}>
-            <option value="" .selected=${live(!c.theme)}>Default theme</option>
-            ${themes.map((t) => html`<option value=${t} .selected=${live(c.theme === t)}>${t}</option>`)}
-          </select>`
-          : nothing
-      }
-      ${
-        c.can('toolbar.preview')
-          ? html`<button class="icon-btn" part="button" aria-pressed=${c.preview} title="Hide editing outlines" @click=${() => c.setPreview(!c.preview)}>
-              Preview
-            </button>`
-          : nothing
-      }
-      ${
-        panels && c.can('inspector')
-          ? html`<button
-              class="icon-btn"
-              part="button"
-              title="Show or hide the inspector"
-              aria-label="Inspector panel"
-              aria-pressed=${!this.hasAttribute('right-hidden')}
-              @click=${() => this.togglePanel('right')}
-            >
-              ⚙
-            </button>`
-          : nothing
-      }
-      <slot name="toolbar-end"></slot>
+            : nothing
+        }
+        ${
+          preview
+            ? html`<button class="btn" part="button" aria-pressed=${c.preview} title="Hide editing outlines" @click=${() => c.setPreview(!c.preview)}>
+                ${icon('eye')}<span>Preview</span>
+              </button>`
+            : nothing
+        }
+        ${
+          panels && c.can('inspector')
+            ? html`<button
+                class="btn ghost icon"
+                part="button"
+                title="Show or hide the inspector"
+                aria-label="Inspector panel"
+                aria-pressed=${!this.hasAttribute('right-hidden')}
+                @click=${() => this.togglePanel('right')}
+              >
+                ${icon('panel-right')}
+              </button>`
+            : nothing
+        }
+        <slot name="toolbar-end"></slot>
+      </div>
     `;
   }
 
@@ -790,12 +886,20 @@ export class BowerbirdEditor extends LitElement {
     return html`<ul class="tree" role="tree" aria-label="Layers" @keydown=${this.onTreeKey}>${rows}</ul>`;
   }
 
+  private nodeIcon(n: BNode): IconName {
+    return iconForType(n.type, {
+      section: !!n.section,
+      linked: !!(n.link || n.symbol),
+      tag: n.props.tag,
+    });
+  }
+
   private layerLabel(c: EditorController, n: BNode): string {
     if (n.name) return n.name;
     if (n.section) return c.store.registry.section(n.section.name)?.title ?? n.section.name;
     // In the language being edited; rich text holds markup, so label it by its text.
     const props = localizedProps(n, c.locale ?? undefined);
-    const raw =
+    const raw = (
       typeof props.text === 'string'
         ? props.text
         : typeof props.html === 'string'
@@ -803,8 +907,9 @@ export class BowerbirdEditor extends LitElement {
               .replace(/<[^>]*>/g, ' ')
               .replace(/&(amp|lt|gt|quot|#39|nbsp);/g, (_, e: string) => ENTITIES[e] ?? '')
               .replace(/\s+/g, ' ')
-          : '';
-    const text = raw.trim() ? `“${raw.trim().slice(0, 32)}”` : '';
+          : ''
+    ).trim();
+    const text = raw ? `“${raw.length > 40 ? `${raw.slice(0, 39).trimEnd()}…` : raw}”` : '';
     return text || n.part || n.type;
   }
 
@@ -829,15 +934,18 @@ export class BowerbirdEditor extends LitElement {
       }}
     >
       <div
+        part="layer"
         class=${classMap({
           row: true,
+          'is-section': !!n.section,
+          'is-linked': !!(n.link || n.symbol),
           selected: c.selected === n.id,
           hovered: c.hovered === n.id,
           'drop-before': drop === 'before',
           'drop-after': drop === 'after',
           'drop-inside': drop === 'inside',
         })}
-        style=${`padding-left: ${8 + depth * 14}px`}
+        style=${`padding-left: calc(var(--_s1) + ${depth * 14}px)`}
         draggable=${c.can('move') && c.canRestructure(n.id) ? 'true' : 'false'}
         @click=${() => {
           this.focusedRow = n.id;
@@ -859,6 +967,7 @@ export class BowerbirdEditor extends LitElement {
           tabindex="-1"
           aria-hidden="true"
           aria-label=${open ? 'Collapse' : 'Expand'}
+          ?hidden=${!hasChildren}
           @click=${(e: Event) => {
             e.stopPropagation();
             if (open) this.expanded.delete(n.id);
@@ -866,8 +975,10 @@ export class BowerbirdEditor extends LitElement {
             this.tick++;
           }}
         >
-          ${hasChildren ? (open ? '▾' : '▸') : ''}
+          ${icon(open ? 'chevron-down' : 'chevron-right')}
         </button>
+        ${hasChildren ? nothing : html`<span class="caret" aria-hidden="true"></span>`}
+        <span class="type" aria-hidden="true">${icon(this.nodeIcon(n))}</span>
         <span class="name">${this.layerLabel(c, n)}</span>
         <span class="kind">${n.section ? 'section' : n.type}</span>
       </div>
@@ -1020,9 +1131,9 @@ export class BowerbirdEditor extends LitElement {
       }
       ${
         symbols.length
-          ? html`<div class="section" part="panel-section">
+          ? html`<div class="section intro" part="panel-section">
             <h3>Linked components</h3>
-            <p class="muted">Edit one and every copy follows.</p>
+            <p class="muted hint">Edit one and every copy follows.</p>
           </div>
           <div class="cards">
             ${symbols.map(
@@ -1030,7 +1141,8 @@ export class BowerbirdEditor extends LitElement {
                 sym,
               ) => html`<button class="card linked" part="card" ?disabled=${off} @click=${() => c.insertSymbol(sym.id)}>
                 <strong>${sym.name}</strong>
-                <span>${sym.description ?? `Linked copy of ${sym.id}`}</span>
+                <span class="desc">${sym.description ?? `Linked copy of ${sym.id}`}</span>
+                <span class="add" aria-hidden="true">${icon('plus')}</span>
               </button>`,
             )}
           </div>`
@@ -1039,10 +1151,10 @@ export class BowerbirdEditor extends LitElement {
       ${sections.length ? this.renderSectionList(c, sections, !!target) : nothing}
       ${
         elements.length
-          ? html`<div class="section" part="panel-section"><h3>Elements</h3><p class="muted">Added inside the selected container.</p></div>
+          ? html`<div class="section intro" part="panel-section"><h3>Elements</h3><p class="muted hint">Added inside the selected container.</p></div>
             <div class="elements">
               ${elements.map(
-                ([, label, input]) => html`<button
+                ([name, label, input]) => html`<button
                   part="button"
                   ?disabled=${off}
                   draggable="true"
@@ -1050,7 +1162,7 @@ export class BowerbirdEditor extends LitElement {
                   @dragstart=${(e: DragEvent) => startDrag(e, { kind: 'node', input: structuredClone(input) })}
                   @dragend=${() => endDrag()}
                 >
-                  ${label}
+                  ${icon(ELEMENT_ICONS[name])}<span>${label}</span>
                 </button>`,
               )}
             </div>`
@@ -1060,9 +1172,9 @@ export class BowerbirdEditor extends LitElement {
   }
 
   private renderSectionList(c: EditorController, sections: SectionDef[], hasTarget: boolean) {
-    return html`<div class="section" part="panel-section">
+    return html`<div class="section intro" part="panel-section">
         <h3>Sections</h3>
-        <p class="muted">Click to add ${hasTarget ? 'after the selected section' : 'to the end of the page'}, or drag onto the page.</p>
+        <p class="muted hint">Click to add ${hasTarget ? 'after the selected section' : 'to the end of the page'}, or drag onto the page.</p>
       </div>
       <div class="cards">${sections.map((s) => this.renderSectionCard(c, s))}</div>`;
   }
@@ -1079,7 +1191,8 @@ export class BowerbirdEditor extends LitElement {
       @dragend=${() => endDrag()}
     >
       <strong>${s.title}</strong>
-      <span>${s.description}</span>
+      <span class="desc" title=${s.description}>${s.description}</span>
+      <span class="add" aria-hidden="true">${icon('plus')}</span>
       ${
         variants.length
           ? html`<span class="chips">${variants.flatMap(([, values]) => values.map((v) => html`<span class="badge">${v}</span>`))}</span>`
@@ -1100,16 +1213,16 @@ export class BowerbirdEditor extends LitElement {
     return html`
       ${
         others.size && c.can('undo')
-          ? html`<div class="section" part="panel-section">
+          ? html`<div class="section undo-others" part="panel-section">
             <h3>Undo someone else's work</h3>
             ${[...others.values()].map(
               (a) => html`<button
-                class="icon-btn"
+                class="btn sm"
                 part="button"
                 ?disabled=${!c.store.history.some((e) => e.actor.id === a.id && e.kind !== 'undo' && !e.undone)}
                 @click=${() => c.undoBy(a.id)}
               >
-                Undo last change by ${a.name ?? a.id}
+                ${icon('undo')}<span>Undo last change by ${a.name ?? a.id}</span>
               </button>`,
             )}
           </div>`
@@ -1118,9 +1231,12 @@ export class BowerbirdEditor extends LitElement {
       <ol class="history" aria-label="History">
         ${entries.map(
           (e) => html`<li class=${classMap({ entry: true, undone: c.isUndone(e) })}>
-            <span class=${`actor ${e.actor.kind}`}>${e.actor.name ?? e.actor.id}</span>
-            <span class="what">${e.label ?? e.kind}</span>
-            <time datetime=${new Date(e.time).toISOString()}>${timeAgo(e.time)}</time>
+            <span class=${`avatar ${e.actor.kind}`} aria-hidden="true">${(e.actor.name ?? e.actor.id).slice(0, 1).toUpperCase()}</span>
+            <span class="what">
+              <span class=${`who ${e.actor.kind}`}>${e.actor.name ?? e.actor.id}</span>
+              <span class="label">${e.label ?? e.kind}</span>
+            </span>
+            <time datetime=${new Date(e.time).toISOString()} title=${new Date(e.time).toLocaleString()}>${timeAgo(e.time)}</time>
           </li>`,
         )}
       </ol>
@@ -1139,14 +1255,15 @@ export class BowerbirdEditor extends LitElement {
     const provenance = c.can('inspector.provenance') ? this.renderProvenance(node) : nothing;
     const info = c.can('inspector.info')
       ? html`<div class="section" part="panel-section">
-          <div class="head">
-            <strong>${this.layerLabel(c, node)}</strong>
-            <span class=${node.section ? 'badge section' : 'badge'}>${node.section ? `section · ${node.section.name}` : node.type}</span>
+          <div class="node-head">
+            <span class=${classMap({ 'node-icon': true, linked: !!(node.link || node.symbol) })} aria-hidden="true">${icon(this.nodeIcon(node))}</span>
+            <span class="node-name" title=${this.layerLabel(c, node)}>${this.layerLabel(c, node)}</span>
+            <span class="node-meta">
+              <span class=${node.section ? 'badge section' : 'badge'}>${node.section ? `section · ${node.section.name}` : node.type}</span>
+              <code title=${node.id}>${node.id}</code>
+            </span>
           </div>
-          <div class="head" style="margin-top: 6px">
-            <code>${node.id}</code>
-            ${owner ? html`<button class="link" part="button" @click=${() => c.select(owner.id)}>in ${owner.id}</button>` : nothing}
-          </div>
+          ${owner ? html`<p class="muted hint provenance">In <button class="link" @click=${() => c.select(owner.id)}>${owner.id}</button></p>` : nothing}
           ${provenance}
         </div>`
       : provenance !== nothing
@@ -1176,19 +1293,19 @@ export class BowerbirdEditor extends LitElement {
     const remove = allowed.delete;
     // "Select parent" only makes sense next to things you can do with the parent.
     if (!duplicate && !remove && !c.can('move')) return nothing;
-    return html`<div class="section row-inline" part="panel-section">
-      ${duplicate ? html`<button class="icon-btn" part="button" @click=${() => c.duplicateSelected()}>Duplicate</button>` : nothing}
-      <button class="icon-btn" part="button" @click=${() => c.selectParent()}>Select parent</button>
+    return html`<div class="section actions" part="panel-section">
+      ${duplicate ? html`<button class="btn sm" part="button" @click=${() => c.duplicateSelected()}>${icon('copy')}<span>Duplicate</span></button>` : nothing}
+      <button class="btn sm" part="button" @click=${() => c.selectParent()}>${icon('parent')}<span>Select parent</span></button>
       ${
         remove
           ? html`<button
-              class="icon-btn danger"
+              class="btn sm danger"
               part="button"
               @click=${() => {
                 if (c.removeSelected()?.ok) this.focusCanvas();
               }}
             >
-              Delete
+              ${icon('trash')}<span>Delete</span>
             </button>`
           : nothing
       }
@@ -1217,8 +1334,8 @@ export class BowerbirdEditor extends LitElement {
     if (node.symbol) {
       const sym = c.doc.symbols?.[node.symbol];
       return html`<div class="section linked-panel" part="panel-section">
-        <h3>Linked component</h3>
-        <p class="muted">This is the definition of “${sym?.name ?? node.symbol}”. Changes here update every instance, except fields an instance overrides.</p>
+        <h3>${icon('component')}Linked component</h3>
+        <p class="muted hint">This is the definition of “${sym?.name ?? node.symbol}”. Changes here update every instance, except fields an instance overrides.</p>
       </div>`;
     }
     if (node.link) {
@@ -1226,29 +1343,29 @@ export class BowerbirdEditor extends LitElement {
       const root = instanceRootOf(view, node.id);
       const overrides = overridesOf(view, node);
       return html`<div class="section linked-panel" part="panel-section">
-        <h3>Linked component</h3>
-        <p class="muted">
+        <h3>${icon('component')}Linked component</h3>
+        <p class="muted hint">
           ${root?.id === node.id ? 'Instance' : 'Part of an instance'} of “${sym?.name ?? node.link.symbol}”.
           ${overrides.length ? html`Overrides: ${overrides.map(fieldLabel).join(', ')}.` : 'Matches the definition.'}
         </p>
         <div class="row-inline">
-          <button class="icon-btn" part="button" @click=${() => c.select(node.link!.node)}>Edit definition</button>
-          ${(overrides.length || root?.id === node.id) && c.can('components.reset') ? html`<button class="icon-btn" part="button" @click=${() => c.resetOverrides(node.id)}>Reset overrides</button>` : nothing}
-          ${root ? html`<button class="icon-btn" part="button" @click=${() => c.detachInstance(root.id)}>Detach</button>` : nothing}
+          <button class="btn sm" part="button" @click=${() => c.select(node.link!.node)}>${icon('edit')}<span>Edit definition</span></button>
+          ${(overrides.length || root?.id === node.id) && c.can('components.reset') ? html`<button class="btn sm" part="button" @click=${() => c.resetOverrides(node.id)}>${icon('reset')}<span>Reset overrides</span></button>` : nothing}
+          ${root ? html`<button class="btn sm" part="button" @click=${() => c.detachInstance(root.id)}>${icon('unlink')}<span>Detach</span></button>` : nothing}
         </div>
       </div>`;
     }
     if (!node.section || c.symbolView || !c.can('components.create')) return nothing;
     return html`<div class="section" part="panel-section">
       <h3>Reuse</h3>
-      <div class="decl">
+      <div class="row-inline reuse">
         <input part="input" aria-label="Linked component name" placeholder="Name, e.g. Site footer" .value=${live(this.symbolName)}
           @input=${(e: Event) => {
             this.symbolName = (e.target as HTMLInputElement).value;
             this.tick++;
           }} />
         <button
-          class="icon-btn"
+          class="btn"
           part="button"
           ?disabled=${!this.symbolName.trim()}
           @click=${() => {
@@ -1282,7 +1399,7 @@ export class BowerbirdEditor extends LitElement {
       return html`<div class="section changeset" part="panel-section">
         <div class="head">
           <strong>${cs.label ?? cs.id}</strong>
-          <span class=${`badge actor ${cs.actor.kind}`}>${cs.actor.name ?? cs.actor.id}</span>
+          <span class=${`badge ${cs.actor.kind}`}>${cs.actor.name ?? cs.actor.id}</span>
         </div>
         <ul class="ops">
           ${openOps.map(
@@ -1330,20 +1447,20 @@ export class BowerbirdEditor extends LitElement {
         ${blocked ? html`<p class="notes" role="note">You can’t accept ${selected.length === 1 ? 'this' : 'these'}: ${blocked.message}</p>` : nothing}
         <div class="row-inline">
           <button
-            class="icon-btn"
+            class="btn sm"
             part="button"
             aria-pressed=${!!previewing}
             @click=${() => (previewing ? c.clearPreview() : c.previewChangeset(cs.id, selected))}
           >
-            ${previewing ? 'Hide preview' : 'Preview'}
+            ${icon('eye')}<span>${previewing ? 'Hide preview' : 'Preview'}</span>
           </button>
-          <button class="icon-btn primary" part="button" ?disabled=${!selected.length || !!blocked} @click=${() => {
+          <button class="btn sm primary" part="button" ?disabled=${!selected.length || !!blocked} @click=${() => {
             this.reviewSelection.delete(cs.id);
             c.acceptChangeset(cs.id, selected);
           }}>
-            Accept ${selected.length === openOps.length ? 'all' : `${selected.length}`}
+            ${icon('check')}<span>Accept ${selected.length === openOps.length ? 'all' : `${selected.length}`}</span>
           </button>
-          <button class="icon-btn danger" part="button" ?disabled=${!selected.length} @click=${() => {
+          <button class="btn sm danger" part="button" ?disabled=${!selected.length} @click=${() => {
             this.reviewSelection.delete(cs.id);
             c.rejectChangeset(cs.id, selected);
           }}>
@@ -1397,7 +1514,7 @@ export class BowerbirdEditor extends LitElement {
       ${variants.map(
         ([axis, values]) => html`<div class="field" part="field">
           <label for=${`v-${axis}`}>${axis[0]!.toUpperCase() + axis.slice(1)}</label>
-          <select id=${`v-${axis}`} part="select" @change=${(e: Event) => c.setVariant(node.id, { [axis]: (e.target as HTMLSelectElement).value })}>
+          <select part="input select" id=${`v-${axis}`} @change=${(e: Event) => c.setVariant(node.id, { [axis]: (e.target as HTMLSelectElement).value })}>
             ${values.map((v) => html`<option value=${v} .selected=${live(node.section?.variant[axis] === v)}>${v}</option>`)}
           </select>
         </div>`,
@@ -1411,11 +1528,11 @@ export class BowerbirdEditor extends LitElement {
           <label for=${id}>${(spec.description ?? name).replace(/\.$/, '')}</label>
           ${
             family
-              ? html`<select id=${id} part="select" @change=${(e: Event) => c.setVars(node.id, { [name]: (e.target as HTMLSelectElement).value || null })}>
+              ? html`<select part="input select" id=${id} @change=${(e: Event) => c.setVars(node.id, { [name]: (e.target as HTMLSelectElement).value || null })}>
                 <option value="" .selected=${live(!current)}>Default (${spec.default})</option>
                 ${options.map((t) => html`<option value=${`var(${t})`} .selected=${live(current === `var(${t})`)}>${t.slice(2)}</option>`)}
               </select>`
-              : html`<input id=${id} part="input" .value=${live(current)} placeholder=${spec.default}
+              : html`<input part="input" id=${id} .value=${live(current)} placeholder=${spec.default}
                 @change=${(e: Event) => c.setVars(node.id, { [name]: (e.target as HTMLInputElement).value || null })} />`
           }
         </div>`;
@@ -1459,12 +1576,13 @@ export class BowerbirdEditor extends LitElement {
     };
     let control: TemplateResult;
     if (field.kind === 'select') {
-      control = html`<select id=${id} part="select" @change=${onChange}>
+      control = html`<select part="input select" id=${id} @change=${onChange}>
         ${field.required ? nothing : html`<option value="" .selected=${live(value === undefined)}>—</option>`}
         ${field.options!.map((o) => html`<option value=${o} .selected=${live(value === o)}>${o}</option>`)}
       </select>`;
     } else if (field.kind === 'json') {
       control = html`<textarea
+        part="input"
         id=${id}
         part="input"
         class="code"
@@ -1473,15 +1591,16 @@ export class BowerbirdEditor extends LitElement {
         @change=${onChange}
       ></textarea>`;
     } else if (field.kind === 'textarea') {
-      control = html`<textarea id=${id} part="input" .value=${live(String(value ?? ''))} @change=${onChange}></textarea>`;
+      control = html`<textarea part="input" id=${id} .value=${live(String(value ?? ''))} @change=${onChange}></textarea>`;
     } else if (field.kind === 'checkbox') {
-      control = html`<input id=${id} type="checkbox" .checked=${live(!!value)} @change=${onChange} />`;
+      control = html`<input part="input" id=${id} type="checkbox" .checked=${live(!!value)} @change=${onChange} />`;
     } else if (field.kind === 'number') {
-      control = html`<input id=${id} part="input" type="number" .value=${live(value === undefined ? '' : String(value))} @change=${onChange} />`;
+      control = html`<input part="input" id=${id} type="number" .value=${live(value === undefined ? '' : String(value))} @change=${onChange} />`;
     } else {
       const text = String(value ?? '');
       const embedded = field.kind === 'image' && text.startsWith('data:');
       control = html`<input
+        part="input"
         id=${id}
         part="input"
         type=${field.kind === 'url' || field.kind === 'image' ? 'url' : 'text'}
@@ -1491,7 +1610,7 @@ export class BowerbirdEditor extends LitElement {
       />${
         field.kind === 'image' && this.assets
           ? html`<label class="upload">
-              Upload image
+              ${icon('upload')}<span>Upload image</span>
               <input
                 type="file"
                 accept="image/*"
@@ -1504,7 +1623,7 @@ export class BowerbirdEditor extends LitElement {
     const def = node.link ? c.node(node.link.node) : undefined;
     const defValue = def ? localizedProps(def, c.locale ?? undefined)[field.key] : undefined;
     const overridden = !!def && JSON.stringify(defValue) !== JSON.stringify(value);
-    return html`<div class="field" part="field"><label for=${id}>${field.label}${field.required ? ' *' : ''}${
+    return html`<div class=${field.kind === 'checkbox' ? 'field check' : 'field'} part="field"><label for=${id}>${field.label}${field.required ? ' *' : ''}${
       overridden
         ? html` <span class="override" title="Differs from the linked component">●</span>`
         : nothing
@@ -1548,13 +1667,13 @@ export class BowerbirdEditor extends LitElement {
           />
           ${
             f.styleProperty(prop)
-              ? html`<button class="link danger" aria-label=${`Remove ${prop}`} @click=${() => c.setStyle(node.id, '', { state, remove: [prop] })}>✕</button>`
+              ? html`<button class="btn ghost sm icon" part="button" aria-label=${`Remove ${prop}`} title=${`Remove ${prop}`} @click=${() => c.setStyle(node.id, '', { state, remove: [prop] })}>${icon('close')}</button>`
               : html`<span></span>`
           }
         </div>`,
       )}
       ${Object.keys(decls).length ? nothing : html`<p class="muted">No styles for ${bpLabel}${state === 'default' ? '' : ` (${state})`} yet.</p>`}
-      <div class="decl" style="margin-top: 8px">
+      <div class="decl add">
         <input part="input" aria-label="CSS property" placeholder="property" list="bb-props" .value=${live(this.newProp)}
           @input=${(e: Event) => {
             this.newProp = (e.target as HTMLInputElement).value;
@@ -1566,7 +1685,7 @@ export class BowerbirdEditor extends LitElement {
           @keydown=${(e: KeyboardEvent) => {
             if (e.key === 'Enter') this.addStyle(c, node.id, state);
           }} />
-        <button class="icon-btn" part="button" @click=${() => this.addStyle(c, node.id, state)}>Add</button>
+        <button class="btn" part="button" @click=${() => this.addStyle(c, node.id, state)}>Add</button>
       </div>
       <datalist id="bb-props">${offered.map((p) => html`<option value=${p}></option>`)}</datalist>
       <datalist id="bb-tokens">${tokens.map((t) => html`<option value=${t}></option>`)}</datalist>

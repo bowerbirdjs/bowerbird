@@ -128,7 +128,38 @@ editor.ui = {
 
 `EDITOR_FEATURES` in `@bowerbirdjs/editor` lists every key with a description. Hiding is not a permission: the store's policy decides what may change, for people and agents alike, so set both.
 
-For the look, pick `appearance="dark"` (or `auto`, which follows the system; the default is `light`) and set `--bb-editor-*` variables (accent, on-accent, fg, muted, bg, panel, border, hover, danger, linked, warning, font, left, right, canvas-bg, color-scheme), which win over the appearance's defaults, or style parts with `::part()`: `toolbar`, `structure`, `inspector`, `tabs`, `tab`, `panel-section`, `card`, `button`, `select`, `input`, `field`, `toast`. Your own controls go in the `toolbar-start` and `toolbar-end` slots:
+### Make it look like your product
+
+The editor's whole look comes from design tokens, so it can match the product it sits in. Set them as CSS custom properties on the element (or any ancestor), or as `ui.tokens` from JavaScript; pick light or dark and a density as settings:
+
+```css
+bowerbird-editor {
+  --bb-editor-accent: #0f766e;
+  --bb-editor-font: "Inter", system-ui, sans-serif;
+  --bb-editor-radius: 4px;
+  --bb-editor-radius-lg: 8px;
+}
+```
+
+```js
+editor.ui = {
+  appearance: 'auto', // 'light' (default) | 'dark' | 'auto' (follows the system)
+  density: 'compact', // 'comfortable' (default) | 'compact'
+  tokens: { accent: '#0f766e', 'canvas-bg': '#f4f1ea' }, // win over CSS
+};
+```
+
+`<bowerbird-editor appearance="dark" density="compact">` and the `appearance` / `density` props of the React and Vue wrappers do the same. Every token has a light and a dark default; tokens may refer to each other (`--bb-editor-focus: var(--bbe-accent)` is the default). The page being edited never uses them: it keeps the site's own design, and dark editor chrome doesn't make the page dark.
+
+| Group   | Tokens (`--bb-editor-<name>`)                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Colour  | `accent` (selection, focus, primary buttons), `accent-fg` (text on it), `accent-text` (accent as text), `fg`, `muted`, `bg` (top bar), `panel` (side panels), `surface` (inputs, cards, the field panel), `border`, `border-strong`, `hover`, `selected`, `focus`, `danger`, `warning`, `success`, `linked` (linked components), `agent`, `floating-bg` and `floating-fg` (toolbar on the page, banners, messages), `canvas-bg` (around the page), `selection` (outlines on the page) |
+| Type    | `font`, `font-mono`, `font-size` (base size; the rest scales with it)                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| Shape   | `radius` (buttons, inputs, rows), `radius-lg` (cards, menus), `shadow`                                                                                                                                                                                                                                                                                                                                                                                                                |
+| Density | `space` (spacing unit), `control-height` (buttons, inputs, layer rows)                                                                                                                                                                                                                                                                                                                                                                                                                |
+| Layout  | `left` (structure panel width), `right` (inspector width)                                                                                                                                                                                                                                                                                                                                                                                                                             |
+
+`EDITOR_TOKENS` in `@bowerbirdjs/editor` lists each token with its defaults and what it is for. For changes tokens can't make, style parts with `::part()`: `toolbar`, `structure`, `inspector`, `tabs`, `tab`, `panel-section`, `layer`, `card`, `button`, `field`, `input`, `select`, `toast`. Your own controls go in the `toolbar-start` and `toolbar-end` slots:
 
 ```html
 <bowerbird-editor>
