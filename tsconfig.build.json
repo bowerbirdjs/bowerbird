@@ -1,0 +1,19 @@
+{
+  "files": [],
+  "references": [
+    { "path": "packages/core" },
+    { "path": "packages/css" },
+    { "path": "packages/html" },
+    { "path": "packages/blocks" },
+    { "path": "packages/layout" },
+    { "path": "packages/agent" },
+    { "path": "packages/sync" },
+    { "path": "packages/mcp" },
+    { "path": "packages/import" },
+    { "path": "packages/export" },
+    { "path": "packages/editor" },
+    { "path": "packages/react" },
+    { "path": "packages/vue" },
+    { "path": "bench" }
+  ]
+}

@@ -4,7 +4,7 @@ An embeddable, agent-first visual page editor. Read `docs/plan.md` for decisions
 
 ## Commands
 
-- `pnpm build`: TypeScript project build (`tsc -b packages/*/tsconfig.json`). Needed before running the MCP CLI or smoke script.
+- `pnpm build`: TypeScript project build (`tsc -b tsconfig.build.json`, which lists every package; add new packages there). Needed before running the MCP CLI or smoke script. No shell globs or Unix-only commands in scripts: they must run on Windows too.
 - `pnpm test`: Vitest. Tests import `@bowerbirdjs/*` from `src` through aliases in `vitest.config.ts`, so no build is needed.
 - `pnpm test:e2e`: builds `examples/*` and `apps/showcase` with Vite and drives them with Playwright (skipped if Playwright isn't installed). Tests live in `e2e/`.
 - `pnpm lint` / `pnpm format`: Biome.
