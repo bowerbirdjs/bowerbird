@@ -121,7 +121,11 @@ function renderContext(view: DocView, mode: CssMode, locale?: string): RenderCon
 /** Attributes as written, minus editor-only marks outside the editor, with URLs sanitized. */
 function cleanAttrs(ctx: Ctx, attrs: Record<string, unknown>): Record<string, unknown> {
   const out = { ...attrs };
-  if (ctx.mode !== 'editor') delete out['data-bb-data'];
+  if (ctx.mode !== 'editor') {
+    delete out['data-bb-data'];
+    delete out['data-bb-edit'];
+    delete out['data-bb-item'];
+  }
   if (typeof out.href === 'string') out.href = sanitizeUrl(out.href, 'href');
   if (typeof out.src === 'string') out.src = sanitizeUrl(out.src, 'src');
   return out;
@@ -140,12 +144,25 @@ function varsAttr(vars: ElementSpec['vars']): string {
     : '';
 }
 
+/** Editor marks for data a spec shows (`ElementSpec.edit` and `item`); none when published. */
+function dataMarks(ctx: Ctx, spec: ElementSpec): Record<string, unknown> {
+  if (ctx.mode !== 'editor' || (!spec.edit && !spec.item)) return {};
+  const fields = spec.edit ? (Array.isArray(spec.edit) ? spec.edit : [spec.edit]) : [];
+  return {
+    ...(fields[0]
+      ? { 'data-bb-data': fields[0].path, 'data-bb-edit': JSON.stringify(fields) }
+      : {}),
+    ...(spec.item ? { 'data-bb-item': JSON.stringify(spec.item) } : {}),
+  };
+}
+
 /** Elements a component generated from data (see `ElementSpec.children`). */
 function renderSpec(ctx: Ctx, spec: ElementSpec | string, depth: number, inLink: boolean): string {
   if (typeof spec === 'string') return escapeHtml(spec);
   if (depth > 200) return '';
   const tag = TAG_RE.test(spec.tag) && !DENIED_TAGS.has(spec.tag) ? spec.tag : 'div';
-  const open = `<${tag}${attrString(cleanAttrs(ctx, spec.attrs ?? {}))}${varsAttr(spec.vars)}>`;
+  const attrs = { ...(spec.attrs ?? {}), ...dataMarks(ctx, spec) };
+  const open = `<${tag}${attrString(cleanAttrs(ctx, attrs))}${varsAttr(spec.vars)}>`;
   if (spec.void || VOID.has(tag)) return open;
   const linked = inLink || tag === 'a';
   return `${open}${specInner(ctx, spec, depth, linked)}</${tag}>`;
@@ -188,7 +205,11 @@ function renderNode(
   } else if (node.part && scope) {
     classes.push(`bb-${scope}__${node.part}`);
   }
-  const attrs: Record<string, unknown> = { class: classes.join(' ') || undefined, ...specAttrs };
+  const attrs: Record<string, unknown> = {
+    class: classes.join(' ') || undefined,
+    ...specAttrs,
+    ...dataMarks(ctx, spec),
+  };
   if (ctx.nodeIds === 'all' || (ctx.nodeIds === 'styled' && (node.styles || node.vars))) {
     attrs['data-bb-node'] = node.id;
   }

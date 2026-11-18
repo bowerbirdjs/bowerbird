@@ -23,6 +23,32 @@ export interface ElementSpec {
    * data. Only colours (`#rgb`…`#rrggbbaa`) and plain numbers or lengths get through.
    */
   vars?: Record<string, string>;
+  /**
+   * Site data this element shows, editable on the canvas (editor only; the published page carries
+   * none of it). One text field whose value is the element's text is edited in place; anything
+   * else (a formatted time, a link's address, several fields) opens a small form over it.
+   */
+  edit?: EditField | EditField[];
+  /** The element is one item of a list in site data (`schedule.2`): it can be moved, copied, removed. */
+  item?: {
+    path: string /** Keys whose values must stay unique when the item is copied. */;
+    unique?: string[];
+  };
+}
+
+/** A piece of site data that can be edited on the canvas (see `ElementSpec.edit`). */
+export interface EditField {
+  /** `<group>.<path>`, e.g. `schedule.0.time`. */
+  path: string;
+  /** Input to use. Default `text`. */
+  kind?: 'text' | 'multiline' | 'time' | 'date' | 'url' | 'color' | 'select';
+  /** The stored value (what the element shows may be formatted). */
+  value?: string;
+  label?: string;
+  /** For `select`: `[value, label]` pairs. */
+  options?: [string, string][];
+  /** Empty is refused instead of removing the value. */
+  required?: boolean;
 }
 
 /** What a component's `render` can read besides its node. */

@@ -22,7 +22,7 @@ export const OCCASIONS = ['wedding', 'birthday', 'anniversary', 'party', 'compan
 
 export const eventSchema = z.object({
   title: required(80),
-  date: isoDate.nullable(),
+  date: isoDate.nullable().optional(),
   locale: z.enum(LOCALES),
   occasion: z.enum(OCCASIONS),
 });

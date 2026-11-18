@@ -2,6 +2,7 @@ import {
   type BNode,
   type ComponentDef,
   defineComponent,
+  type EditField,
   type ElementSpec,
   type RenderContext,
   sectionRootOf,
@@ -23,8 +24,9 @@ import type {
 /**
  * Components that show facts. They are pure: they read site data through the render context, so
  * one change to a fact reaches every section that shows it, in the editor and in the published
- * page alike. In the editor, every piece of fact text carries `data-bb-data` so a click can open
- * its field.
+ * page alike. Every piece of fact text says which data it shows (`edit`), so it can be edited
+ * right on the page; list entries say which item they are (`item`), so they can be moved, copied
+ * and removed there too.
  */
 
 export const event = (ctx: RenderContext): EventInfo =>
@@ -36,9 +38,6 @@ export const event = (ctx: RenderContext): EventInfo =>
   };
 const locale = (ctx: RenderContext): SiteLocale => event(ctx).locale;
 const copy = (ctx: RenderContext) => COPY[locale(ctx)];
-/** An editor mark: which fact this element shows. */
-const mark = (ctx: RenderContext, path: string) =>
-  ctx.mode === 'editor' ? { 'data-bb-data': path } : {};
 const hint = (text: string): ElementSpec => ({
   tag: 'p',
   attrs: { class: 'ev-hint' },
@@ -107,6 +106,14 @@ const eventSection = defineComponent({
   },
 });
 
+/** Site data an element shows, editable on the page (see `ElementSpec.edit`). */
+const field = (
+  path: string,
+  label: string,
+  value: string | undefined,
+  more: Omit<EditField, 'path' | 'label' | 'value'> = {},
+): EditField => ({ path, label, value: value ?? '', ...more });
+
 const eventDate = defineComponent({
   name: 'event-date',
   kind: 'primitive',
@@ -122,10 +129,10 @@ const eventDate = defineComponent({
   contentProps: ['date'],
   render: (node, ctx) => {
     const own = typeof node.props.date === 'string' && node.props.date ? node.props.date : null;
-    const date = own ?? event(ctx).date;
+    const date = own ?? event(ctx).date ?? null;
     return {
       tag: 'p',
-      ...(own ? {} : { attrs: mark(ctx, 'event.date') }),
+      ...(own ? {} : { edit: field('event.date', 'Event date', date ?? '', { kind: 'date' }) }),
       text: date ? formatDate(date, locale(ctx)) : '',
     };
   },
@@ -140,7 +147,8 @@ const monogramMark = defineComponent({
   insertable: false,
   render: (_node, ctx) => ({
     tag: 'p',
-    attrs: { 'aria-hidden': 'true', ...mark(ctx, 'event.title') },
+    attrs: { 'aria-hidden': 'true' },
+    edit: field('event.title', 'Names', event(ctx).title, { required: true }),
     text: monogram(event(ctx).title),
   }),
 });
@@ -153,11 +161,11 @@ const countdownDays = defineComponent({
   children: false,
   insertable: false,
   render: (_node, ctx) => {
-    const date = event(ctx).date;
+    const date = event(ctx).date ?? null;
     const days = date ? daysUntil(date) : -1;
     return {
       tag: 'p',
-      attrs: mark(ctx, 'event.date'),
+      edit: field('event.date', 'Event date', date ?? '', { kind: 'date' }),
       text: days > 0 ? copy(ctx).daysLeft(days) : days === 0 ? copy(ctx).today : '',
     };
   },
@@ -175,18 +183,25 @@ const scheduleItems = defineComponent({
     const venues = facts<Venue[]>(ctx, 'venues') ?? [];
     if (!items.length)
       return ctx.mode === 'editor' ? hint(copy(ctx).empty.schedule) : { tag: 'div' };
+    const places: [string, string][] = [
+      ['', '—'],
+      ...venues.map((v) => [v.id, v.name] as [string, string]),
+    ];
     return {
       tag: 'ol',
       attrs: { class: 'ev-schedule' },
       children: items.map((item, i) => {
         const venue = item.venue ? venues.find((v) => v.id === item.venue) : undefined;
+        const at = `schedule.${i}`;
         return {
           tag: 'li',
           attrs: { class: 'ev-schedule__item' },
+          item: { path: at },
           children: [
             {
               tag: 'time',
-              attrs: { class: 'ev-schedule__time', ...mark(ctx, `schedule.${i}.time`) },
+              attrs: { class: 'ev-schedule__time' },
+              edit: field(`${at}.time`, 'Time', item.time, { kind: 'time', required: true }),
               text: copy(ctx).oclock(item.time),
             },
             {
@@ -195,24 +210,31 @@ const scheduleItems = defineComponent({
               children: [
                 {
                   tag: 'h3',
-                  attrs: { class: 'ev-schedule__title', ...mark(ctx, `schedule.${i}.title`) },
+                  attrs: { class: 'ev-schedule__title' },
+                  edit: field(`${at}.title`, 'What', item.title, { required: true }),
                   text: item.title,
                 },
                 ...(item.text
                   ? [
                       {
                         tag: 'p',
-                        attrs: { class: 'ev-text', ...mark(ctx, `schedule.${i}.text`) },
+                        attrs: { class: 'ev-text' },
+                        edit: field(`${at}.text`, 'Details', item.text, { kind: 'multiline' }),
                         text: item.text,
                       },
                     ]
                   : []),
-                ...(venue
+                ...(venue || (ctx.mode === 'editor' && venues.length)
                   ? [
                       {
                         tag: 'p',
-                        attrs: { class: 'ev-muted', ...mark(ctx, `schedule.${i}.venue`) },
-                        text: venue.name,
+                        attrs: { class: 'ev-muted' },
+                        edit: field(`${at}.venue`, 'Where', item.venue, {
+                          kind: 'select',
+                          options: places,
+                        }),
+                        // In the editor an item without a venue still offers one to pick.
+                        text: venue?.name ?? '—',
                       },
                     ]
                   : []),
@@ -240,31 +262,37 @@ const venueCards = defineComponent({
       tag: 'div',
       attrs: { class: 'ev-cards' },
       children: venues.map((v, i) => {
+        const at = `venues.${i}`;
         // A pasted map link wins; an address gets a maps search; no address, no link.
         const href = v.mapUrl ?? (v.address ? directionsUrl(v.name, v.address) : undefined);
         return {
           tag: 'article',
           attrs: { class: 'ev-card' },
+          // Schedule items name venues by id, so a copy gets a new one.
+          item: { path: at, unique: ['id'] },
           children: [
             ...(v.role
               ? [
                   {
                     tag: 'p',
-                    attrs: { class: 'ev-eyebrow', ...mark(ctx, `venues.${i}.role`) },
+                    attrs: { class: 'ev-eyebrow' },
+                    edit: field(`${at}.role`, 'Role', v.role),
                     text: v.role,
                   },
                 ]
               : []),
             {
               tag: 'h3',
-              attrs: { class: 'ev-card__title', ...mark(ctx, `venues.${i}.name`) },
+              attrs: { class: 'ev-card__title' },
+              edit: field(`${at}.name`, 'Name', v.name, { required: true }),
               text: v.name,
             },
             ...(v.address
               ? [
                   {
                     tag: 'p',
-                    attrs: { class: 'ev-text', ...mark(ctx, `venues.${i}.address`) },
+                    attrs: { class: 'ev-text' },
+                    edit: field(`${at}.address`, 'Address', v.address, { kind: 'multiline' }),
                     text: v.address,
                   },
                 ]
@@ -273,7 +301,8 @@ const venueCards = defineComponent({
               ? [
                   {
                     tag: 'p',
-                    attrs: { class: 'ev-text ev-muted', ...mark(ctx, `venues.${i}.note`) },
+                    attrs: { class: 'ev-text ev-muted' },
+                    edit: field(`${at}.note`, 'Note', v.note, { kind: 'multiline' }),
                     text: v.note,
                   },
                 ]
@@ -288,6 +317,12 @@ const venueCards = defineComponent({
                       target: '_blank',
                       rel: 'noopener noreferrer',
                     },
+                    edit: field(
+                      `${at}.mapUrl`,
+                      'Map link (empty: directions from the address)',
+                      v.mapUrl,
+                      { kind: 'url' },
+                    ),
                     text: copy(ctx).directions,
                   },
                 ]
@@ -311,28 +346,21 @@ const travelInfo = defineComponent({
     const stays = facts<Stay[]>(ctx, 'stays') ?? [];
     const c = copy(ctx);
     const blocks: ElementSpec[] = [];
-    if (travel.text)
-      blocks.push({
-        tag: 'div',
-        attrs: { class: 'ev-travel__block' },
-        children: [
-          { tag: 'h3', attrs: { class: 'ev-subheading' }, text: c.gettingThere },
-          { tag: 'p', attrs: { class: 'ev-text', ...mark(ctx, 'travel.text') }, text: travel.text },
-        ],
-      });
-    if (travel.parking)
-      blocks.push({
-        tag: 'div',
-        attrs: { class: 'ev-travel__block' },
-        children: [
-          { tag: 'h3', attrs: { class: 'ev-subheading' }, text: c.parking },
-          {
-            tag: 'p',
-            attrs: { class: 'ev-text', ...mark(ctx, 'travel.parking') },
-            text: travel.parking,
-          },
-        ],
-      });
+    const block = (title: string, path: string, value: string) => ({
+      tag: 'div',
+      attrs: { class: 'ev-travel__block' },
+      children: [
+        { tag: 'h3', attrs: { class: 'ev-subheading' }, text: title },
+        {
+          tag: 'p',
+          attrs: { class: 'ev-text' },
+          edit: field(path, title, value, { kind: 'multiline' }),
+          text: value,
+        },
+      ],
+    });
+    if (travel.text) blocks.push(block(c.gettingThere, 'travel.text', travel.text));
+    if (travel.parking) blocks.push(block(c.parking, 'travel.parking', travel.parking));
     if (stays.length)
       blocks.push({
         tag: 'div',
@@ -342,47 +370,53 @@ const travelInfo = defineComponent({
           {
             tag: 'ul',
             attrs: { class: 'ev-stays' },
-            children: stays.map((s, i) => ({
-              tag: 'li',
-              attrs: { class: 'ev-stay' },
-              children: [
-                s.url
-                  ? {
-                      tag: 'a',
-                      attrs: {
-                        href: s.url,
-                        target: '_blank',
-                        rel: 'noopener noreferrer',
-                        class: 'ev-stay__name',
-                        ...mark(ctx, `stays.${i}.name`),
-                      },
-                      text: s.name,
-                    }
-                  : {
-                      tag: 'p',
-                      attrs: { class: 'ev-stay__name', ...mark(ctx, `stays.${i}.name`) },
-                      text: s.name,
-                    },
-                ...(s.address
-                  ? [
-                      {
-                        tag: 'p',
-                        attrs: { class: 'ev-muted', ...mark(ctx, `stays.${i}.address`) },
-                        text: s.address,
-                      },
-                    ]
-                  : []),
-                ...(s.note
-                  ? [
-                      {
-                        tag: 'p',
-                        attrs: { class: 'ev-text', ...mark(ctx, `stays.${i}.note`) },
-                        text: s.note,
-                      },
-                    ]
-                  : []),
-              ],
-            })),
+            children: stays.map((s, i) => {
+              const at = `stays.${i}`;
+              const name = [
+                field(`${at}.name`, 'Name', s.name, { required: true }),
+                field(`${at}.url`, 'Website', s.url, { kind: 'url' }),
+              ];
+              return {
+                tag: 'li',
+                attrs: { class: 'ev-stay' },
+                item: { path: at },
+                children: [
+                  s.url
+                    ? {
+                        tag: 'a',
+                        attrs: {
+                          href: s.url,
+                          target: '_blank',
+                          rel: 'noopener noreferrer',
+                          class: 'ev-stay__name',
+                        },
+                        edit: name,
+                        text: s.name,
+                      }
+                    : { tag: 'p', attrs: { class: 'ev-stay__name' }, edit: name, text: s.name },
+                  ...(s.address
+                    ? [
+                        {
+                          tag: 'p',
+                          attrs: { class: 'ev-muted' },
+                          edit: field(`${at}.address`, 'Address', s.address),
+                          text: s.address,
+                        },
+                      ]
+                    : []),
+                  ...(s.note
+                    ? [
+                        {
+                          tag: 'p',
+                          attrs: { class: 'ev-text' },
+                          edit: field(`${at}.note`, 'Note', s.note, { kind: 'multiline' }),
+                          text: s.note,
+                        },
+                      ]
+                    : []),
+                ],
+              };
+            }),
           },
         ],
       });
@@ -410,7 +444,8 @@ const dresscodeInfo = defineComponent({
           ? [
               {
                 tag: 'p',
-                attrs: { class: 'ev-dress__style', ...mark(ctx, 'dresscode.style') },
+                attrs: { class: 'ev-dress__style' },
+                edit: field('dresscode.style', 'Style', d.style),
                 text: d.style,
               },
             ]
@@ -419,7 +454,8 @@ const dresscodeInfo = defineComponent({
           ? [
               {
                 tag: 'p',
-                attrs: { class: 'ev-text', ...mark(ctx, 'dresscode.text') },
+                attrs: { class: 'ev-text' },
+                edit: field('dresscode.text', 'Text', d.text, { kind: 'multiline' }),
                 text: d.text,
               },
             ]
@@ -431,7 +467,15 @@ const dresscodeInfo = defineComponent({
                 attrs: { class: 'ev-swatches', 'aria-label': copy(ctx).colours },
                 children: d.colors.map((col, i) => ({
                   tag: 'li',
-                  attrs: { class: 'ev-swatch', ...mark(ctx, `dresscode.colors.${i}.name`) },
+                  attrs: { class: 'ev-swatch' },
+                  item: { path: `dresscode.colors.${i}` },
+                  edit: [
+                    field(`dresscode.colors.${i}.name`, 'Name', col.name, { required: true }),
+                    field(`dresscode.colors.${i}.hex`, 'Colour', col.hex, {
+                      kind: 'color',
+                      required: true,
+                    }),
+                  ],
                   // The colour reaches CSS only as a validated custom property.
                   vars: { '--swatch': col.hex },
                   text: col.name,
@@ -461,13 +505,26 @@ const faqItems = defineComponent({
       children: items.map((item, i) => ({
         tag: 'details',
         attrs: { class: 'ev-faq__item', open },
+        item: { path: `faq.${i}` },
         children: [
           {
             tag: 'summary',
-            attrs: { class: 'ev-faq__q', ...mark(ctx, `faq.${i}.q`) },
-            text: item.q,
+            attrs: { class: 'ev-faq__q' },
+            // The question is a span, so editing it doesn't toggle the answer.
+            children: [
+              {
+                tag: 'span',
+                edit: field(`faq.${i}.q`, 'Question', item.q, { required: true }),
+                text: item.q,
+              },
+            ],
           },
-          { tag: 'p', attrs: { class: 'ev-text', ...mark(ctx, `faq.${i}.a`) }, text: item.a },
+          {
+            tag: 'p',
+            attrs: { class: 'ev-text' },
+            edit: field(`faq.${i}.a`, 'Answer', item.a, { kind: 'multiline', required: true }),
+            text: item.a,
+          },
         ],
       })),
     };
@@ -490,7 +547,14 @@ const giftLinks = defineComponent({
       attrs: { class: 'ev-gifts' },
       children: [
         ...(g.text
-          ? [{ tag: 'p', attrs: { class: 'ev-text', ...mark(ctx, 'gifts.text') }, text: g.text }]
+          ? [
+              {
+                tag: 'p',
+                attrs: { class: 'ev-text' },
+                edit: field('gifts.text', 'Text', g.text, { kind: 'multiline' }),
+                text: g.text,
+              },
+            ]
           : []),
         ...(g.links.length
           ? [
@@ -499,6 +563,7 @@ const giftLinks = defineComponent({
                 attrs: { class: 'ev-links' },
                 children: g.links.map((l, i) => ({
                   tag: 'li',
+                  item: { path: `gifts.links.${i}` },
                   children: [
                     {
                       tag: 'a',
@@ -507,8 +572,14 @@ const giftLinks = defineComponent({
                         href: l.url,
                         target: '_blank',
                         rel: 'noopener noreferrer',
-                        ...mark(ctx, `gifts.links.${i}.label`),
                       },
+                      edit: [
+                        field(`gifts.links.${i}.label`, 'Label', l.label, { required: true }),
+                        field(`gifts.links.${i}.url`, 'Link', l.url, {
+                          kind: 'url',
+                          required: true,
+                        }),
+                      ],
                       text: l.label,
                     },
                   ],
