@@ -8,7 +8,7 @@ interface PwLocator {
   evaluate<R, A, E>(fn: (el: E, arg: A) => R, arg: A): Promise<R>;
   screenshot(options: { type: 'png' | 'jpeg'; quality?: number }): Promise<Buffer>;
   count(): Promise<number>;
-  boundingBox(): Promise<{ height: number } | null>;
+  boundingBox(): Promise<{ x: number; y: number; width: number; height: number } | null>;
 }
 interface PwPage {
   setContent(
@@ -28,6 +28,8 @@ interface PwPage {
 interface PwBrowser {
   newPage(options: { viewport: { width: number; height: number } }): Promise<PwPage>;
   close(): Promise<void>;
+  isConnected(): boolean;
+  on(event: 'disconnected', handler: () => void): void;
 }
 interface Playwright {
   chromium: { launch(options?: { executablePath?: string }): Promise<PwBrowser> };
@@ -51,14 +53,15 @@ const MAX_HEIGHT = 7800;
 
 /**
  * Renders published HTML in headless Chromium to measure layouts and take screenshots. The
- * browser starts on first use and is reused; call `close()` on shutdown.
+ * browser starts on first use and is reused (and restarted if it goes away); call `close()` on
+ * shutdown.
  */
 export function createPlaywrightLayoutProvider(
   store: Store,
   options: { executablePath?: string; viewportHeight?: number } = {},
 ): LayoutProvider & { close(): Promise<void> } {
   let browser: Promise<PwBrowser> | undefined;
-  const launch = () => {
+  const launch = async (): Promise<PwBrowser> => {
     browser ??= (async () => {
       let pw: Playwright;
       try {
@@ -66,21 +69,31 @@ export function createPlaywrightLayoutProvider(
       } catch {
         throw new Error(MISSING);
       }
-      return pw.chromium.launch(
+      const launched = await pw.chromium.launch(
         options.executablePath ? { executablePath: options.executablePath } : {},
       );
+      // If Chromium crashes or is killed, start a fresh one next time.
+      launched.on('disconnected', () => {
+        browser = undefined;
+      });
+      return launched;
     })();
     browser.catch(() => {
       browser = undefined;
     });
-    return browser;
+    const b = await browser;
+    if (b.isConnected()) return b;
+    browser = undefined;
+    return launch();
   };
 
-  const open = async (page: string, width: number, theme?: string) => {
-    const html = renderDocument(store.doc, store.registry, page, {
+  const open = async (page: string, width: number, theme?: string, doc = store.doc) => {
+    const html = renderDocument(doc, store.registry, page, {
       nodeIds: 'all',
       ...(theme ? { theme } : {}),
-    });
+    })
+      // Lazy images below the fold would never load in a measurement or a screenshot.
+      .replaceAll('loading="lazy"', 'loading="eager"');
     const tab = await (await launch()).newPage({
       viewport: { width, height: options.viewportHeight ?? 900 },
     });
@@ -91,40 +104,56 @@ export function createPlaywrightLayoutProvider(
   };
 
   return {
-    async snapshot({ page, width, theme }): Promise<LayoutSnapshot> {
-      const tab = await open(page, width, theme);
+    async snapshot({ page, width, theme, doc }): Promise<LayoutSnapshot> {
+      const tab = await open(page, width, theme, doc);
       try {
         return await tab.locator('.bb-page').evaluate(measureLayout, { page });
       } finally {
         await tab.close();
       }
     },
-    async screenshot({ page, width, theme, node }) {
-      const tab = await open(page, width, theme);
+    async screenshot({ page, width, theme, node, doc }) {
+      const tab = await open(page, width, theme, doc);
       try {
-        let data: Buffer;
-        if (node) {
-          const target = tab.locator(`[data-bb-node="${node.replace(/["\\]/g, '')}"]`);
-          if (!(await target.count())) throw new Error(`No node "${node}" on page "${page}".`);
-          data = await target.screenshot({ type: 'png' });
-        } else {
-          const box = await tab.locator('.bb-page').boundingBox();
-          const height = Math.min(Math.ceil(box?.height ?? 900), MAX_HEIGHT);
-          data = await tab.screenshot({
-            type: 'png',
-            fullPage: true,
-            clip: { x: 0, y: 0, width, height },
-          });
+        const target = node
+          ? tab.locator(`[data-bb-node="${node.replace(/["\\]/g, '')}"]`)
+          : tab.locator('.bb-page');
+        if (node && !(await target.count()))
+          throw new Error(`No node "${node}" on page "${page}".`);
+        const box = await target.boundingBox();
+        if (!box || box.height < 1 || box.width < 1) {
+          throw new Error(
+            node
+              ? `"${node}" isn't visible at ${width}px wide (hidden or zero size).`
+              : `Page "${page}" is empty, so there is nothing to show.`,
+          );
         }
-        return { data: data.toString('base64'), mimeType: 'image/png' };
+        // Model APIs reject very tall images: cut long pages and tall nodes, and say so.
+        const fullHeight = Math.ceil(box.height);
+        const height = Math.min(fullHeight, MAX_HEIGHT);
+        const data = await tab.screenshot({
+          type: 'png',
+          fullPage: true,
+          clip: {
+            x: Math.max(0, box.x),
+            y: Math.max(0, box.y),
+            width: Math.max(1, Math.ceil(box.width)),
+            height,
+          },
+        });
+        return {
+          data: data.toString('base64'),
+          mimeType: 'image/png',
+          ...(height < fullHeight ? { cropped: { height, fullHeight } } : {}),
+        };
       } finally {
         await tab.close();
       }
     },
     async close() {
-      const b = browser;
+      const pending = browser;
       browser = undefined;
-      if (b) await (await b.catch(() => undefined))?.close();
+      if (pending) await (await pending.catch(() => undefined))?.close();
     },
   };
 }

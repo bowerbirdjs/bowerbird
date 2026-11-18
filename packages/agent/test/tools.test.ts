@@ -246,4 +246,61 @@ describe('agent tools (phase 2)', () => {
     // Without a provider the tools aren't offered.
     expect(createAgentTools({ store }).map((t) => t.name)).not.toContain('get_layout');
   });
+
+  it('lays out at widths inside each breakpoint, and explains unknown breakpoints and themes', async () => {
+    const store = createStore({
+      registry: createDefaultRegistry(),
+      doc: {
+        ...createStarterDoc(),
+        breakpoints: [
+          { id: 'base', minWidth: 0 },
+          { id: 'md', minWidth: 900 },
+          { id: 'lg', minWidth: 1400 },
+        ],
+      },
+    });
+    store.apply({ ops: [{ op: 'page.create', path: '/', title: 'Home' }] });
+    const widths: number[] = [];
+    const tools = createAgentTools({
+      store,
+      layout: {
+        snapshot: async ({ width, page }) => {
+          widths.push(width);
+          return { page, width, height: 1, overflowX: 0, boxes: [] };
+        },
+      },
+    });
+    await runTool(tools, 'get_layout', { bp: 'md' });
+    await runTool(tools, 'get_layout', { bp: 'lg' });
+    expect(widths).toEqual([900, 1400]);
+    expect((await runTool(tools, 'get_layout', { bp: 'mobile' })).text).toMatch(
+      /No breakpoint "mobile"/,
+    );
+    expect((await runTool(tools, 'get_layout', { theme: 'sepia' })).text).toMatch(
+      /No theme "sepia"/,
+    );
+  });
+
+  it('dry runs of proposals say what would be proposed; lint can check a proposal', async () => {
+    const store = createStore({
+      registry: createDefaultRegistry(),
+      doc: createStarterDoc(),
+      policy: createPolicy({ review: { agent: true } }),
+    });
+    store.apply({ ops: [{ op: 'page.create', path: '/', title: 'Home' }] });
+    const tools = createAgentTools({ store, actor: { kind: 'agent', id: 'a' } });
+    const dry = await runTool(tools, 'apply', {
+      ops: [{ op: 'section.insert', section: 'hero' }],
+      dryRun: true,
+    });
+    expect(dry.text).toMatch(/this would be proposed for review; nothing was stored/);
+    expect(store.changesets).toHaveLength(0);
+    const proposed = await runTool(tools, 'apply', {
+      ops: [{ op: 'section.insert', section: 'hero' }],
+    });
+    expect(proposed.text).toContain('changeset: "cs-1"');
+    expect((await runTool(tools, 'lint', { changeset: 'cs-1' })).text).toContain('template-text');
+    expect((await runTool(tools, 'lint', {})).text).not.toContain('template-text');
+    expect((await runTool(tools, 'undo', {})).text).toContain('[review_required]');
+  });
 });

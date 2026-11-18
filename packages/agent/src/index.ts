@@ -3,6 +3,7 @@ import {
   type ApplyResult,
   type BNode,
   type ComponentDef,
+  DocIndex,
   describeNode,
   flattenTokens,
   formatIssue,
@@ -14,8 +15,10 @@ import {
   overridesOf,
   type ProposeResult,
   type SectionDef,
+  type SiteDoc,
   STATE_PSEUDO,
   type Store,
+  type TransactionInput,
   templateParts,
 } from '@bowerbirdjs/core';
 import { htmlToNodes } from '@bowerbirdjs/import';
@@ -165,6 +168,23 @@ function compactNode(store: Store, n: BNode) {
   };
 }
 
+/** A dry run of a proposal: what it would change, without storing it. */
+function formatProposalDryRun(
+  store: Store,
+  transaction: TransactionInput,
+  opCount: number,
+): ToolResult {
+  const { result } = store.simulate(transaction);
+  if (!result.ok) return formatApplyResult(store, result, opCount);
+  const formatted = formatApplyResult(store, result, opCount);
+  return {
+    text: formatted.text.replace(
+      /^Dry run OK at revision (\d+); nothing was committed\./,
+      'Dry run OK at revision $1: this would be proposed for review; nothing was stored.',
+    ),
+  };
+}
+
 /** Formats a proposal (changes stored for review) for an agent. */
 export function formatProposeResult(
   store: Store,
@@ -184,7 +204,9 @@ export function formatProposeResult(
     ...(s.updated.length ? [`Would update: ${s.updated.slice(0, 20).join(', ')}`] : []),
     ...(s.removed.length ? [`Would remove: ${s.removed.slice(0, 20).join(', ')}`] : []),
     ...result.warnings.map((w) => `Note for the reviewer: ${formatIssue(w)}`),
-    'Later changes can build on the ids above only after it is accepted.',
+    'Later changes can build on the ids above only after it is accepted. get_outline shows the current page; check the proposal with lint or get_layout and changeset: "' +
+      cs.id +
+      '".',
   ];
   return { text: lines.join('\n') };
 }
@@ -330,12 +352,42 @@ export function createAgentTools(options: AgentToolsOptions): AgentTool[] {
         : 'The site has no pages yet.',
     };
   };
-  const widthFor = (bp?: string, width?: number): number => {
+  /** Width to lay out at for a breakpoint: a typical device width within the breakpoint's range. */
+  const widthFor = (bp?: string, width?: number): number | ToolResult => {
     if (width) return width;
-    const widths: Record<string, number> = { base: 390, md: 820, lg: 1280 };
     const list = store.doc.breakpoints;
-    const found = list.find((b) => b.id === bp) ?? list.at(-1);
-    return (found && widths[found.id]) ?? Math.max(found?.minWidth ?? 0, 390);
+    const i = bp ? list.findIndex((b) => b.id === bp) : list.length - 1;
+    const found = list[i];
+    if (!found) {
+      return {
+        isError: true,
+        text: `No breakpoint "${bp}". Breakpoints: ${list.map((b) => `${b.id} (≥${b.minWidth}px)`).join(', ')}.`,
+      };
+    }
+    const typical: Record<string, number> = { base: 390, md: 820, lg: 1280 };
+    const next = list[i + 1];
+    const preferred =
+      typical[found.id] ??
+      (next ? Math.round((found.minWidth + next.minWidth) / 2) : Math.max(found.minWidth, 1280));
+    return Math.max(
+      found.minWidth,
+      Math.min(preferred, next ? next.minWidth - 1 : Number.POSITIVE_INFINITY),
+      240,
+    );
+  };
+  const themeError = (theme?: string): ToolResult | undefined =>
+    theme && !Object.hasOwn(store.doc.themes, theme)
+      ? {
+          isError: true,
+          text: `No theme "${theme}". Themes: ${Object.keys(store.doc.themes).join(', ') || '(none)'}.`,
+        }
+      : undefined;
+  /** The document to check: the current one, or a proposal as if accepted. */
+  const docFor = (changeset?: string): SiteDoc | ToolResult => {
+    if (!changeset) return store.doc;
+    const { result, doc } = store.previewChangeset(changeset);
+    if (!result.ok || !doc) return formatApplyResult(store, result, 1);
+    return doc;
   };
   const layoutTools: AgentTool[] = layout
     ? [
@@ -360,14 +412,25 @@ export function createAgentTools(options: AgentToolsOptions): AgentTool[] {
             root: z.string().optional().describe('Only list this node and its subtree.'),
             depth: z.number().int().min(1).max(12).optional(),
             theme: z.string().optional(),
+            changeset: z
+              .string()
+              .optional()
+              .describe('Check a proposal (e.g. "cs-1") as if it were accepted.'),
           }),
           annotations: { readOnlyHint: true },
           run: async (input) => {
             const page = pageFor(input.page);
             if (typeof page !== 'string') return page;
+            const width = widthFor(input.bp, input.width);
+            if (typeof width !== 'number') return width;
+            const bad = themeError(input.theme);
+            if (bad) return bad;
+            const doc = docFor(input.changeset);
+            if (!('nodes' in doc)) return doc;
             const snapshot = await layout.snapshot({
               page,
-              width: widthFor(input.bp, input.width),
+              width,
+              doc,
               ...(input.theme ? { theme: input.theme } : {}),
             });
             return {
@@ -392,21 +455,32 @@ export function createAgentTools(options: AgentToolsOptions): AgentTool[] {
                   width: z.number().int().min(240).max(3840).optional(),
                   node: z.string().optional().describe('Only this node.'),
                   theme: z.string().optional(),
+                  changeset: z.string().optional().describe('Show a proposal as if accepted.'),
                 }),
                 annotations: { readOnlyHint: true },
                 run: async (input) => {
                   const page = pageFor(input.page);
                   if (typeof page !== 'string') return page;
                   const width = widthFor(input.bp, input.width);
+                  if (typeof width !== 'number') return width;
+                  const bad = themeError(input.theme);
+                  if (bad) return bad;
+                  const doc = docFor(input.changeset);
+                  if (!('nodes' in doc)) return doc;
                   const image = await layout.screenshot!({
                     page,
                     width,
+                    doc,
                     ...(input.node ? { node: input.node } : {}),
                     ...(input.theme ? { theme: input.theme } : {}),
                   });
                   return {
-                    text: `Screenshot of ${input.node ?? `page ${page}`} at ${width}px.`,
-                    images: [image],
+                    text: `Screenshot of ${input.node ?? `page ${page}`} at ${width}px${
+                      image.cropped
+                        ? `, cropped to the top ${image.cropped.height}px of ${image.cropped.fullHeight}px (use node to look at a lower part)`
+                        : ''
+                    }.`,
+                    images: [{ data: image.data, mimeType: image.mimeType }],
                   };
                 },
               }),
@@ -612,7 +686,8 @@ export function createAgentTools(options: AgentToolsOptions): AgentTool[] {
             ...(input.baseRevision !== undefined ? { baseRevision: input.baseRevision } : {}),
             ...(input.overwrite ? { overwrite: true } : {}),
           };
-          if (!input.dryRun && (input.propose || store.policy.requiresReview?.(a))) {
+          if (input.propose || store.policy.requiresReview?.(a)) {
+            if (input.dryRun) return formatProposalDryRun(store, transaction, input.ops.length);
             return formatProposeResult(store, store.propose(transaction), input.ops.length);
           }
           const result = store.apply({ ...transaction, ...(input.dryRun ? { dryRun: true } : {}) });
@@ -674,8 +749,10 @@ export function createAgentTools(options: AgentToolsOptions): AgentTool[] {
         const ops = nodes.map((node) => ({ op: 'node.insert', parent, ...position, node }));
         const a = actor();
         const transaction = { ops, actor: a, label: input.label ?? 'Import HTML' };
-        if (!input.dryRun && (input.propose || store.policy.requiresReview?.(a))) {
-          const proposed = formatProposeResult(store, store.propose(transaction), ops.length);
+        if (input.propose || store.policy.requiresReview?.(a)) {
+          const proposed = input.dryRun
+            ? formatProposalDryRun(store, transaction, ops.length)
+            : formatProposeResult(store, store.propose(transaction), ops.length);
           return {
             ...proposed,
             text: [proposed.text, ...warnings.map((w) => `Note: ${w}`)].join('\n'),
@@ -701,14 +778,19 @@ export function createAgentTools(options: AgentToolsOptions): AgentTool[] {
         'Checks pages for problems: missing or extra h1, skipped heading levels, links without text or destination, empty alt text, unsafe URLs and example copy left from section templates. Run it before telling the user you are done.',
       input: z.object({
         page: z.string().optional().describe('Page id; omit to check all pages.'),
+        changeset: z
+          .string()
+          .optional()
+          .describe('Check a proposal (e.g. "cs-1") as if it were accepted.'),
       }),
       annotations: { readOnlyHint: true },
-      run: ({ page }) => {
-        const ids = page ? [page] : Object.keys(store.doc.pages);
+      run: ({ page, changeset }) => {
+        const doc = docFor(changeset);
+        if (!('nodes' in doc)) return doc;
+        const view = doc === store.doc ? store.view : new DocIndex(doc);
+        const ids = page ? [page] : Object.keys(doc.pages);
         return {
-          text: ids
-            .map((id) => formatLint(id, lintPage(store.view, store.registry, id)))
-            .join('\n\n'),
+          text: ids.map((id) => formatLint(id, lintPage(view, store.registry, id))).join('\n\n'),
         };
       },
     }),

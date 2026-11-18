@@ -35,6 +35,8 @@ export interface GhostPreview {
   updated: string[];
   removed: string[];
   label: string;
+  /** Set when previewing a changeset. */
+  changeset?: string;
   /** Re-runs the preview against the current document (after other people's edits). */
   refresh(): GhostPreview | null;
 }
@@ -305,6 +307,7 @@ export class EditorController {
         doc,
         ...result.summary,
         label: `Preview of ${cs.label ?? cs.id} by ${cs.actor.name ?? cs.actor.id}`,
+        changeset: id,
         refresh: () => (this.store.changeset(id)?.status.includes('open') ? make() : null),
       };
     };

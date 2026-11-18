@@ -192,6 +192,11 @@ export function definitionOf(view: DocView, id: NodeId): SymbolDef | undefined {
   return root?.symbol ? view.symbol(root.symbol) : undefined;
 }
 
+/** True if the node links to a definition node that still exists (dangling links don't count). */
+export function isLinked(view: DocView, node: BNode | undefined): boolean {
+  return !!node?.link && !!view.symbol(node.link.symbol) && !!view.node(node.link.node);
+}
+
 /** True for the root node of a symbol instance. */
 export function isInstanceRoot(view: DocView, node: BNode | undefined): boolean {
   return !!node?.link && view.symbol(node.link.symbol)?.rootId === node.link.node;

@@ -12,6 +12,10 @@ export interface LayoutBox {
   hidden?: boolean;
   /** Positioned out of flow (absolute, fixed or sticky). */
   positioned?: boolean;
+  /** Inside an ancestor that clips or scrolls its overflow (so overflowing is intended). */
+  contained?: boolean;
+  /** `display: inline` (e.g. a link in running text); its box spans its line fragments. */
+  inline?: boolean;
   /** Content wider/taller than the box while overflow is clipped. */
   clipped?: { x: number; y: number };
   /** Own text content (direct text, not descendants'). */

@@ -47,12 +47,22 @@ export function measureLayout(root: Element, options: MeasureOptions = {}): Layo
     };
     return 0.2126 * ch(r!) + 0.7152 * ch(g!) + 0.0722 * ch(b!);
   };
-  /** Composites backgrounds from `el` upwards until opaque; undefined if an image is in the way. */
+  const MEDIA = /^(img|video|picture|canvas|svg|iframe)$/i;
+  /**
+   * Composites backgrounds from `el` upwards until opaque. Undefined when an image is in the way:
+   * a background image, or a positioned image/video layered behind the text.
+   */
   const backgroundOf = (el: Element): number[] | undefined => {
     const layers: number[][] = [];
-    for (let cur: Element | null = el; cur; cur = cur.parentElement) {
+    let prev: Element | null = null;
+    for (let cur: Element | null = el; cur; prev = cur, cur = cur.parentElement) {
       const cs = getComputedStyle(cur);
       if (cs.backgroundImage && cs.backgroundImage !== 'none') return undefined;
+      for (const child of cur.children) {
+        if (child === prev || !MEDIA.test(child.tagName)) continue;
+        const pos = getComputedStyle(child).position;
+        if (pos === 'absolute' || pos === 'fixed') return undefined;
+      }
       const c = parseColor(cs.backgroundColor);
       if (c && c[3] > 0) {
         layers.push(c);
@@ -94,6 +104,13 @@ export function measureLayout(root: Element, options: MeasureOptions = {}): Layo
       box.hidden = true;
     if (cs.position === 'absolute' || cs.position === 'fixed' || cs.position === 'sticky')
       box.positioned = true;
+    if (cs.display === 'inline') box.inline = true;
+    for (let a = el === root ? null : el.parentElement; a && a !== root; a = a.parentElement) {
+      if (getComputedStyle(a).overflowX !== 'visible') {
+        box.contained = true;
+        break;
+      }
+    }
     const html = el as HTMLElement;
     const clipsX = cs.overflowX !== 'visible' && html.scrollWidth > html.clientWidth + 1;
     const clipsY = cs.overflowY !== 'visible' && html.scrollHeight > html.clientHeight + 1;
@@ -112,8 +129,12 @@ export function measureLayout(root: Element, options: MeasureOptions = {}): Layo
       const fg = parseColor(cs.color);
       const bg = backgroundOf(el);
       let contrast: number | undefined;
+      // Opacity on the element or its ancestors fades the text into its background.
+      let opacity = 1;
+      for (let a: Element | null = el; a && a !== root.parentElement; a = a.parentElement)
+        opacity *= Number(getComputedStyle(a).opacity);
       if (fg && bg) {
-        const a = fg[3];
+        const a = fg[3] * (Number.isFinite(opacity) ? opacity : 1);
         const blended = [0, 1, 2].map((i) => fg[i]! * a + bg[i]! * (1 - a));
         const l1 = luminance(blended);
         const l2 = luminance(bg);
@@ -123,7 +144,18 @@ export function measureLayout(root: Element, options: MeasureOptions = {}): Layo
         chars: own.length,
         fontSize: round(fontSize),
         lineHeight: round(lineHeight),
-        lines: Math.max(1, Math.round(h / lineHeight)),
+        // Count lines in the content box: padding and borders aren't lines.
+        lines: Math.max(
+          1,
+          Math.round(
+            (h -
+              (Number.parseFloat(cs.paddingTop) || 0) -
+              (Number.parseFloat(cs.paddingBottom) || 0) -
+              (Number.parseFloat(cs.borderTopWidth) || 0) -
+              (Number.parseFloat(cs.borderBottomWidth) || 0)) /
+              lineHeight,
+          ),
+        ),
         bold: Number(cs.fontWeight) >= 600,
         ...(contrast !== undefined ? { contrast } : {}),
       };
@@ -145,7 +177,7 @@ export function measureLayout(root: Element, options: MeasureOptions = {}): Layo
         naturalHeight: img.naturalHeight,
       };
     }
-    if (!box.hidden && !box.positioned) {
+    if (!box.hidden && !box.positioned && !box.contained) {
       maxRight = Math.max(maxRight, x + w);
       maxBottom = Math.max(maxBottom, y + h);
     }

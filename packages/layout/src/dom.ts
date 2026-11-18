@@ -5,7 +5,13 @@ import type { LayoutSnapshot } from './types.js';
 
 /** Produces layout snapshots (and optionally screenshots) for agent tools. */
 export interface LayoutProvider {
-  snapshot(options: { page: string; width: number; theme?: string }): Promise<LayoutSnapshot>;
+  snapshot(options: {
+    page: string;
+    width: number;
+    theme?: string;
+    /** Lay out this document instead of the current one (e.g. a proposal). */
+    doc?: SiteDoc;
+  }): Promise<LayoutSnapshot>;
   /** PNG screenshot, base64. Not every environment can take one. */
   screenshot?(options: {
     page: string;
@@ -13,7 +19,13 @@ export interface LayoutProvider {
     theme?: string;
     /** Only this node. */
     node?: string;
-  }): Promise<{ data: string; mimeType: 'image/png' }>;
+    doc?: SiteDoc;
+  }): Promise<{
+    data: string;
+    mimeType: 'image/png';
+    /** Set when the image was cut to a maximum height. */
+    cropped?: { height: number; fullHeight: number };
+  }>;
 }
 
 let counter = 0;
@@ -29,9 +41,10 @@ export function createDomLayoutProvider(
   const read = () =>
     typeof source === 'function' ? source() : { doc: source.doc, registry: source.registry };
   return {
-    async snapshot({ page, width, theme }) {
+    async snapshot({ page, width, theme, doc: override }) {
       const doc = options.document ?? document;
-      const { doc: site, registry } = read();
+      const { doc: current, registry } = read();
+      const site = override ?? current;
       const id = `m${++counter}`;
       const host = doc.createElement('div');
       host.setAttribute('data-bb-measure', id);
@@ -47,6 +60,8 @@ export function createDomLayoutProvider(
       style.textContent = rendered.css;
       const content = doc.createElement('div');
       content.innerHTML = rendered.html;
+      // Offscreen, lazy images would never load: measure them as if they were on screen.
+      for (const img of content.querySelectorAll('img')) img.loading = 'eager';
       host.append(style, content);
       doc.body.append(host);
       try {

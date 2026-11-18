@@ -98,6 +98,8 @@ export interface SiteDoc {
   breakpoints: Breakpoint[];
   /** Linked components by id. */
   symbols?: Record<string, SymbolDef>;
+  /** Who last changed each token (`token:<path>`) and theme value (`theme:<name>:<path>`). */
+  tokenEdits?: Record<string, Stamp>;
   /**
    * Highest number handed out per id prefix (`hero` → 3 means hero-1…hero-3 were used). Ids are
    * never reused, so undo and references can't land on a different node with an old id.

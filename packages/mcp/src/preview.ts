@@ -127,6 +127,11 @@ export async function startPreview(options: PreviewOptions): Promise<PreviewServ
     }
     const id = decodeURIComponent(match[1]!);
     const ops = form.getAll('ops').map(Number).filter(Number.isInteger);
+    if (!ops.length) {
+      res.writeHead(400, { 'content-type': 'text/plain; charset=utf-8' });
+      res.end('Nothing was selected: tick the changes to accept or reject, then try again.');
+      return;
+    }
     const message =
       match[2] === 'accept'
         ? (() => {
@@ -163,32 +168,34 @@ export async function startPreview(options: PreviewOptions): Promise<PreviewServ
       res.end(JSON.stringify(store.doc, null, 2));
       return;
     }
-    const doc = store.doc;
     const badge = url.searchParams.get('badge') !== '0';
+    // ?changeset=cs-1 shows the site as it would be with that proposal accepted: its new pages
+    // can be opened, and removed pages are gone.
+    const shown = url.searchParams.get('changeset') ?? undefined;
+    const preview = shown ? store.previewChangeset(shown).doc : undefined;
+    const doc = preview ?? store.doc;
+    const query = shown ? `?changeset=${encodeURIComponent(shown)}&amp;badge=0` : '';
     const page = Object.values(doc.pages).find((p) => p.path === url.pathname);
     if (!page) {
       const links = Object.values(doc.pages)
         .map(
           (p) =>
-            `<li><a href="${escapeHtml(p.path)}">${escapeHtml(p.title)}</a> <code>${escapeHtml(p.path)}</code></li>`,
+            `<li><a href="${escapeAttr(p.path)}${query}">${escapeHtml(p.title)}</a> <code>${escapeHtml(p.path)}</code></li>`,
         )
         .join('');
-      res.writeHead(doc.pages && Object.keys(doc.pages).length ? 404 : 200, {
+      res.writeHead(Object.keys(doc.pages).length && url.pathname !== '/' ? 404 : 200, {
         'content-type': 'text/html; charset=utf-8',
       });
       res.end(
         `<!doctype html><meta charset="utf-8"><title>Bowerbird preview</title><body style="font:16px system-ui;padding:2rem">` +
-          `<h1>Bowerbird preview</h1>${links ? `<p>Pages:</p><ul>${links}</ul>` : '<p>No pages yet. Ask your agent to build one.</p>'}` +
+          `<h1>Bowerbird preview</h1>${links ? `<p>Pages${shown ? ` (with ${escapeHtml(shown)})` : ''}:</p><ul>${links}</ul>` : '<p>No pages yet. Ask your agent to build one.</p>'}` +
+          reviewPanel(store, token, url.pathname, preview ? shown : undefined) +
           `${liveScript(lastChange, badge)}</body>`,
       );
       return;
     }
     const theme = url.searchParams.get('theme');
-    // ?changeset=cs-1 shows the page as it would be with that proposal accepted.
-    const shown = url.searchParams.get('changeset') ?? undefined;
-    const preview = shown ? store.previewChangeset(shown).doc : undefined;
-    const source = preview?.pages[page.id] ? preview : doc;
-    const html = renderDocument(source, store.registry, page.id, {
+    const html = renderDocument(doc, store.registry, page.id, {
       ...(theme && /^[a-z0-9-]+$/.test(theme) ? { theme } : {}),
       bodyEnd:
         reviewPanel(store, token, url.pathname, preview ? shown : undefined) +

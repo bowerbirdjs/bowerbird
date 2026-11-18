@@ -6,6 +6,7 @@ import {
   descendants,
   instanceRootOf,
   isInstanceRoot,
+  isLinked,
   isScopeOwner,
   sectionRootOf,
   subtreeHeight,
@@ -95,6 +96,13 @@ export function allocateCopyId(ctx: OpContext, id: string): string {
   const prefix = match ? match[1]! : id;
   ctx.draft.useCounter(prefix, match ? Number(match[2]) : 1);
   return allocateId(ctx, prefix);
+}
+
+/** True if `id` exists or was used before (numbered ids are never handed out twice). */
+export function idTaken(draft: Draft, id: string): boolean {
+  if (draft.has(id)) return true;
+  const match = /^(.*)-(\d+)$/.exec(id);
+  return !!match && draft.counter(match[1]!) >= Number(match[2]);
 }
 
 /** Marks a removed numbered id as used, so it is never handed out again. */
@@ -329,13 +337,14 @@ export function scopeFor(view: DocView, parentId: NodeId): string {
  * definition, so its structure can only change through the definition.
  */
 export function guardInstance(ctx: OpContext, node: BNode, action: string): boolean {
-  if (!node.link || isInstanceRoot(ctx.draft, node)) return true;
+  if (!isLinked(ctx.draft, node) || isInstanceRoot(ctx.draft, node)) return true;
+  const link = node.link!;
   const root = instanceRootOf(ctx.draft, node.id);
-  const symbol = ctx.draft.symbol(node.link.symbol);
+  const symbol = ctx.draft.symbol(link.symbol);
   fail(ctx, {
     code: 'instance',
     nodeId: node.id,
-    message: `"${node.id}" is inside an instance of symbol "${node.link.symbol}"${root ? ` ("${root.id}")` : ''}, so you can't ${action} here.`,
+    message: `"${node.id}" is inside an instance of symbol "${link.symbol}"${root ? ` ("${root.id}")` : ''}, so you can't ${action} here.`,
     hint: `Change the definition (${symbol ? `nodes under "${symbol.rootId}"` : 'the symbol'}) to update every instance, or run symbol.detach on "${root?.id ?? node.id}" first. Text, props and styles can be overridden per instance.`,
   });
   return false;
@@ -343,13 +352,14 @@ export function guardInstance(ctx: OpContext, node: BNode, action: string): bool
 
 /** Fails if `parent` is inside an instance (structure is locked) when adding children to it. */
 function guardParent(ctx: OpContext, parent: BNode): boolean {
-  if (!parent.link) return true;
+  if (!isLinked(ctx.draft, parent)) return true;
+  const link = parent.link!;
   const root = instanceRootOf(ctx.draft, parent.id);
   fail(ctx, {
     code: 'instance',
     nodeId: parent.id,
-    message: `"${parent.id}" is part of an instance of symbol "${parent.link.symbol}"; nodes can't be added inside instances.`,
-    hint: `Add it to the definition (node "${parent.link.node}") to add it to every instance, or run symbol.detach on "${root?.id ?? parent.id}" first.`,
+    message: `"${parent.id}" is part of an instance of symbol "${link.symbol}"; nodes can't be added inside instances.`,
+    hint: `Add it to the definition (node "${link.node}") to add it to every instance, or run symbol.detach on "${root?.id ?? parent.id}" first.`,
   });
   return false;
 }
@@ -782,8 +792,21 @@ function nodeDuplicate(ctx: OpContext, op: OpOf<'node.duplicate'>) {
     });
   if (!guardInstance(ctx, node, 'duplicate it')) return;
   const order = orderNextTo(draft.children(node.parent), node.order, 'after');
-  // Instance copies keep their links (a copy of an instance is another instance).
-  copySubtree(ctx, node, { parent: node.parent, order, rootId: allocateCopyId(ctx, node.id) });
+  // Instance copies keep their links (a copy of an instance is another instance), and start
+  // from the same definition state as their source, so sync in this transaction treats them alike.
+  const idMap = copySubtree(ctx, node, {
+    parent: node.parent,
+    order,
+    rootId: allocateCopyId(ctx, node.id),
+  });
+  for (const [from, to] of idMap) {
+    const src = draft.node(from);
+    if (!src?.link) continue;
+    const base = ctx.linkBase?.get(from) ?? own(draft.base.nodes, src.link.node);
+    if (!base) continue;
+    ctx.linkBase ??= new Map();
+    ctx.linkBase.set(to, base);
+  }
 }
 
 function textEdit(ctx: OpContext, op: OpOf<'text.edit'>) {
@@ -1205,12 +1228,21 @@ function sectionVariant(ctx: OpContext, op: OpOf<'section.variant'>) {
   const { draft, registry } = ctx;
   const root = requireNode(ctx, op.id);
   if (!root) return;
-  if (root.link) {
+  const linkedInside = descendants(draft, root.id).find((d) => isLinked(draft, d));
+  if (linkedInside && !isLinked(draft, root)) {
     return fail(ctx, {
       code: 'instance',
       nodeId: root.id,
-      message: `"${root.id}" is ${isInstanceRoot(draft, root) ? 'an instance' : 'inside an instance'} of symbol "${root.link.symbol}", so its variant follows the definition.`,
-      hint: `Change the variant on the definition ("${root.link.node}"), or run symbol.detach first.`,
+      message: `"${root.id}" contains an instance of symbol "${linkedInside.link!.symbol}", which a variant change would rebuild.`,
+      hint: `Move or detach "${instanceRootOf(draft, linkedInside.id)?.id ?? linkedInside.id}" first.`,
+    });
+  }
+  if (isLinked(draft, root)) {
+    return fail(ctx, {
+      code: 'instance',
+      nodeId: root.id,
+      message: `"${root.id}" is ${isInstanceRoot(draft, root) ? 'an instance' : 'inside an instance'} of symbol "${root.link!.symbol}", so its variant follows the definition.`,
+      hint: `Change the variant on the definition ("${root.link!.node}"), or run symbol.detach first.`,
     });
   }
   if (!root.section) {

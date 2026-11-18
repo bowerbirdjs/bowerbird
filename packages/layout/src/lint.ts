@@ -56,8 +56,22 @@ export function lintLayout(
 
   for (const b of visible) {
     const parent = b.parent ? byId.get(b.parent) : undefined;
+    // Content inside a scroller or clipping box is meant to overflow it.
+    if (!b.contained && !b.positioned && b.x < -1 && !(parent && parent.x < -1)) {
+      issues.push({
+        rule: 'horizontal-overflow',
+        severity: 'error',
+        nodeId: b.id,
+        message: `${b.id} starts ${Math.round(-b.x)}px left of the page, so it is cut off.`,
+        hint: 'Check negative margins and translate/left offsets at this breakpoint.',
+      });
+    }
     // Report only the outermost box that sticks out, not every descendant of it.
-    if (b.x + b.w > limit && !(parent && !parent.hidden && parent.x + parent.w > limit)) {
+    if (
+      !b.contained &&
+      b.x + b.w > limit &&
+      !(parent && !parent.hidden && parent.x + parent.w > limit)
+    ) {
       const over = Math.round(b.x + b.w - snapshot.width);
       issues.push({
         rule: 'horizontal-overflow',
@@ -86,7 +100,16 @@ export function lintLayout(
         message: `${b.id} text is ${b.text.fontSize}px; anything under ${minFont}px is hard to read.`,
       });
     }
-    if (b.interactive && (b.w < minTarget || b.h < minTarget) && b.w > 0 && b.h > 0 && crowded(b)) {
+    // WCAG 2.5.8 inline exception: a link inside a sentence is sized by the text around it.
+    const inSentence = b.inline && !!parent?.text;
+    if (
+      b.interactive &&
+      !inSentence &&
+      (b.w < minTarget || b.h < minTarget) &&
+      b.w > 0 &&
+      b.h > 0 &&
+      crowded(b)
+    ) {
       issues.push({
         rule: 'tap-target',
         severity: 'warning',
@@ -135,7 +158,8 @@ export function lintLayout(
   // Overlapping in-flow siblings usually means negative margins or broken grid placement.
   const siblings = new Map<string, LayoutBox[]>();
   for (const b of visible) {
-    if (b.positioned || !b.parent || area(b) === 0) continue;
+    // Inline boxes span line fragments, so their rectangles overlap without anything overlapping.
+    if (b.positioned || b.inline || !b.parent || area(b) === 0) continue;
     const list = siblings.get(b.parent);
     if (list) list.push(b);
     else siblings.set(b.parent, [b]);

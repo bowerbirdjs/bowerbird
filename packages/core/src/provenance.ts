@@ -1,7 +1,7 @@
 import type { Draft } from './draft.js';
 import type { Issue } from './errors.js';
-import type { Actor, BNode, Stamp } from './types.js';
-import { deepEqual } from './util.js';
+import type { Actor, BNode, SiteDoc, Stamp, TokenTree } from './types.js';
+import { deepEqual, isPlainObject } from './util.js';
 
 /**
  * Provenance: each node records who last changed each of its fields (`BNode.edited`). It is
@@ -82,4 +82,69 @@ export function humanEditConflicts(draft: Draft): Omit<Issue, 'code'>[] {
     });
   }
   return out;
+}
+
+/** Token leaves keyed by dot path (values are the leaf objects or shorthand values). */
+export function tokenLeaves(tree: TokenTree): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  const walk = (node: Record<string, unknown>, path: string[]) => {
+    for (const [key, child] of Object.entries(node)) {
+      if (key.startsWith('$')) continue;
+      const p = [...path, key];
+      if (isPlainObject(child) && !('$value' in child)) walk(child, p);
+      else out[p.join('.')] = child;
+    }
+  };
+  walk(tree, []);
+  return out;
+}
+
+export function themeEntries(themes: SiteDoc['themes']): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [theme, values] of Object.entries(themes)) {
+    for (const [path, value] of Object.entries(values)) out[`${theme}\u0000${path}`] = value;
+  }
+  return out;
+}
+
+/** Token and theme values that differ between two documents, as `token:<path>` / `theme:<name>:<path>` keys. */
+function changedTokenKeys(draft: Draft): string[] {
+  const out: string[] = [];
+  const diff = (
+    a: Record<string, unknown>,
+    b: Record<string, unknown>,
+    key: (k: string) => string,
+  ) => {
+    for (const k of new Set([...Object.keys(a), ...Object.keys(b)]))
+      if (!deepEqual(a[k], b[k])) out.push(key(k));
+  };
+  if (draft.tokens() !== draft.base.tokens)
+    diff(tokenLeaves(draft.base.tokens), tokenLeaves(draft.tokens()), (k) => `token:${k}`);
+  if (draft.themes() !== draft.base.themes)
+    diff(
+      themeEntries(draft.base.themes),
+      themeEntries(draft.themes()),
+      (k) => `theme:${k.replace('\u0000', ':')}`,
+    );
+  return out;
+}
+
+/** Stamps changed tokens and theme values (people's design decisions are protected too). */
+export function stampTokens(draft: Draft, actor: Actor, rev: number): void {
+  const keys = changedTokenKeys(draft);
+  if (!keys.length) return;
+  const stamps = { ...(draft.tokenStamps() ?? {}) };
+  for (const k of keys) stamps[k] = { by: actor.id, kind: actor.kind, rev };
+  draft.setTokenStamps(stamps);
+}
+
+/** Token or theme values a person set last that the draft changes. */
+export function humanTokenConflicts(draft: Draft): Omit<Issue, 'code'>[] {
+  const stamps = draft.base.tokenEdits ?? {};
+  return changedTokenKeys(draft).flatMap((k) => {
+    const s = stamps[k];
+    if (s?.kind !== 'user') return [];
+    const what = k.startsWith('token:') ? `token ${k.slice(6)}` : `theme value ${k.slice(6)}`;
+    return [{ path: k, message: `Overwrites ${what}, last changed by ${describeStamp(s)}.` }];
+  });
 }

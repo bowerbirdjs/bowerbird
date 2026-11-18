@@ -96,4 +96,28 @@ describe('preview review panel', () => {
     expect(res.status).toBe(409);
     expect(await res.text()).toMatch(/needs op 0/);
   });
+
+  it('previews proposed new pages and asks for a selection', async () => {
+    const { store, url, id } = await setup();
+    const p = store.propose({
+      actor: agent,
+      ops: [
+        { op: 'page.create', id: 'about', path: '/about', title: 'About' },
+        { op: 'section.insert', section: 'cta', page: 'about' },
+      ],
+    });
+    if (!p.ok) throw new Error('propose');
+    expect((await fetch(`${url}/about`)).status).toBe(404);
+    const about = await fetch(`${url}/about?changeset=${p.changeset.id}`);
+    expect(about.status).toBe(200);
+    expect(await about.text()).toContain('bb-cta');
+    const page = await (await fetch(`${url}/`)).text();
+    const token = /name="token" value="([0-9a-f]+)"/.exec(page)?.[1] ?? '';
+    const none = await fetch(
+      `${url}/__bowerbird/changesets/${id}/accept`,
+      form([['token', token]]),
+    );
+    expect(none.status).toBe(400);
+    expect(await none.text()).toMatch(/Nothing was selected/);
+  });
 });

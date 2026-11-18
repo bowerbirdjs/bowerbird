@@ -4,6 +4,7 @@ import { readFile, rename, writeFile } from 'node:fs/promises';
 import { parseArgs } from 'node:util';
 import { createDefaultRegistry, createStarterDoc } from '@bowerbirdjs/blocks';
 import {
+  type Changeset,
   createPolicy,
   createStore,
   type FreedomLevel,
@@ -63,10 +64,21 @@ async function main() {
     throw new Error(`--protect must be warn, confirm or off (got "${protect}").`);
   }
 
+  if (values.review && values['no-preview']) {
+    throw new Error(
+      '--review needs the preview: proposals are accepted or rejected there. Drop --no-preview.',
+    );
+  }
+
   let doc: SiteDoc;
+  let changesets: Changeset[] = [];
   const file = values.file;
   if (file && existsSync(file)) {
-    const parsed = normalizeDoc(JSON.parse(await readFile(file, 'utf8')));
+    const raw = JSON.parse(await readFile(file, 'utf8')) as Record<string, unknown>;
+    // Open proposals are saved next to the document, so they survive a server restart.
+    if (Array.isArray(raw.changesets)) changesets = raw.changesets as Changeset[];
+    delete raw.changesets;
+    const parsed = normalizeDoc(raw);
     if (!parsed) throw new Error(`${file} is not a Bowerbird site file.`);
     doc = parsed;
     log(`loaded ${file} (revision ${doc.revision})`);
@@ -77,6 +89,7 @@ async function main() {
   const store = createStore({
     registry: createDefaultRegistry(),
     doc,
+    changesets,
     policy: createPolicy({
       allowRawValues: values['allow-raw'],
       ...(level ? { levels: { agent: level } } : {}),
@@ -101,16 +114,20 @@ async function main() {
       .catch(() => undefined)
       .then(async () => {
         const tmp = `${file}.tmp`;
-        await writeFile(tmp, `${JSON.stringify(store.doc, null, 2)}\n`);
+        const open = store.changesets.filter((c) => c.status.includes('open'));
+        const data = open.length ? { ...store.doc, changesets: open } : store.doc;
+        await writeFile(tmp, `${JSON.stringify(data, null, 2)}\n`);
         await rename(tmp, file);
       });
     return saving;
   };
   if (file) {
-    store.subscribe(() => {
+    const later = () => {
       clearTimeout(timer);
       timer = setTimeout(() => void save().catch((e) => log('save failed:', e)), 50);
-    });
+    };
+    store.subscribe(later);
+    store.onChangesets(later);
     await save();
   }
 

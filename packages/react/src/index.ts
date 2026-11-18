@@ -60,6 +60,7 @@ export const BowerbirdEditor = forwardRef<EditorElement | null, BowerbirdEditorP
     latest.current = props;
     const [mounted, setMounted] = useState(false);
     useEffect(() => setMounted(true), []);
+    // biome-ignore lint/correctness/useExhaustiveDependencies: the element exists once mounted
     useImperativeHandle(ref, () => element.current as EditorElement, [mounted]);
 
     useIsomorphicLayoutEffect(() => {

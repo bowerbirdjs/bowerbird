@@ -1,12 +1,19 @@
-import { applyOp, type OpContext, orderNextTo } from './apply.js';
+import { applyOp, idTaken, isValidPagePath, type OpContext, orderNextTo } from './apply.js';
 import { createEmptyDoc, DocIndex, descendants } from './doc.js';
 import { type Change, Draft } from './draft.js';
 import { type Issue, listPreview } from './errors.js';
 import { type Op, parseOps } from './ops.js';
 import { createPolicy, type Policy } from './policy.js';
-import { humanEditConflicts, stampChanges } from './provenance.js';
+import {
+  humanEditConflicts,
+  humanTokenConflicts,
+  stampChanges,
+  stampTokens,
+  themeEntries,
+  tokenLeaves,
+} from './provenance.js';
 import type { Registry } from './registry.js';
-import { syncInstances } from './symbols.js';
+import { syncInstances, unlinkDangling } from './symbols.js';
 import type { Actor, BNode, NodeId, PageId, SiteDoc, TokenTree } from './types.js';
 import { clone, deepEqual, ensure, isPlainObject, pruneEmpty } from './util.js';
 
@@ -133,11 +140,14 @@ export function summarize(changes: Change[]): ChangeSummary {
   return s;
 }
 
-/** Every string value inside an op (ids it refers to). */
-function stringsIn(value: unknown, out = new Set<string>()): Set<string> {
-  if (typeof value === 'string') out.add(value);
-  else if (Array.isArray(value)) for (const v of value) stringsIn(v, out);
-  else if (isPlainObject(value)) for (const v of Object.values(value)) stringsIn(v, out);
+/** Op fields that hold ids of nodes, pages or symbols (not text, names or section types). */
+const ID_FIELDS = ['id', 'parent', 'before', 'after', 'page', 'symbol'] as const;
+
+/** Ids an op refers to (its id fields only). */
+function idRefs(op: Op): Set<string> {
+  const out = new Set<string>();
+  const o = op as Record<string, unknown>;
+  for (const f of ID_FIELDS) if (typeof o[f] === 'string') out.add(o[f] as string);
   return out;
 }
 
@@ -264,21 +274,6 @@ function revertNode(current: BNode, before: BNode, after: BNode, conflicts: stri
   return next as unknown as BNode;
 }
 
-/** Token leaves keyed by dot path (values are the leaf objects or shorthand values). */
-function tokenLeaves(tree: TokenTree): Record<string, unknown> {
-  const out: Record<string, unknown> = {};
-  const walk = (node: Record<string, unknown>, path: string[]) => {
-    for (const [key, child] of Object.entries(node)) {
-      if (key.startsWith('$')) continue;
-      const p = [...path, key];
-      if (isPlainObject(child) && !('$value' in child)) walk(child, p);
-      else out[p.join('.')] = child;
-    }
-  };
-  walk(tree, []);
-  return out;
-}
-
 /** Applies merged leaves onto the current tree, keeping group metadata such as `$type`. */
 function rebuildTokens(current: TokenTree, leaves: Record<string, unknown>): TokenTree {
   const tree = structuredClone(current);
@@ -304,14 +299,6 @@ function rebuildTokens(current: TokenTree, leaves: Record<string, unknown>): Tok
     group[segs.at(-1)!] = leaf;
   }
   return tree;
-}
-
-function themeEntries(themes: SiteDoc['themes']): Record<string, unknown> {
-  const out: Record<string, unknown> = {};
-  for (const [theme, values] of Object.entries(themes)) {
-    for (const [path, value] of Object.entries(values)) out[`${theme}\u0000${path}`] = value;
-  }
-  return out;
 }
 
 function rebuildThemes(entries: Record<string, unknown>): SiteDoc['themes'] {
@@ -343,6 +330,8 @@ type RunOutcome =
       ops: Op[];
       /** With `propose`: what each op created. */
       createdBy: { nodes: string[]; pages: string[]; symbols: string[] }[];
+      /** With `rebase`: pinned ids that were taken, and what they became. */
+      renamed: Map<string, string>;
     }
   | { ok: false; result: Extract<ApplyResult, { ok: false }> };
 
@@ -361,14 +350,14 @@ function unpinTaken(op: Op, draft: Draft): Pinned {
     case 'section.insert':
     case 'symbol.insert': {
       const id = out.id;
-      if (id && draft.has(id)) delete out.id;
+      if (id && idTaken(draft, id)) delete out.id;
       return { op: out, nodes: [id] };
     }
     case 'node.insert': {
       const nodes: (string | undefined)[] = [];
       const walk = (n: { id?: string; children?: unknown[] }) => {
         nodes.push(n.id);
-        if (n.id && draft.has(n.id)) delete n.id;
+        if (n.id && idTaken(draft, n.id)) delete n.id;
         for (const c of n.children ?? []) walk(c as typeof n);
       };
       walk(out.node);
@@ -389,23 +378,28 @@ function unpinTaken(op: Op, draft: Draft): Pinned {
   }
 }
 
-/** Rewrites id strings (and ids nested under them) using `map`. */
-function substitute(value: unknown, map: Map<string, string>): unknown {
-  if (typeof value === 'string') {
-    const direct = map.get(value);
-    if (direct) return direct;
-    const slash = value.indexOf('/');
-    if (slash > 0) {
-      for (const [from, to] of map)
-        if (value.startsWith(`${from}/`)) return to + value.slice(from.length);
-    }
-    return value;
+/** Maps an id (or an id nested under a renamed one) through `map`. */
+function renameId(id: string, map: Map<string, string>): string {
+  const direct = map.get(id);
+  if (direct) return direct;
+  for (const [from, to] of map) if (id.startsWith(`${from}/`)) return to + id.slice(from.length);
+  return id;
+}
+
+/** Rewrites the id fields of an op (and ids inside node inputs) using `map`. Text is untouched. */
+function substitute(op: Op, map: Map<string, string>): Op {
+  if (!map.size) return op;
+  const out = clone(op) as Record<string, unknown>;
+  for (const f of ID_FIELDS)
+    if (typeof out[f] === 'string') out[f] = renameId(out[f] as string, map);
+  if (out.op === 'node.insert') {
+    const walk = (n: { id?: string; children?: unknown[] }) => {
+      if (n.id) n.id = renameId(n.id, map);
+      for (const c of n.children ?? []) walk(c as typeof n);
+    };
+    walk(out.node as { id?: string });
   }
-  if (Array.isArray(value)) return value.map((v) => substitute(v, map));
-  if (isPlainObject(value)) {
-    return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, substitute(v, map)]));
-  }
-  return value;
+  return out as Op;
 }
 
 export class Store {
@@ -493,7 +487,10 @@ export class Store {
     const run = this.run(input);
     if (!run.ok) return run.result;
     const actor = input.actor ?? LOCAL_USER;
-    if (!input.dryRun) stampChanges(run.draft, actor, this.current.revision + 1);
+    if (!input.dryRun) {
+      stampChanges(run.draft, actor, this.current.revision + 1);
+      stampTokens(run.draft, actor, this.current.revision + 1);
+    }
     return this.commit(run.draft, actor, {
       kind: 'edit',
       warnings: run.ctx.warnings,
@@ -546,7 +543,12 @@ export class Store {
     if (issues.length) return failed(issues);
     if (!ops.length) return failed([{ code: 'invalid_op', message: 'No ops given.' }]);
     const policy = this.policy;
-    if (!options.approvedBy && !options.propose && policy.requiresReview?.(actor)) {
+    if (
+      !options.approvedBy &&
+      !options.propose &&
+      !input.dryRun &&
+      policy.requiresReview?.(actor)
+    ) {
       return failed([
         {
           code: 'review_required',
@@ -568,11 +570,12 @@ export class Store {
     };
     const createdBy: { nodes: string[]; pages: string[]; symbols: string[] }[] = [];
     const renamed = new Map<string, string>();
+    const synced = new Set<string>();
     for (let [i, op] of ops.entries()) {
       ctx.opIndex = i;
       let pinned: Pinned | undefined;
       if (options.rebase) {
-        if (renamed.size) op = substitute(op, renamed) as Op;
+        if (renamed.size) op = substitute(op, renamed);
         pinned = unpinTaken(op, draft);
         op = pinned.op;
         ops[i] = op;
@@ -595,6 +598,9 @@ export class Store {
             }
           : undefined;
       applyOp(ctx, op);
+      if (ctx.issues.length) return failed(ctx.issues, i);
+      // Keep instances in step after every op, so later ops can address the copies.
+      for (const id of syncInstances(ctx)) synced.add(id);
       if (ctx.issues.length) return failed(ctx.issues, i);
       if (before) {
         const made = {
@@ -625,36 +631,64 @@ export class Store {
       }
     }
 
-    const protection =
-      policy.protectHumanEdits?.(actor) ?? (actor.kind === 'agent' ? 'warn' : 'off');
-    if (protection !== 'off') {
-      const conflicts = humanEditConflicts(draft);
-      if (conflicts.length) {
-        const shown = conflicts.slice(0, 5);
-        const more = conflicts.length - shown.length;
-        const asIssues: Issue[] = shown.map((c) => ({ ...c, code: 'human_edit' }));
-        if (more) {
-          asIssues.push({
-            code: 'human_edit',
-            message: `…and ${more} more people-edited node(s): ${listPreview(conflicts.slice(5).map((c) => c.nodeId ?? ''))}.`,
-          });
+    // Instance changes made by sync weren't named by any op: check them against locks too.
+    if (synced.size) {
+      const changes = draft.changes().filter((c) => c.kind === 'node' && synced.has(c.id));
+      for (const who of [actor, ...(options.approvedBy ? [options.approvedBy] : [])]) {
+        const denied = policy.checkChanges?.({
+          actor: who,
+          changes,
+          view: draft,
+          registry: this.registry,
+        });
+        if (denied) {
+          return failed([
+            {
+              ...denied,
+              message: `${denied.message} (an instance of a linked component would change)`,
+            },
+          ]);
         }
-        const block =
-          protection === 'confirm' && !input.overwrite && !options.approvedBy && !options.propose;
-        if (block) {
-          const last = asIssues.at(-1)!;
-          last.hint =
-            'People edited these last. Only change them if the person asked: pass overwrite: true, or propose the change for review.';
-          return failed(asIssues);
-        }
-        ctx.warnings.push(...asIssues);
       }
     }
+    const protectedEdits = this.protect(draft, actor, {
+      allow: !!input.overwrite || !!options.approvedBy || !!options.propose,
+    });
+    if (protectedEdits.blocked) return failed(protectedEdits.issues);
+    ctx.warnings.push(...protectedEdits.issues);
+    return { ok: true, draft, ctx, ops, createdBy, renamed };
+  }
 
-    ctx.opIndex = ops.length - 1;
-    syncInstances(ctx);
-    if (ctx.issues.length) return failed(ctx.issues);
-    return { ok: true, draft, ctx, ops, createdBy };
+  /**
+   * Checks a draft for agent changes to what people edited last (including instance changes
+   * from sync and nodes an undo would delete). Returns warnings, or a blocking error with
+   * `protectHumanEdits: 'confirm'` unless `allow` (the person asked, or approved it).
+   */
+  private protect(
+    draft: Draft,
+    actor: Actor,
+    options: { allow: boolean },
+  ): { blocked: boolean; issues: Issue[] } {
+    const mode =
+      this.policy.protectHumanEdits?.(actor) ?? (actor.kind === 'agent' ? 'warn' : 'off');
+    if (mode === 'off') return { blocked: false, issues: [] };
+    const conflicts = [...humanEditConflicts(draft), ...humanTokenConflicts(draft)];
+    if (!conflicts.length) return { blocked: false, issues: [] };
+    const shown = conflicts.slice(0, 5);
+    const more = conflicts.length - shown.length;
+    const issues: Issue[] = shown.map((c) => ({ ...c, code: 'human_edit' }));
+    if (more) {
+      issues.push({
+        code: 'human_edit',
+        message: `…and ${more} more people-edited item(s): ${listPreview(conflicts.slice(5).map((c) => c.nodeId ?? c.path ?? ''))}.`,
+      });
+    }
+    const blocked = mode === 'confirm' && !options.allow;
+    if (blocked) {
+      issues.at(-1)!.hint =
+        'People edited these last. Only change them if the person asked: pass overwrite: true, or propose the change for review.';
+    }
+    return { blocked, issues };
   }
 
   // -------------------------------------------------------------------------------------------
@@ -710,10 +744,13 @@ export class Store {
     const ops = run.ops.map((op, i) => pinIds(op, run.createdBy[i]!));
     const createdSets = run.createdBy.map((c) => new Set([...c.nodes, ...c.pages, ...c.symbols]));
     const needs = ops.map((op, j) => {
-      const refs = stringsIn(op);
+      const refs = idRefs(op);
       const out: number[] = [];
       for (let i = 0; i < j; i++) {
-        if ([...createdSets[i]!].some((id) => refs.has(id))) out.push(i);
+        const made = createdSets[i]!;
+        // A reference to a created id, or to something nested under one, is a dependency.
+        if ([...refs].some((r) => made.has(r) || [...made].some((m) => r.startsWith(`${m}/`))))
+          out.push(i);
       }
       return out;
     });
@@ -804,7 +841,17 @@ export class Store {
       }
     }
     if (!selected.length)
-      errors.push({ code: 'invalid_op', message: `Changeset ${id} has no open ops.` });
+      errors.push({
+        code: 'invalid_op',
+        message: options.ops ? 'No ops were selected.' : `Changeset ${id} has no open ops.`,
+      });
+    if (options.by.id === cs.actor.id || this.policy.requiresReview?.(options.by)) {
+      errors.push({
+        code: 'review_required',
+        message: `${options.by.kind} "${options.by.id}" can't approve ${options.by.id === cs.actor.id ? 'its own' : 'these'} changes.`,
+        hint: 'A person who isn’t under review has to accept them.',
+      });
+    }
     if (errors.length) return { ok: false, revision, errors };
     const input: TransactionInput = {
       ops: selected.map((i) => cs.ops[i]),
@@ -826,6 +873,7 @@ export class Store {
       };
     }
     stampChanges(run.draft, cs.actor, revision + 1);
+    stampTokens(run.draft, cs.actor, revision + 1);
     const result = this.commit(run.draft, cs.actor, {
       kind: 'edit',
       warnings: run.ctx.warnings,
@@ -835,6 +883,12 @@ export class Store {
     });
     if (result.ok) {
       for (const i of selected) cs.status[i] = 'accepted';
+      // Later ops refer to ids as proposed; keep them pointing at what was actually created.
+      if (run.renamed.size) {
+        cs.ops = cs.ops.map((op, i) =>
+          cs.status[i] === 'open' ? substitute(op, run.renamed) : op,
+        );
+      }
       this.emitChangesets();
     }
     return result;
@@ -863,12 +917,16 @@ export class Store {
 
   /** Undoes the most recent edit (by `actorId`, if given) that hasn't been undone. */
   undo(options: { actorId?: string; actor?: Actor } = {}): ApplyResult {
+    const gate = options.actor && this.reviewGate(options.actor);
+    if (gate) return gate;
     const who = options.actorId;
     for (let i = this.entries.length - 1; i >= 0; i--) {
       const e = this.entries[i]!;
       if (who && e.actor.id !== who && e.approvedBy?.id !== who) continue;
       if (e.kind === 'undo' || e.undone) continue;
-      return this.revertEntry(e, options.actor ?? e.actor, 'undo');
+      // Undoing an accepted changeset by its approver's id: the approver is the one undoing.
+      const actor = options.actor ?? (who && e.approvedBy?.id === who ? e.approvedBy : e.actor);
+      return this.reviewGate(actor) ?? this.revertEntry(e, actor, 'undo');
     }
     return this.nothing(
       who ? `There is nothing to undo for "${who}".` : 'There is nothing to undo.',
@@ -877,13 +935,17 @@ export class Store {
 
   /** Redoes the most recent undo (by `actorId`, if given), unless that actor has edited since. */
   redo(options: { actorId?: string; actor?: Actor } = {}): ApplyResult {
+    const gate = options.actor && this.reviewGate(options.actor);
+    if (gate) return gate;
     const who = options.actorId;
     for (let i = this.entries.length - 1; i >= 0; i--) {
       const e = this.entries[i]!;
       if (who && e.actor.id !== who) continue;
       if (e.kind === 'edit') break;
-      if (e.kind === 'undo' && !e.redone)
-        return this.revertEntry(e, options.actor ?? e.actor, 'redo');
+      if (e.kind === 'undo' && !e.redone) {
+        const actor = options.actor ?? e.actor;
+        return this.reviewGate(actor) ?? this.revertEntry(e, actor, 'redo');
+      }
     }
     return this.nothing(
       who ? `There is nothing to redo for "${who}".` : 'There is nothing to redo.',
@@ -895,7 +957,23 @@ export class Store {
     const entry = this.entries.find((e) => e.txId === txId);
     if (!entry) return this.nothing(`No transaction "${txId}" in history.`);
     if (entry.undone) return this.nothing(`"${txId}" has already been undone.`);
-    return this.revertEntry(entry, actor, 'undo');
+    return this.reviewGate(actor) ?? this.revertEntry(entry, actor, 'undo');
+  }
+
+  /** Actors whose changes need review can't undo or redo directly either. */
+  private reviewGate(actor: Actor): ApplyResult | undefined {
+    if (!this.policy.requiresReview?.(actor)) return undefined;
+    return {
+      ok: false,
+      revision: this.current.revision,
+      errors: [
+        {
+          code: 'review_required',
+          message: `Changes by ${actor.kind} "${actor.id}" need review, so it can't undo or redo directly.`,
+          hint: 'Propose the change that reverses it instead, or ask a person to undo it.',
+        },
+      ],
+    };
   }
 
   private nothing(message: string): ApplyResult {
@@ -1047,6 +1125,21 @@ export class Store {
         });
       }
     }
+    // Links to symbols or definition nodes that no longer exist become ordinary nodes, and
+    // reverted definition changes reach every instance (including ones added later).
+    unlinkDangling(draft);
+    const sync: OpContext = {
+      draft,
+      registry: this.registry,
+      actor,
+      policy: this.policy,
+      opIndex: 0,
+      issues: [],
+      warnings,
+    };
+    syncInstances(sync);
+    if (sync.issues.length)
+      return { ok: false, revision: this.current.revision, errors: sync.issues };
     const integrity: Issue[] = [];
     for (const id of draft.nodeIds()) {
       const n = draft.node(id)!;
@@ -1073,6 +1166,11 @@ export class Store {
       registry: this.registry,
     });
     if (denied) return { ok: false, revision: this.current.revision, errors: [denied] };
+    // Undoing can delete what people added or changed since (e.g. text inside a created section).
+    const protectedEdits = this.protect(draft, actor, { allow: false });
+    if (protectedEdits.blocked)
+      return { ok: false, revision: this.current.revision, errors: protectedEdits.issues };
+    warnings.push(...protectedEdits.issues);
 
     const result = this.commit(draft, actor, {
       kind,
@@ -1164,7 +1262,11 @@ export function isSiteDoc(value: unknown): value is SiteDoc {
     isPlainObject(value.tokens) &&
     isPlainObject(value.themes) &&
     Array.isArray(value.breakpoints) &&
-    (value.symbols === undefined || isPlainObject(value.symbols))
+    (value.symbols === undefined || isPlainObject(value.symbols)) &&
+    // Paths end up in links and file names; ops validate them, so stored ones must be valid too.
+    Object.values(value.pages).every(
+      (p) => isPlainObject(p) && typeof p.path === 'string' && isValidPagePath(p.path),
+    )
   );
 }
 

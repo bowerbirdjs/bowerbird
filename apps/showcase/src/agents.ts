@@ -204,9 +204,17 @@ export const demoAgent: AgentRunner = {
   actor: { kind: 'agent', id: 'demo-agent', name: 'Demo agent' },
   async send(prompt, store, onLine, signal, preview) {
     const tools = toolsFor(store, this.actor);
+    let proposed = false;
     for (const step of scriptFor(prompt, store)) {
       await sleep(550, signal);
-      if (step.say) onLine({ kind: 'agent', text: step.say });
+      if (step.say) {
+        // After proposing, the change isn't done: it waits for the person.
+        const text =
+          proposed && /^(Done|Added)/.test(step.say)
+            ? 'I’ve proposed this for your review: accept or reject it in the Review tab.'
+            : step.say;
+        onLine({ kind: 'agent', text });
+      }
       // Stream the ops onto the canvas one by one, as a real model would write them.
       const ops = step.tool === 'apply' ? opsFromPartialInput(step.input) : [];
       if (preview && ops.length > 1) {
@@ -232,6 +240,7 @@ export const demoAgent: AgentRunner = {
           });
           return;
         }
+        if (/^Proposed cs-/.test(result.text)) proposed = true;
         onLine({ kind: 'tool', text: `${step.tool}: ${firstLine(result.text)}` });
       }
     }
@@ -261,7 +270,11 @@ export const claudeAgent: AgentRunner = {
     });
     const tools: AgentTool[] = toolsFor(store, this.actor);
     const actor = this.actor;
-    const definitions = toolDefinitions(tools) as Anthropic.Beta.BetaTool[];
+    // Stream apply's input as it is written (not buffered per parameter), so the canvas can
+    // preview the ops while Claude is still writing them.
+    const definitions = toolDefinitions(tools).map((d) =>
+      d.name === 'apply' ? { ...d, eager_input_streaming: true } : d,
+    ) as Anthropic.Beta.BetaTool[];
     const messages = conversations.get(store) ?? [];
     conversations.set(store, messages);
     // If this send is stopped or fails, the conversation goes back to where it was, so a

@@ -4,6 +4,7 @@ import {
   copySubtree,
   fail,
   guardInstance,
+  idTaken,
   MAX_DEPTH,
   type OpContext,
   type OpOf,
@@ -22,6 +23,7 @@ import {
   descendants,
   instanceRootOf,
   isInstanceRoot,
+  isLinked,
   isScopeOwner,
   subtreeHeight,
 } from './doc.js';
@@ -110,16 +112,16 @@ export function symbolCreate(ctx: OpContext, op: OpOf<'symbol.create'>) {
       message: `"${node.id}" is part of the definition of symbol "${def.id}".`,
     });
   }
-  if (node.link) {
+  if (isLinked(draft, node)) {
     const root = instanceRootOf(draft, node.id);
     return fail(ctx, {
       code: 'instance',
       nodeId: node.id,
-      message: `"${node.id}" is already ${root?.id === node.id ? 'an instance' : 'inside an instance'} of symbol "${node.link.symbol}".`,
+      message: `"${node.id}" is already ${root?.id === node.id ? 'an instance' : 'inside an instance'} of symbol "${node.link!.symbol}".`,
       hint: `Run symbol.detach on "${root?.id ?? node.id}" first to make a separate symbol.`,
     });
   }
-  const nested = descendants(draft, node.id).find((d) => d.link);
+  const nested = descendants(draft, node.id).find((d) => isLinked(draft, d));
   if (nested) {
     return fail(ctx, {
       code: 'instance',
@@ -146,8 +148,10 @@ export function symbolCreate(ctx: OpContext, op: OpOf<'symbol.create'>) {
     const base = id;
     for (let n = 2; draft.symbol(id); n++) id = `${base}-${n}`;
   }
+  // Definition roots are never reused, even after a symbol is removed (undo could bring it back).
   let rootId = `symbol-${id}`;
-  if (draft.has(rootId)) rootId = allocateCopyId(ctx, rootId);
+  if (draft.has(rootId) || draft.counter(rootId) > 0) rootId = allocateId(ctx, rootId);
+  else draft.useCounter(rootId, 1);
   const idMap = copySubtree(ctx, node, {
     parent: null,
     order: keyBetween(undefined, undefined),
@@ -199,11 +203,11 @@ export function symbolInsert(ctx: OpContext, op: OpOf<'symbol.insert'>) {
       message: `"${parent.id}" is part of a symbol definition; symbols can't contain other symbols yet.`,
     });
   }
-  if (parent.link) {
+  if (isLinked(draft, parent)) {
     return fail(ctx, {
       code: 'instance',
       nodeId: parent.id,
-      message: `"${parent.id}" is part of an instance of symbol "${parent.link.symbol}"; nodes can't be added inside instances.`,
+      message: `"${parent.id}" is part of an instance of symbol "${parent.link!.symbol}"; nodes can't be added inside instances.`,
     });
   }
   if (!registry.accepts(parent.type, defRoot.type)) {
@@ -220,12 +224,12 @@ export function symbolInsert(ctx: OpContext, op: OpOf<'symbol.insert'>) {
       message: `An instance there would nest nodes more than ${MAX_DEPTH} levels deep.`,
     });
   }
-  if (op.id && (draft.has(op.id) || !isValidId(op.id))) {
+  if (op.id && (idTaken(draft, op.id) || !isValidId(op.id))) {
     return fail(ctx, {
-      code: draft.has(op.id) ? 'duplicate_id' : 'invalid_id',
+      code: idTaken(draft, op.id) ? 'duplicate_id' : 'invalid_id',
       nodeId: op.id,
-      message: draft.has(op.id)
-        ? `A node "${op.id}" already exists.`
+      message: idTaken(draft, op.id)
+        ? `The id "${op.id}" is in use or was used before.`
         : `"${op.id}" is not a valid id.`,
     });
   }
@@ -241,7 +245,10 @@ export function symbolInsert(ctx: OpContext, op: OpOf<'symbol.insert'>) {
   });
   for (const [defId, instanceId] of idMap) remember(ctx, instanceId, defId);
   for (const [path, patch] of Object.entries(op.content ?? {})) {
-    const target = draft.node(path === '' ? rootId : `${rootId}/${path}`);
+    // Parts are named by their place in the definition, and resolved through this copy only.
+    const defTarget = path === '' ? defRoot.id : `${defRoot.id}/${path}`;
+    const mapped = idMap.get(defTarget);
+    const target = mapped ? draft.node(mapped) : undefined;
     if (!target) {
       const parts = descendants(draft, rootId)
         .filter((n) => n.id.startsWith(`${rootId}/`))
@@ -427,35 +434,79 @@ function scopeOwner(view: DocView, id: NodeId): BNode | undefined {
 /**
  * Copies definition changes made in this transaction to every instance: created definition nodes
  * are added to each instance, removed ones are removed, moved ones are moved, and changed fields
- * follow unless the instance overrides them. Runs once per transaction, after all ops.
+ * follow unless the instance overrides them. Runs after every op, so later ops in the same
+ * transaction can address the copies; `ctx.linkBase` remembers what each instance last saw, so
+ * running it again is harmless. Returns the instance nodes it created, changed or removed.
  */
-export function syncInstances(ctx: OpContext): void {
+export function syncInstances(ctx: OpContext): string[] {
   const { draft } = ctx;
   const changes = draft.changes().filter((c) => c.kind === 'node');
   let baseView: DocIndex | undefined;
-  const inDefinition = (c: (typeof changes)[number]) =>
-    c.after
-      ? !!definitionOf(draft, c.id)
-      : !!c.before && !!definitionOf((baseView ??= new DocIndex(draft.base)), c.id);
+  const inDefinition = (c: (typeof changes)[number]) => {
+    if (c.after) return !!definitionOf(draft, c.id);
+    if (!c.before) return false;
+    baseView ??= new DocIndex(draft.base);
+    return !!definitionOf(baseView, c.id);
+  };
   const defChanges = changes.filter(inDefinition);
-  if (!defChanges.length) return;
+  if (!defChanges.length) return [];
+  const touched = new Set<string>();
+  ctx.linkBase ??= new Map();
+  const linkBase = ctx.linkBase;
 
-  // Definition node id → instance nodes linked to it.
+  // Instance root of a linked node (memoized up the tree), and an index from (instance root,
+  // definition node) to the instance node that mirrors it, so lookups stay linear.
+  const rootMemo = new Map<string, string | null>();
+  const instanceRootIdOf = (n: BNode): string | null => {
+    const path: string[] = [];
+    let result: string | null = null;
+    for (
+      let cur: BNode | undefined = n;
+      cur;
+      cur = cur.parent ? draft.node(cur.parent) : undefined
+    ) {
+      const memo = rootMemo.get(cur.id);
+      if (memo !== undefined) {
+        result = memo;
+        break;
+      }
+      path.push(cur.id);
+      if (isInstanceRoot(draft, cur)) {
+        result = cur.id;
+        break;
+      }
+    }
+    for (const id of path) rootMemo.set(id, result);
+    return result;
+  };
   const linked = new Map<NodeId, BNode[]>();
+  const byRoot = new Map<string, BNode>();
+  const index = (n: BNode) => {
+    const list = linked.get(n.link!.node);
+    if (list) list.push(n);
+    else linked.set(n.link!.node, [n]);
+    const root = instanceRootIdOf(n);
+    if (root) byRoot.set(`${root}\u0000${n.link!.node}`, n);
+  };
   for (const id of draft.nodeIds()) {
     const n = draft.node(id)!;
-    if (!n.link) continue;
-    const list = linked.get(n.link.node);
-    if (list) list.push(n);
-    else linked.set(n.link.node, [n]);
+    if (n.link) index(n);
   }
-  const instanceRootFor = (n: BNode) => instanceRootOf(draft, n.id);
   /** The node in the same instance as `member` that mirrors definition node `defId`. */
   const counterpart = (member: BNode, defId: NodeId): BNode | undefined => {
-    const root = instanceRootFor(member);
-    return (linked.get(defId) ?? []).find(
-      (c) => draft.has(c.id) && instanceRootFor(draft.node(c.id)!)?.id === root?.id,
-    );
+    const root = instanceRootIdOf(member);
+    const found = root ? byRoot.get(`${root}\u0000${defId}`) : undefined;
+    return found && draft.has(found.id) ? draft.node(found.id) : undefined;
+  };
+  const tooDeep = (parentId: NodeId, height: number) => {
+    if (depthOf(draft, parentId) + 1 + height <= MAX_DEPTH) return false;
+    fail(ctx, {
+      code: 'invalid_parent',
+      nodeId: parentId,
+      message: `This would nest nodes of an instance ("${instanceRootOf(draft, parentId)?.id ?? parentId}") more than ${MAX_DEPTH} levels deep.`,
+      hint: 'Keep the definition shallower, or move that instance higher up its page.',
+    });
+    return true;
   };
 
   // 1. Created definition nodes, parents first.
@@ -468,6 +519,7 @@ export function syncInstances(ctx: OpContext): void {
     for (const instParent of [...(linked.get(d.parent) ?? [])]) {
       if (!draft.has(instParent.id)) continue;
       if (draft.children(instParent.id).some((c) => c.link?.node === d.id)) continue;
+      if (tooDeep(instParent.id, 0)) return [...touched];
       let id: string | undefined;
       if (d.section) id = allocateId(ctx, d.section.name);
       else {
@@ -487,22 +539,23 @@ export function syncInstances(ctx: OpContext): void {
         link: { symbol: instParent.link!.symbol, node: d.id },
       };
       draft.setNode(copy);
-      const list = linked.get(d.id);
-      if (list) list.push(copy);
-      else linked.set(d.id, [copy]);
+      index(copy);
+      linkBase.set(copy.id, clone(d));
+      touched.add(copy.id);
     }
   }
 
   // 2. Changed definition nodes: fields follow, positions mirror. The merge base is the
-  // definition as the instance last saw it: the start of the transaction, or the moment the
-  // instance was linked if that happened in this transaction.
+  // definition as the instance last saw it (the start of the transaction, when it was linked,
+  // or the previous sync in this transaction).
   for (const c of defChanges) {
     if (!c.after) continue;
     const after = draft.node(c.id)!;
     for (const inst of linked.get(c.id) ?? []) {
       const current = draft.node(inst.id);
       if (!current) continue;
-      const before = ctx.linkBase?.get(inst.id) ?? c.before;
+      const before = linkBase.get(inst.id) ?? c.before;
+      linkBase.set(inst.id, clone(after));
       if (!before) continue;
       let next = followNode(current, before, after);
       if (
@@ -510,9 +563,16 @@ export function syncInstances(ctx: OpContext): void {
         (before.parent !== after.parent || before.order !== after.order)
       ) {
         const parent = counterpart(current, after.parent);
-        if (parent) next = { ...next, parent: parent.id, order: after.order };
+        if (parent) {
+          if (parent.id !== current.parent && tooDeep(parent.id, subtreeHeight(draft, current.id)))
+            return [...touched];
+          next = { ...next, parent: parent.id, order: after.order };
+        }
       }
-      if (!deepEqual(next, current)) draft.setNode(next);
+      if (!deepEqual(next, current)) {
+        draft.setNode(next);
+        touched.add(inst.id);
+      }
     }
   }
 
@@ -525,9 +585,11 @@ export function syncInstances(ctx: OpContext): void {
       for (const d of descendants(draft, inst.id)) {
         retireId(ctx, d.id);
         draft.deleteNode(d.id);
+        touched.add(d.id);
       }
       retireId(ctx, inst.id);
       draft.deleteNode(inst.id);
+      touched.add(inst.id);
       removedFrom.push(inst.id);
     }
   }
@@ -537,4 +599,23 @@ export function syncInstances(ctx: OpContext): void {
       message: `Removed from instances too: ${listPreview(removedFrom)}.`,
     });
   }
+  return [...touched];
+}
+
+/**
+ * Drops links that point at a symbol or definition node that no longer exists (after undoing a
+ * symbol, or in documents loaded from elsewhere), so those nodes become ordinary nodes again.
+ */
+export function unlinkDangling(draft: OpContext['draft']): string[] {
+  const out: string[] = [];
+  for (const id of draft.nodeIds()) {
+    const n = draft.node(id)!;
+    if (!n.link) continue;
+    if (draft.symbol(n.link.symbol) && draft.node(n.link.node)) continue;
+    const copy = { ...n };
+    delete copy.link;
+    draft.setNode(copy);
+    out.push(id);
+  }
+  return out;
 }

@@ -3,6 +3,7 @@ import type { Change } from './draft.js';
 import type { Issue } from './errors.js';
 import type { Op } from './ops.js';
 import { type NodeInput, type Registry, resolveVariant, templateParts } from './registry.js';
+import { instancesOf } from './symbols.js';
 import type { Actor } from './types.js';
 
 /**
@@ -118,6 +119,8 @@ export function requiredLevel(op: Op, view: DocView, registry: Registry): Freedo
     case 'token.set':
     case 'symbol.create':
     case 'symbol.remove':
+    // Resetting overrides can drop an instance's styles and variables.
+    case 'symbol.reset':
       return 'design';
     case 'symbol.insert': {
       const def = view.symbol(op.symbol);
@@ -175,7 +178,10 @@ function touched(op: Op, view: DocView): { nodes: string[]; subtrees: string[] }
     }
     case 'symbol.remove': {
       const def = view.symbol(op.symbol);
-      return { nodes: [], subtrees: def ? [def.rootId] : [] };
+      if (!def) return { nodes: [], subtrees: [] };
+      // The definition and every instance change (unlinked or removed).
+      const roots = [def.rootId, ...instancesOf(view, def.id).map((n) => n.id)];
+      return { nodes: roots, subtrees: roots };
     }
     default:
       return { nodes: [], subtrees: [] };
@@ -201,8 +207,8 @@ export function requiredLevelForChanges(changes: Change[], registry: Registry): 
       const a = c.after;
       if (b.parent !== a.parent || b.order !== a.order || b.type !== a.type) raise('layout');
       if (
-        JSON.stringify([b.section, b.part, b.key, b.name]) !==
-        JSON.stringify([a.section, a.part, a.key, a.name])
+        JSON.stringify([b.section, b.part, b.key, b.name, b.link, b.symbol]) !==
+        JSON.stringify([a.section, a.part, a.key, a.name, a.link, a.symbol])
       )
         raise('layout');
       if (

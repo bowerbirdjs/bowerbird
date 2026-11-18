@@ -99,4 +99,26 @@ describe('lintLayout', () => {
       ].join('\n'),
     );
   });
+
+  it('ignores overflow inside scrollers, and reports content pushed off the left edge', () => {
+    const s = snap([
+      box('root', null, 0, 0, 390, 800),
+      box('row', 'root', 0, 0, 390, 100),
+      box('row/card', 'row', 300, 0, 300, 100, { contained: true }),
+      box('shifted', 'root', -120, 200, 300, 100),
+    ]);
+    expect(rules(s)).toEqual(['horizontal-overflow shifted']);
+  });
+
+  it('inline links in a sentence are exempt from tap-target size and overlap checks', () => {
+    const s = snap([
+      box('root', null, 0, 0, 390, 800),
+      box('p', 'root', 0, 0, 200, 60, {
+        text: { chars: 40, fontSize: 16, lineHeight: 20, lines: 3, bold: false },
+      }),
+      box('p/a1', 'p', 0, 4, 182, 43, { tag: 'a', interactive: true, inline: true }),
+      box('p/a2', 'p', 40, 24, 60, 18, { tag: 'a', interactive: true, inline: true }),
+    ]);
+    expect(rules(s)).toEqual([]);
+  });
 });

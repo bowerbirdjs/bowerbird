@@ -25,6 +25,7 @@ export class Draft implements DocView {
   private readonly childIndex: Map<NodeId, Set<NodeId>>;
   private tokenTree: TokenTree;
   private themeMap: SiteDoc['themes'];
+  private tokenStampMap: SiteDoc['tokenEdits'];
   /** Bumped whenever tokens or nodes change, so callers can invalidate caches. */
   version = 0;
 
@@ -32,6 +33,16 @@ export class Draft implements DocView {
     this.childIndex = buildChildIndex(Object.values(base.nodes));
     this.tokenTree = base.tokens;
     this.themeMap = base.themes;
+    this.tokenStampMap = base.tokenEdits;
+  }
+
+  /** Provenance of tokens and theme values (not part of undo). */
+  tokenStamps(): SiteDoc['tokenEdits'] {
+    return this.tokenStampMap;
+  }
+
+  setTokenStamps(stamps: SiteDoc['tokenEdits']): void {
+    this.tokenStampMap = stamps;
   }
 
   node(id: NodeId): BNode | undefined {
@@ -189,6 +200,7 @@ export class Draft implements DocView {
       tokens: this.tokenTree,
       themes: this.themeMap,
     };
+    if (this.tokenStampMap) next.tokenEdits = this.tokenStampMap;
     if (this.symbolOverlay.size) {
       const symbols = { ...(this.base.symbols ?? {}) };
       for (const [id, sym] of this.symbolOverlay) {

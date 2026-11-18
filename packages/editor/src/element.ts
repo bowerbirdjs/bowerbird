@@ -817,7 +817,6 @@ export class BowerbirdEditor extends LitElement {
       }
       ${sections.length ? this.renderSectionList(c, sections, !!target) : nothing}
       <div class="section"><h3>Elements</h3><p class="muted">Added inside the selected container.</p></div>
-PLACEHOLDER_SECTIONS
       <div class="elements">
         ${ELEMENTS.map(
           ([label, input]) => html`<button
@@ -1015,7 +1014,7 @@ PLACEHOLDER_SECTIONS
         this.reviewSelection.set(cs.id, chosen);
       }
       const selected = openOps.filter((i) => chosen!.has(i));
-      const previewing = c.ghost?.label.startsWith(`Preview of ${cs.label ?? cs.id}`);
+      const previewing = c.ghost?.changeset === cs.id;
       return html`<div class="section changeset">
         <div class="head">
           <strong>${cs.label ?? cs.id}</strong>
