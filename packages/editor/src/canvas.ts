@@ -63,15 +63,6 @@ export const CANVAS_CSS = `
 .bbx-host .bbx-mark.bbx-updated { outline: 2px dashed #d97706; background: rgb(217 119 6 / .06); }
 `;
 
-/** The feature each toolbar action needs (`parent` only needs the toolbar). */
-const TOOLBAR_FEATURE = {
-  drag: 'move',
-  up: 'move',
-  down: 'move',
-  duplicate: 'duplicate',
-  delete: 'delete',
-} as const;
-
 const TOOLBAR: [action: string, label: string, glyph: string][] = [
   ['drag', 'Drag to move', '⠿'],
   ['parent', 'Select parent', '↰'],
@@ -485,12 +476,19 @@ export class CanvasView {
     const rect = selEl?.getBoundingClientRect() ?? null;
     this.place(this.selectBox, rect);
     // What the host turned off disappears from the selection's label and toolbar.
+    // Only what the feature settings and the policy allow for this node.
+    const allowed = c.selectionActions();
+    const shown: Record<string, boolean> = {
+      drag: allowed.up || allowed.down,
+      parent: true,
+      up: allowed.up,
+      down: allowed.down,
+      duplicate: allowed.duplicate,
+      delete: allowed.delete,
+    };
     let actions = 0;
-    const restructure = c.canRestructure(c.selected);
     for (const b of this.toolbar.querySelectorAll<HTMLElement>('button')) {
-      const needs = TOOLBAR_FEATURE[b.dataset.action as keyof typeof TOOLBAR_FEATURE];
-      // Instance parts follow their definition: moving or removing them always fails.
-      b.hidden = !!needs && (!c.can(needs) || !restructure);
+      b.hidden = !shown[b.dataset.action ?? ''];
       if (!b.hidden && b.dataset.action !== 'parent') actions++;
     }
     const showToolbar = c.can('canvas.toolbar') && actions > 0;
@@ -548,8 +546,14 @@ export class CanvasView {
         if (this.editing && (e.target as Element).closest('[contenteditable]')) return;
         e.preventDefault();
         if (c.readOnly) return;
-        c.select(this.idAt(e.target));
+        const id = this.idAt(e.target);
+        c.select(id);
         this.frame.focus({ preventScroll: true });
+        // Text shown from site data (e.g. a schedule item): the host can open where it's edited.
+        const path = (e.target as Element)
+          .closest?.('[data-bb-data]')
+          ?.getAttribute('data-bb-data');
+        if (path) c.openData(path, id);
       },
       true,
     );

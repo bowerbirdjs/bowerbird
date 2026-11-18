@@ -62,6 +62,8 @@ export interface BowerbirdEditorProps {
   onError?: (detail: { errors: Issue[]; label?: string }) => void;
   /** Proposed changes waiting for review changed (proposed, accepted or rejected). */
   onChangesets?: (detail: { changesets: readonly Changeset[] }) => void;
+  /** Text shown from site data was clicked; `path` is `<group>.<path>`, e.g. `schedule.0.time`. */
+  onDataClick?: (detail: { path: string; node: string | null }) => void;
 }
 
 const EVENTS = {
@@ -71,6 +73,7 @@ const EVENTS = {
   'bb-page': 'onPageChange',
   'bb-error': 'onError',
   'bb-changesets': 'onChangesets',
+  'bb-data-click': 'onDataClick',
 } as const;
 
 // Layout effects run after the element is inserted but before its first (microtask) update, so it

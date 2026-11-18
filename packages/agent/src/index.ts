@@ -574,6 +574,17 @@ export function createAgentTools(options: AgentToolsOptions): AgentTool[] {
             .join(', ')}`,
           `Tokens: ${[...families].map(([f, n]) => `${f} (${n})`).join(', ')} (list_tokens to see them)`,
           `Themes: ${Object.keys(doc.themes).join(', ') || 'none'}`,
+          ...(store.registry.listData().length
+            ? [
+                `Site data (sections show it; change it with data.set, read it with get_data): ${store.registry
+                  .listData()
+                  .map(
+                    (d) =>
+                      `${d.key} (${d.title}${store.view.data(d.key) === undefined ? ', empty' : ''})`,
+                  )
+                  .join(', ')}`,
+              ]
+            : []),
           ...(doc.locales
             ? [
                 `Languages: ${doc.locales.default} (default, in props), ${doc.locales.others.join(', ')}. Translate content with props.set/text.edit plus "locale"; get_outline with locale shows what is untranslated.`,
@@ -609,6 +620,33 @@ export function createAgentTools(options: AgentToolsOptions): AgentTool[] {
           AGENT_GUIDE,
         ];
         return { text: lines.join('\n') };
+      },
+    }),
+    tool({
+      name: 'get_data',
+      title: 'Get site data',
+      description:
+        'Site data groups (e.g. an event’s schedule or venues) as JSON, with what each holds. Sections show this data; change it with data.set.',
+      input: z.object({
+        key: z.string().optional().describe('One group; omit for all.'),
+      }),
+      annotations: { readOnlyHint: true },
+      run: (input) => {
+        const defs = store.registry.listData();
+        const chosen = input.key ? defs.filter((d) => d.key === input.key) : defs;
+        if (input.key && !chosen.length)
+          return {
+            text: `No data group "${input.key}". Groups: ${defs.map((d) => d.key).join(', ') || 'none'}.`,
+            isError: true,
+          };
+        return {
+          text: chosen
+            .map(
+              (d) =>
+                `## ${d.key}: ${d.title}\n${d.description}\n${JSON.stringify(store.view.data(d.key) ?? null)}`,
+            )
+            .join('\n\n'),
+        };
       },
     }),
     tool({

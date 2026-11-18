@@ -25,6 +25,8 @@ export interface DocView {
   symbol(id: string): SymbolDef | undefined;
   symbols(): SymbolDef[];
   locales?(): SiteDoc['locales'];
+  /** A site data group (see `SiteDoc.data`). */
+  data?(key: string): unknown;
 }
 
 export const DEFAULT_BREAKPOINTS: Breakpoint[] = [
@@ -88,6 +90,10 @@ export class DocIndex implements DocView {
 
   pages() {
     return Object.values(this.doc.pages);
+  }
+
+  data(key: string): unknown {
+    return own(this.doc.data ?? {}, key);
   }
 
   breakpoints() {

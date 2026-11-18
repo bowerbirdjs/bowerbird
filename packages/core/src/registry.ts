@@ -1,4 +1,5 @@
 import type { z } from 'zod';
+import type { DocView } from './doc.js';
 import { slugify } from './ids.js';
 import { PRIMITIVES } from './primitives.js';
 import type { BNode, NodeStyles, Props } from './types.js';
@@ -12,6 +13,42 @@ export interface ElementSpec {
   html?: string;
   /** Void elements (e.g. `img`) never have children. */
   void?: boolean;
+  /**
+   * Elements generated from data (e.g. one per schedule item), for nodes without children. They
+   * are escaped and sanitized like everything else, but can't be selected or edited on their own.
+   */
+  children?: (ElementSpec | string)[];
+  /**
+   * CSS custom properties for this element (`{ '--swatch': '#a1b2c3' }`), e.g. a colour from site
+   * data. Only colours (`#rgb`…`#rrggbbaa`) and plain numbers or lengths get through.
+   */
+  vars?: Record<string, string>;
+}
+
+/** What a component's `render` can read besides its node. */
+export interface RenderContext {
+  /** A site data group (`SiteDoc.data`), e.g. the event's schedule. */
+  data(key: string): unknown;
+  /** The language being rendered (`undefined`: the default language). */
+  locale?: string;
+  /**
+   * `editor` while editing: elements may carry `data-bb-data="<group>.<path>"` so a click can
+   * open that piece of data. The published output drops those attributes.
+   */
+  mode: 'editor' | 'published';
+  /** The document (for things like a menu built from a page's sections). */
+  view: DocView;
+}
+
+/** A group of site data (e.g. the venues of an event), shared by the sections that show it. */
+export interface DataDef {
+  /** Key in `SiteDoc.data`, e.g. `schedule`. */
+  key: string;
+  title: string;
+  /** For agents and people: what this data is and where it shows. */
+  description: string;
+  /** Every write is validated against it (and stored as parsed). */
+  schema: z.ZodType;
 }
 
 export interface ComponentDef {
@@ -29,9 +66,12 @@ export interface ComponentDef {
   children: boolean | { allow?: string[]; deny?: string[] };
   /** Props editable at the "content" freedom level (copy, links, images). */
   contentProps?: string[];
-  /** `false` hides the component from insertion (e.g. the page root). */
+  /**
+   * `false`: people and agents can't add it with `node.insert` (e.g. the page root, or parts only
+   * section templates use).
+   */
   insertable?: boolean;
-  render?: (node: BNode) => ElementSpec;
+  render?: (node: BNode, ctx: RenderContext) => ElementSpec;
   /** Custom element tag for code components. */
   tag?: string;
 }
@@ -94,6 +134,15 @@ export function defineSection(def: SectionDef): SectionDef {
   return def;
 }
 
+export function defineData(def: DataDef): DataDef {
+  if (!/^[a-z][a-zA-Z0-9-]*$/.test(def.key)) {
+    throw new Error(
+      `Data key "${def.key}" must start with a letter and use letters, digits or "-".`,
+    );
+  }
+  return def;
+}
+
 export function defineComponent(def: ComponentDef): ComponentDef {
   if (def.kind === 'code' && !def.tag?.includes('-')) {
     throw new Error(`Code component "${def.name}" needs a custom element tag containing a hyphen.`);
@@ -104,6 +153,21 @@ export function defineComponent(def: ComponentDef): ComponentDef {
 export class Registry {
   private readonly components = new Map<string, ComponentDef>();
   private readonly sections = new Map<string, SectionDef>();
+  private readonly dataDefs = new Map<string, DataDef>();
+
+  /** Declares a site data group (see `defineData`). */
+  registerData(def: DataDef): this {
+    this.dataDefs.set(def.key, def);
+    return this;
+  }
+
+  dataDef(key: string): DataDef | undefined {
+    return this.dataDefs.get(key);
+  }
+
+  listData(): DataDef[] {
+    return [...this.dataDefs.values()];
+  }
 
   registerComponent(def: ComponentDef): this {
     this.components.set(def.name, def);
@@ -147,6 +211,7 @@ export class Registry {
 export interface RegistryOptions {
   components?: ComponentDef[];
   sections?: SectionDef[];
+  data?: DataDef[];
 }
 
 /** A registry with the built-in primitives plus any given components and sections. */
@@ -155,6 +220,7 @@ export function createRegistry(options: RegistryOptions = {}): Registry {
   for (const def of PRIMITIVES) registry.registerComponent(def);
   for (const def of options.components ?? []) registry.registerComponent(def);
   for (const def of options.sections ?? []) registry.registerSection(def);
+  for (const def of options.data ?? []) registry.registerData(def);
   return registry;
 }
 

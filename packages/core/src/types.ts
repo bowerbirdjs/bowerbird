@@ -117,6 +117,11 @@ export interface SiteDoc {
   /** Languages the site is published in. Absent means one language. */
   locales?: Locales;
   /**
+   * Site data by group (e.g. an event's schedule and venues), shared by every section that shows
+   * it. Groups are declared in the registry (`defineData`) and changed with `data.set`.
+   */
+  data?: Record<string, unknown>;
+  /**
    * Highest number handed out per id prefix (`hero` → 3 means hero-1…hero-3 were used). Ids are
    * never reused, so undo and references can't land on a different node with an old id.
    */

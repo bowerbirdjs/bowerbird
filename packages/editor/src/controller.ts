@@ -28,7 +28,9 @@ export type EditorEvent =
   | { type: 'store' }
   | { type: 'changesets'; changesets: readonly Changeset[] }
   | { type: 'peers'; peers: readonly PeerPresence[] }
-  | { type: 'error'; errors: Issue[]; label?: string };
+  | { type: 'error'; errors: Issue[]; label?: string }
+  /** The person clicked something shown from site data (`path` is `<group>.<path>`). */
+  | { type: 'data'; path: string; node: string | null };
 
 /** Someone else in the document (a person or an agent), e.g. from `@bowerbirdjs/sync`. */
 export interface PeerPresence {
@@ -55,6 +57,14 @@ interface PresenceStore {
 const sharesPresence = (store: unknown): store is PresenceStore =>
   typeof (store as PresenceStore).onPeers === 'function' &&
   typeof (store as PresenceStore).setPresence === 'function';
+
+/** What the person can do with the selected node (see `EditorController.selectionActions`). */
+export interface SelectionActions {
+  delete: boolean;
+  duplicate: boolean;
+  up: boolean;
+  down: boolean;
+}
 
 /** A store that syncs with a server (duck-typed, like presence). */
 interface SyncingStore {
@@ -202,6 +212,50 @@ export class EditorController {
   setUI(ui: EditorUI): void {
     this.ui = ui;
     this.emit({ type: 'view' });
+  }
+
+  /** Tells the host which piece of site data the person clicked on the page. */
+  openData(path: string, node: string | null): void {
+    this.emit({ type: 'data', path, node });
+  }
+
+  private actionCache:
+    | { revision: number; id: string; policy: Store['policy']; actions: SelectionActions }
+    | undefined;
+
+  /**
+   * What the person can do with the selected node right now: the feature is on and the store's
+   * policy allows it (checked with dry runs, so a policy that keeps parts of a section in place
+   * hides their delete and move buttons instead of refusing them afterwards).
+   */
+  selectionActions(): SelectionActions {
+    const node = this.selectedNode;
+    const none = { delete: false, duplicate: false, up: false, down: false };
+    // Cheap checks first: previews, page roots and parts of linked instances.
+    if (!node?.parent || this.readOnly || !this.canRestructure(node.id)) return none;
+    const cache = this.actionCache;
+    const revision = this.store.doc.revision;
+    if (
+      cache &&
+      cache.id === node.id &&
+      cache.revision === revision &&
+      cache.policy === this.store.policy
+    )
+      return cache.actions;
+    const dry = (op: Record<string, unknown>) =>
+      this.store.apply({ ops: [op], actor: this.actor, dryRun: true }).ok;
+    const siblings = this.store.view.children(node.parent);
+    const i = siblings.findIndex((s) => s.id === node.id);
+    const prev = siblings[i - 1];
+    const next = siblings[i + 1];
+    const actions = {
+      delete: this.can('delete') && dry({ op: 'node.remove', id: node.id }),
+      duplicate: this.can('duplicate') && dry({ op: 'node.duplicate', id: node.id }),
+      up: this.can('move') && !!prev && dry({ op: 'node.move', id: node.id, before: prev.id }),
+      down: this.can('move') && !!next && dry({ op: 'node.move', id: node.id, after: next.id }),
+    };
+    this.actionCache = { revision, id: node.id, policy: this.store.policy, actions };
+    return actions;
   }
 
   /** Shorthand for `features.on(feature)`. */

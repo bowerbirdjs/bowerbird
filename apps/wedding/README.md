@@ -1,0 +1,47 @@
+# Wedding planner (proof of concept)
+
+A wedding planner with an event website, built on Bowerbird. Hosts enter their event's facts once (when, where, what happens, where to sleep, what to wear, gifts, questions) and compose a one-page site from event blocks in a design. The site shows the facts wherever a block needs them.
+
+```bash
+pnpm install
+pnpm build
+pnpm --filter @bowerbirdjs/wedding dev
+```
+
+It starts with a German demo wedding ("Lena & Jonas"); **New event** creates an empty one in German or English, or loads the English demo. Everything is kept in this browser (localStorage).
+
+This is a proof of concept for the "standalone site editor" brief: can Bowerbird be the engine for a structured event-site editor? It is not integrated with Joy Phone and doesn't read Joy's stored data (see _Not done_).
+
+## What it shows
+
+| Brief                            | Here                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| -------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Structured, never a free canvas  | The editor offers only the 18 event blocks, whole-section actions, content fields and layout/background choices (`ui` in `src/App.tsx`). An event policy (`src/site/policy.ts`) enforces it for people and agents: parts stay where the block puts them, no custom CSS, sections only at page level; gallery photos are the one thing inside a block that can be added, reordered and removed (up to 24). The editor hides actions the policy would refuse (it asks the policy with dry runs). |
+| Facts first                      | Facts are data groups in the document (`event`, `venues`, `schedule`, `travel`, `stays`, `dresscode`, `gifts`, `faq`; schemas in `src/site/facts.ts`). Bound blocks hold only presentation; their fact components read the data at render time, so one change reaches every section. Facts are versioned, undoable and attributed like any other change (`data.set`).                                                                                                                          |
+| Bad data never takes a site down | Writes are strict: `data.set` validates against the zod schemas (https-only links, `#rrggbb` colours, times, dates) and says what's wrong. A section with nothing to show is hidden on the published page and explained in the editor.                                                                                                                                                                                                                                                         |
+| Readable by construction         | Any accent colour is moved toward the text colour until it has 4.5:1 contrast on the page and subtle backgrounds; the colour on it is picked for contrast too (tested against hostile colours for every design).                                                                                                                                                                                                                                                                               |
+| Zero third-party requests        | Placeholder photos are inline SVG, fonts are system stacks, uploads are shrunk and stored inline, and there are no scripts in the output. Directions are a link to a maps search, never an embed.                                                                                                                                                                                                                                                                                              |
+| One operations vocabulary        | Every change (editor, details, design picks, starter facts) is a Bowerbird op; agents get the same ops (`apply`, `data.set`, `get_data`) under the same policy.                                                                                                                                                                                                                                                                                                                                |
+| The 18 blocks                    | Same type ids as the brief: `hero`, `countdown`, `story`, `text-image`, `gallery`, `photo`, `quote`, `schedule`, `location`, `travel`, `dresscode`, `faq`, `registry-links`, `photo-wall`, `guestbook-cta`, `rsvp`, `divider`, `footer`, each with its layouts and a `background` (plain, subtle, inverse, accent). Starter content in German and English. Responsive through container queries.                                                                                               |
+| Designs and knobs                | Three original designs (Linen, Midnight, Meadow): token sets plus a layout and background per block. Picking one restyles every section in one undo step; corners and spacing survive a design switch.                                                                                                                                                                                                                                                                                         |
+| Click on the page edits the fact | Fact text carries an edit mark in the editor; a click opens and focuses its field in **Details**. Selecting a fact section opens its group.                                                                                                                                                                                                                                                                                                                                                    |
+| Publish                          | **View site** shows the page as guests see it (phone or desktop width, with the site menu built from the sections' headings); **Publish** keeps a snapshot, and the button shows when there are unpublished changes.                                                                                                                                                                                                                                                                           |
+
+## How it maps onto Bowerbird
+
+- **Blocks** are sections (`src/site/blocks.ts`): templates of parts (heading, text, image…) plus CSS. `layout` and `background` are variant axes.
+- **Fact components** (`src/site/components.ts`) are components whose `render(node, ctx)` reads `ctx.data(…)` and returns generated elements. They are pure and synchronous, like the brief's blocks.
+- **Designs** (`src/site/designs.ts`) are `token.set` and `section.variant` ops plus a `style` data group.
+- **The editor** is `<bowerbird-editor>` with a `ui` configuration; the app adds the Details and Design panels.
+
+Engine features this POC added to Bowerbird: site data (`SiteDoc.data`, `data.set`, `defineData`, `get_data`), data-aware rendering (render context, generated elements, validated custom properties), the `bb-data-click` event, policy-aware selection actions in the editor, and templates that may use components people can't insert.
+
+## Not done
+
+- **Joy's wire format.** The site is a Bowerbird document, not Joy's `SiteDraft`; blocks use the brief's type ids and prop names, but no import/export adapter or compatibility suite exists yet. The block schemas were written from the brief's tables, not copied from joy-phone (which wasn't available here).
+- Joy's seven designs, ornaments and textures, font pairs as a knob, per-design CSS beyond tokens.
+- Hidden sections and "not in the menu" (`hidden`, `menuHidden`), the section toolbar for layout and background on the page, layout sketch cards.
+- Revisions and conflicts, version history, the pre-publish check, autosave to a server, guided setup, phone editing, the AI assistant surface and proposal mode (Bowerbird has the engine side of the last two: sync and changesets).
+- German editor chrome: the planner and editor UI are in English; site content follows the event's language.
+- The countdown is computed when the page is rendered, so a static export shows the count from that day.
+- Images are stored inline as data URLs (a host stores them in its own storage).

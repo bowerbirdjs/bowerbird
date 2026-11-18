@@ -16,6 +16,14 @@ pnpm --filter @bowerbirdjs/showcase dev
 
 The showcase is a fictional events product that embeds the editor next to an assistant. The scripted demo agent needs no key; to use Claude, start it with `ANTHROPIC_API_KEY` set. The key stays on the Vite server, which proxies `/api/anthropic`; the proxy only forwards `POST /v1/messages` from this machine (`SHOWCASE_ALLOW_REMOTE=1` opens it to your network, which lets anyone there spend your key). Smaller embeds live in [`examples/`](examples): plain HTML, Vue, and a host page with deliberately hostile CSS.
 
+### Wedding planner (proof of concept)
+
+```bash
+pnpm --filter @bowerbirdjs/wedding dev
+```
+
+A wedding planner whose event website is built with Bowerbird as a _structured_ editor: 18 event blocks, three designs, and the event's facts (venues, schedule, travel, dress code, gifts, questions) stored once and shown by every section that needs them. See [`apps/wedding/README.md`](apps/wedding/README.md).
+
 ## Try it with an agent
 
 ```bash
@@ -126,6 +134,22 @@ For the look, pick `appearance="dark"` (or `auto`, which follows the system; the
   <button slot="toolbar-end" onclick="publish()">Publish</button>
 </bowerbird-editor>
 ```
+
+### Site data
+
+Sites often show the same facts in several places: an event's date, its schedule, its venues. Declare them as data groups and let sections read them, so one change reaches every place:
+
+```ts
+const registry = createRegistry({
+  data: [
+    defineData({ key: 'schedule', title: 'Schedule', description: '…', schema: z.array(item) }),
+  ],
+  components: [scheduleList], // render: (node, ctx) => ({ tag: 'ol', children: ctx.data('schedule').map(…) })
+});
+store.apply({ ops: [{ op: 'data.set', key: 'schedule', path: [0, 'time'], value: '14:30' }] });
+```
+
+`data.set` is a content-level op like any other: validated against the group's schema, attributed, undoable, synced, and open to agents (`get_data`). Components render data as generated elements (escaped, URL-sanitized, colours only through validated custom properties); in the editor they carry `data-bb-data` marks, and a click on one fires `bb-data-click` so the host can open the right field.
 
 ## Use the engine in code
 

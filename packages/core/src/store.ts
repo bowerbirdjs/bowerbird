@@ -66,6 +66,8 @@ export interface ChangeSummary {
   tokens: boolean;
   /** The site's languages changed. */
   locales: boolean;
+  /** Site data groups that changed. */
+  data: string[];
 }
 
 export type ApplyResult =
@@ -166,6 +168,7 @@ export function summarize(changes: Change[]): ChangeSummary {
     symbols: [],
     tokens: false,
     locales: false,
+    data: [],
   };
   for (const c of changes) {
     if (c.kind === 'node') {
@@ -175,6 +178,7 @@ export function summarize(changes: Change[]): ChangeSummary {
     } else if (c.kind === 'page') s.pages.push(c.id);
     else if (c.kind === 'symbol') s.symbols.push(c.id);
     else if (c.kind === 'locales') s.locales = true;
+    else if (c.kind === 'data') s.data.push(c.id);
     else s.tokens = true;
   }
   return s;
@@ -602,6 +606,20 @@ export function diffDocs(before: SiteDoc, after: SiteDoc): Change[] {
   records('node', before.nodes, after.nodes);
   records('page', before.pages, after.pages);
   records('symbol', before.symbols, after.symbols);
+  for (const key of new Set([
+    ...Object.keys(before.data ?? {}),
+    ...Object.keys(after.data ?? {}),
+  ])) {
+    const x = before.data && Object.hasOwn(before.data, key) ? before.data[key] : undefined;
+    const y = after.data && Object.hasOwn(after.data, key) ? after.data[key] : undefined;
+    if (deepEqual(x, y)) continue;
+    out.push({
+      kind: 'data',
+      id: key,
+      ...(x !== undefined ? { before: x } : {}),
+      ...(y !== undefined ? { after: y } : {}),
+    });
+  }
   if (!deepEqual(before.locales, after.locales)) {
     out.push({
       kind: 'locales',
@@ -1416,6 +1434,14 @@ export class Store {
       if (change.kind === 'node') continue;
       if (change.kind === 'locales') {
         revertLocales(draft, change.before, change.after, warnings);
+      } else if (change.kind === 'data') {
+        const r = revertValue(draft.data(change.id), change.before, change.after);
+        if (r.conflict)
+          warnings.push({
+            code: 'conflict',
+            message: `Data "${change.id}" was changed later; kept the later version.`,
+          });
+        else draft.setData(change.id, r.value);
       } else if (change.kind === 'symbol') {
         const cur = draft.symbol(change.id);
         const r = revertValue(cur, change.before, change.after);
@@ -1652,6 +1678,7 @@ export function isSiteDoc(value: unknown): value is SiteDoc {
     isPlainObject(value.themes) &&
     Array.isArray(value.breakpoints) &&
     (value.symbols === undefined || isPlainObject(value.symbols)) &&
+    (value.data === undefined || isPlainObject(value.data)) &&
     // Paths end up in links and file names; ops validate them, so stored ones must be valid too.
     Object.values(value.pages).every(
       (p) => isPlainObject(p) && typeof p.path === 'string' && isValidPagePath(p.path),

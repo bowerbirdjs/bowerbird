@@ -16,6 +16,8 @@ declare module 'vitest' {
       showcase: string;
       hostile: string;
       collab: string;
+      mcpEditor: string;
+      wedding: string;
     } | null;
   }
 }
@@ -28,6 +30,7 @@ const APPS = {
   hostile: 'examples/hostile-css',
   collab: 'examples/collab',
   mcpEditor: 'examples/mcp-editor',
+  wedding: 'apps/wedding',
 } as const;
 const TYPES: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
