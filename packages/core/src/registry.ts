@@ -29,11 +29,27 @@ export interface ElementSpec {
    * else (a formatted time, a link's address, several fields) opens a small form over it.
    */
   edit?: EditField | EditField[];
+  /**
+   * Clicking the element in the editor adds site data: appends `value` to the list at `path`, or
+   * sets `path` when it has no value yet. Use it for "add the first item" placeholders, which the
+   * component renders in the editor only.
+   */
+  add?: AddData;
   /** The element is one item of a list in site data (`schedule.2`): it can be moved, copied, removed. */
   item?: {
     path: string /** Keys whose values must stay unique when the item is copied. */;
     unique?: string[];
   };
+}
+
+/** Site data a click adds on the canvas (see `ElementSpec.add`). */
+export interface AddData {
+  /** A list (`schedule`, `dresscode.colors`) to append to, or a value to fill in (`travel.text`). */
+  path: string;
+  /** The new item or value. An object is a list item: a list that doesn't exist yet starts with it. */
+  value: unknown;
+  /** Field to edit right after adding, relative to the new item (`title`); `''` for the value itself. */
+  edit?: string;
 }
 
 /** A piece of site data that can be edited on the canvas (see `ElementSpec.edit`). */

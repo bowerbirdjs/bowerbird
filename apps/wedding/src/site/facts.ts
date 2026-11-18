@@ -65,11 +65,17 @@ export const staysSchema = z
 export const dresscodeSchema = z.object({
   style: line(80).optional(),
   text: line(800).optional(),
-  colors: z.array(z.object({ hex: hexColor, name: required(40) })).max(8),
+  colors: z
+    .array(z.object({ hex: hexColor, name: required(40) }))
+    .max(8)
+    .default([]),
 });
 export const giftsSchema = z.object({
   text: line(1200).optional(),
-  links: z.array(z.object({ label: required(60), url: httpsUrl })).max(6),
+  links: z
+    .array(z.object({ label: required(60), url: httpsUrl }))
+    .max(6)
+    .default([]),
 });
 export const faqSchema = z.array(z.object({ q: required(200), a: required(1200) })).max(20);
 

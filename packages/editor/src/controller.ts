@@ -56,6 +56,10 @@ const sharesPresence = (store: unknown): store is PresenceStore =>
   typeof (store as PresenceStore).onPeers === 'function' &&
   typeof (store as PresenceStore).setPresence === 'function';
 
+/** New list items are objects (a schedule entry, a colour); a plain value fills in a field. */
+const looksLikeList = (value: unknown) =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
 /** `schedule.0.time` → `['schedule', 0, 'time']`. */
 export function splitDataPath(path: string): (string | number)[] {
   return path.split('.').map((s) => (/^\d+$/.test(s) ? Number(s) : s));
@@ -286,6 +290,42 @@ export class EditorController {
     const next = [...list];
     next.splice(to, 0, ...next.splice(index, 1));
     return set(next, 'Move item').ok ? at(to) : path;
+  }
+
+  /**
+   * Adds site data: appends `value` to the list at `path` (`schedule`, `dresscode.colors`), or
+   * sets `path` when it has no value yet (`travel.text`). Returns where the new value is, e.g.
+   * `schedule.0` for the first item of an empty schedule.
+   */
+  addData(path: string, value: unknown): string | undefined {
+    const target = this.addTarget(path, value);
+    if (!target) return undefined;
+    const { key, at, list } = target;
+    const result = this.apply(
+      [{ op: 'data.set', key, ...(at.length ? { path: at } : {}), value }],
+      list ? 'Add item' : 'Add',
+    );
+    return result.ok ? [key, ...at].join('.') : undefined;
+  }
+
+  /** Whether `addData(path, value)` would be tried: the feature is on and nothing is in the way. */
+  canAdd(path: string, value: unknown): boolean {
+    return !this.readOnly && !!this.addTarget(path, value);
+  }
+
+  private addTarget(
+    path: string,
+    value: unknown,
+  ): { key: string; at: (string | number)[]; list: boolean } | undefined {
+    const [first, ...rest] = splitDataPath(path);
+    const key = first === undefined ? '' : String(first);
+    let current: unknown = key ? this.store.view.data?.(key) : undefined;
+    for (const seg of rest)
+      current = (current as Record<string | number, unknown> | undefined)?.[seg];
+    const list = Array.isArray(current) || (current === undefined && looksLikeList(value));
+    if (!key || !this.can(list ? 'data.items' : 'data')) return undefined;
+    if (current !== undefined && !Array.isArray(current)) return undefined;
+    return { key, at: list ? [...rest, Array.isArray(current) ? current.length : 0] : rest, list };
   }
 
   /** Tells the host which piece of site data the person clicked on the page. */

@@ -19,6 +19,34 @@ export interface SiteCopy {
     'schedule' | 'venues' | 'travel' | 'dresscode' | 'gifts' | 'faq' | 'photos',
     string
   >;
+  /** Editor-only buttons that add what's missing (they address the host). */
+  add: Record<
+    | 'schedule'
+    | 'venue'
+    | 'travel'
+    | 'parking'
+    | 'stay'
+    | 'style'
+    | 'text'
+    | 'colour'
+    | 'link'
+    | 'faq',
+    string
+  >;
+  /** Starter values for what the buttons add. */
+  starter: {
+    item: string;
+    venue: string;
+    stay: string;
+    travel: string;
+    parking: string;
+    style: string;
+    text: string;
+    colour: string;
+    link: string;
+    q: string;
+    a: string;
+  };
 }
 
 const de: SiteCopy = {
@@ -35,13 +63,38 @@ const de: SiteCopy = {
   credit: 'Gemacht mit Bowerbird',
   menu: 'Menü',
   empty: {
-    schedule: 'Noch kein Ablauf. Trag ihn unter Details ein.',
-    venues: 'Noch kein Ort. Trag ihn unter Details ein.',
-    travel: 'Noch keine Infos zur Anreise. Trag sie unter Details ein.',
-    dresscode: 'Noch kein Dresscode. Trag ihn unter Details ein.',
-    gifts: 'Noch keine Wünsche. Trag sie unter Details ein.',
-    faq: 'Noch keine Fragen. Trag sie unter Details ein.',
+    schedule: 'Noch kein Ablauf.',
+    venues: 'Noch kein Ort.',
+    travel: 'Noch keine Infos zur Anreise.',
+    dresscode: 'Noch kein Dresscode.',
+    gifts: 'Noch keine Wünsche.',
+    faq: 'Noch keine Fragen.',
     photos: 'Noch keine Fotos. Wähl ein Foto aus und lade ein eigenes hoch.',
+  },
+  add: {
+    schedule: 'Ersten Programmpunkt anlegen',
+    venue: 'Ersten Ort anlegen',
+    travel: 'Anreise beschreiben',
+    parking: 'Parken beschreiben',
+    stay: 'Unterkunft hinzufügen',
+    style: 'Stil angeben',
+    text: 'Text hinzufügen',
+    colour: 'Farbe hinzufügen',
+    link: 'Link hinzufügen',
+    faq: 'Erste Frage anlegen',
+  },
+  starter: {
+    item: 'Neuer Programmpunkt',
+    venue: 'Neuer Ort',
+    stay: 'Neue Unterkunft',
+    travel: 'So kommt ihr hin.',
+    parking: 'Hier könnt ihr parken.',
+    style: 'Festlich',
+    text: 'Ein paar Worte dazu.',
+    colour: 'Farbe',
+    link: 'Link',
+    q: 'Neue Frage',
+    a: 'Antwort',
   },
 };
 
@@ -59,13 +112,38 @@ const en: SiteCopy = {
   credit: 'Made with Bowerbird',
   menu: 'Menu',
   empty: {
-    schedule: 'No schedule yet. Add it under Details.',
-    venues: 'No venue yet. Add it under Details.',
-    travel: 'No travel details yet. Add them under Details.',
-    dresscode: 'No dress code yet. Add it under Details.',
-    gifts: 'No gift details yet. Add them under Details.',
-    faq: 'No questions yet. Add them under Details.',
+    schedule: 'No schedule yet.',
+    venues: 'No venue yet.',
+    travel: 'No travel details yet.',
+    dresscode: 'No dress code yet.',
+    gifts: 'No gift details yet.',
+    faq: 'No questions yet.',
     photos: 'No photos yet. Select a photo and upload your own.',
+  },
+  add: {
+    schedule: 'Add the first schedule item',
+    venue: 'Add the first venue',
+    travel: 'Describe how to get there',
+    parking: 'Add parking',
+    stay: 'Add a place to stay',
+    style: 'Add a style',
+    text: 'Add a text',
+    colour: 'Add a colour',
+    link: 'Add a link',
+    faq: 'Add the first question',
+  },
+  starter: {
+    item: 'New item',
+    venue: 'New venue',
+    stay: 'New place to stay',
+    travel: 'How to get here.',
+    parking: 'Where to park.',
+    style: 'Formal',
+    text: 'A few words about it.',
+    colour: 'Colour',
+    link: 'Link',
+    q: 'New question',
+    a: 'Answer',
   },
 };
 

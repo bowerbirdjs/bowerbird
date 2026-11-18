@@ -117,7 +117,7 @@ describe.skipIf(!apps)('wedding planner POC', () => {
     expect(await canvas.getByText('A & G').count()).toBeGreaterThan(0);
     expect(await canvas.getByText('20 May 2028').count()).toBe(1);
     // No venues yet: the editor says where to add them; the published page leaves the section out.
-    expect(await canvas.getByText('No venue yet. Add it under Details.').count()).toBe(1);
+    expect(await canvas.getByText('No venue yet.').count()).toBe(1);
     await page.getByRole('button', { name: 'View site' }).click();
     const site = page.frameLocator('iframe.preview-frame');
     await expect.poll(() => site.locator('.site-menu').count()).toBe(1);
@@ -227,6 +227,83 @@ describe.skipIf(!apps)('wedding planner POC', () => {
     await expect
       .poll(() => canvas.locator('[data-bb-node="hero-1/media"]').getAttribute('alt'))
       .toBe('');
+    expect(errors).toEqual([]);
+  });
+
+  test('the first item of an empty list (and a missing value) is added on the page', async () => {
+    const { page, errors } = await open(apps?.wedding ?? '', { width: 1600, height: 950 });
+    const canvas = page.locator('[data-bb-canvas]');
+    const panel = page.locator('.bbx-fields');
+    await canvas.locator('[data-bb-node="hero-1"]').waitFor();
+    await page.getByRole('button', { name: 'New event' }).click();
+    const dialog = page.getByRole('dialog', { name: 'New event' });
+    await dialog.getByLabel('Your names or the event’s title').fill('Ada & Grace');
+    await dialog.getByLabel('Language of the site').selectOption('en');
+    await dialog.getByRole('button', { name: 'Create' }).click();
+    await canvas.getByText('No venue yet.').waitFor();
+
+    // The first venue: added, then its name edited in place right away.
+    await canvas.getByText('+ Add the first venue').click();
+    await expect
+      .poll(() => page.evaluate(() => document.activeElement?.getAttribute('data-bb-data')))
+      .toBe('venues.0.name');
+    await page.keyboard.press('Control+A');
+    await page.keyboard.type('The Old Mill');
+    await page.keyboard.press('Enter');
+    await expect
+      .poll(() => canvas.locator('[data-bb-data="venues.0.name"]').textContent())
+      .toBe('The Old Mill');
+    expect(await canvas.getByText('No venue yet.').count()).toBe(0);
+
+    // A missing value: how to get there.
+    await canvas.getByText('+ Describe how to get there').click();
+    await page.keyboard.press('Control+A');
+    await page.keyboard.type('Take the train to Hollow Junction.');
+    await page.keyboard.press('Control+Enter');
+    await expect
+      .poll(() => canvas.locator('[data-bb-data="travel.text"]').textContent())
+      .toBe('Take the train to Hollow Junction.');
+
+    // A place to stay: name and website in one form.
+    await canvas.getByText('+ Add a place to stay').click();
+    await expect.poll(() => panel.isVisible()).toBe(true);
+    await panel.getByLabel('Name').fill('The Swan');
+    await panel.getByLabel('Name').press('Enter');
+    await expect
+      .poll(() => canvas.locator('[data-bb-data="stays.0.name"]').textContent())
+      .toBe('The Swan');
+    expect(await canvas.getByText('+ Add a place to stay').count()).toBe(0);
+
+    // Remove the only question, then add a first one again.
+    await canvas.locator('[data-bb-data="faq.0.q"]').click();
+    await page.locator('.bbx-itembar').getByRole('button', { name: 'Remove item' }).click();
+    await canvas.getByText('+ Add the first question').click();
+    await page.keyboard.press('Control+A');
+    await page.keyboard.type('Is there parking?');
+    await page.keyboard.press('Enter');
+    await expect
+      .poll(() => canvas.locator('[data-bb-data="faq.0.q"]').textContent())
+      .toBe('Is there parking?');
+
+    // A host that turns adding list items off gets no dead buttons; filling in values stays.
+    const setFeatures = (features: Record<string, boolean>) =>
+      page.evaluate((f) => {
+        const editor = document.querySelector('bowerbird-editor') as HTMLElement & {
+          ui?: { features?: Record<string, boolean> };
+        };
+        editor.ui = { ...editor.ui, features: { ...editor.ui?.features, ...f } };
+      }, features);
+    await setFeatures({ 'data.items': false });
+    await expect.poll(() => canvas.getByText('+ Add a colour').isVisible()).toBe(false);
+    expect(await canvas.getByText('+ Add a text').first().isVisible()).toBe(true);
+    await setFeatures({ 'data.items': true });
+    await expect.poll(() => canvas.getByText('+ Add a colour').isVisible()).toBe(true);
+
+    // Guests never see the add buttons.
+    await page.getByRole('button', { name: 'View site' }).click();
+    const site = page.frameLocator('iframe.preview-frame');
+    await expect.poll(() => site.getByText('The Old Mill').count()).toBe(1);
+    expect(await site.getByText(/^\+ /).count()).toBe(0);
     expect(errors).toEqual([]);
   });
 });
