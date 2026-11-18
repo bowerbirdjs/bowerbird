@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Bowerbird: hostile host CSS</title>
+    <style>
+      html, body { margin: 0; height: 100%; }
+      body { display: grid; grid-template-rows: auto 1fr; }
+      bowerbird-editor { display: grid; min-height: 0; }
+    </style>
+    <!--
+      Deliberately aggressive host styles, the kind a real app or CMS theme ships. The canvas lives in
+      this document (no iframe), so the editor has to keep these off the page being edited.
+      Open with ?clean to compare without them.
+    -->
+    <style id="hostile">
+      * { box-sizing: content-box; }
+      body { font: 18px/2 Georgia, serif; color: #7c2d12; }
+      h1, h2, h3, h4 { color: hotpink; text-transform: uppercase; letter-spacing: 0.3em; margin: 2em 0; font-family: Impact, sans-serif; }
+      p { color: red; font-size: 30px; margin: 2em; line-height: 3; }
+      a { color: lime; text-decoration: underline wavy; }
+      section, header, footer, nav { padding: 100px; border: 4px dashed orange; }
+      div { background: rgb(255 255 0 / 0.4); padding: 7px; }
+      ul, ol { list-style: square; margin-left: 40px; }
+      button { background: black; color: white; border-radius: 0; padding: 30px; }
+      .title, .heading, .button { font-size: 80px; }
+      header.app { padding: 10px 16px; border: 0; display: flex; gap: 12px; align-items: center; }
+    </style>
+  </head>
+  <body>
+    <header class="app">
+      <strong>Hostile host CSS</strong>
+      <span>The page below should look the same as with <a href="?clean">?clean</a>.</span>
+    </header>
+    <bowerbird-editor></bowerbird-editor>
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>

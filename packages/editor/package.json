@@ -1,0 +1,40 @@
+{
+  "name": "@bowerbirdjs/editor",
+  "version": "0.0.0",
+  "description": "The Bowerbird visual editor: a framework-free <bowerbird-editor> web component (Lit).",
+  "license": "MIT",
+  "type": "module",
+  "sideEffects": [
+    "./dist/define.js",
+    "./src/define.ts"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./define": {
+      "types": "./dist/define.d.ts",
+      "default": "./dist/define.js"
+    }
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist",
+    "src"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/bowerbirdjs/bowerbird.git",
+    "directory": "packages/editor"
+  },
+  "dependencies": {
+    "@bowerbirdjs/blocks": "workspace:*",
+    "@bowerbirdjs/core": "workspace:*",
+    "@bowerbirdjs/css": "workspace:*",
+    "@bowerbirdjs/html": "workspace:*",
+    "lit": "^3.3.3",
+    "zod": "^4.6.7"
+  }
+}

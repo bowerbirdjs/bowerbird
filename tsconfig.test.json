@@ -8,13 +8,16 @@
     "rootDir": ".",
     "paths": {
       "@bowerbirdjs/*": ["./packages/*/src/index.ts"]
-    }
+    },
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "types": ["node"]
   },
   "include": [
     "packages/*/src/**/*.ts",
     "packages/*/test/**/*.ts",
     "bench/src/**/*.ts",
     "bench/test/**/*.ts",
-    "vitest.config.ts"
+    "vitest.config.ts",
+    "vitest.e2e.config.ts"
   ]
 }

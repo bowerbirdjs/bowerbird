@@ -1,0 +1,36 @@
+{
+  "name": "@bowerbirdjs/react",
+  "version": "0.0.0",
+  "description": "React wrapper for the Bowerbird editor.",
+  "license": "MIT",
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist",
+    "src"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/bowerbirdjs/bowerbird.git",
+    "directory": "packages/react"
+  },
+  "dependencies": {
+    "@bowerbirdjs/core": "workspace:*",
+    "@bowerbirdjs/editor": "workspace:*"
+  },
+  "peerDependencies": {
+    "react": ">=18"
+  },
+  "devDependencies": {
+    "react": "^19.3.1",
+    "@types/react": "^19.3.0"
+  }
+}

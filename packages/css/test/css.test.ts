@@ -88,6 +88,6 @@ describe('compileCss', () => {
     const doc = createEmptyDoc({ tokens: { space: { sm: '4px' } } });
     const css = compileCss(doc, createRegistry(), { mode: 'editor', canvasSelector: '#canvas' });
     expect(css.startsWith('#canvas {\n  --space-sm: 4px;\n}')).toBe(true);
-    expect(css).toContain('#canvas {\n  .bb-page {');
+    expect(css).toContain('#canvas {\n  .bb-page, .bb-page :where(*)');
   });
 });

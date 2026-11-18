@@ -1,0 +1,35 @@
+{
+  "name": "@bowerbirdjs/vue",
+  "version": "0.0.0",
+  "description": "Vue wrapper for the Bowerbird editor.",
+  "license": "MIT",
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist",
+    "src"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/bowerbirdjs/bowerbird.git",
+    "directory": "packages/vue"
+  },
+  "dependencies": {
+    "@bowerbirdjs/core": "workspace:*",
+    "@bowerbirdjs/editor": "workspace:*"
+  },
+  "peerDependencies": {
+    "vue": ">=3.3"
+  },
+  "devDependencies": {
+    "vue": "^3.5.45"
+  }
+}

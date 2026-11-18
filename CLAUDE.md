@@ -6,7 +6,9 @@ An embeddable, agent-first visual page editor. Read `docs/plan.md` for decisions
 
 - `pnpm build`: TypeScript project build (`tsc -b packages/*/tsconfig.json`). Needed before running the MCP CLI or smoke script.
 - `pnpm test`: Vitest. Tests import `@bowerbirdjs/*` from `src` through aliases in `vitest.config.ts`, so no build is needed.
+- `pnpm test:e2e`: builds `examples/*` and `apps/showcase` with Vite and drives them with Playwright (skipped if Playwright isn't installed). Tests live in `e2e/`.
 - `pnpm lint` / `pnpm format`: Biome.
+- `pnpm --filter @bowerbirdjs/showcase dev`: the showcase (build the packages first).
 - `node packages/mcp/scripts/smoke.mjs [--screenshots <dir>]`: end-to-end MCP check (build first).
 
 ## Architecture rules
@@ -18,10 +20,12 @@ An embeddable, agent-first visual page editor. Read `docs/plan.md` for decisions
 - Ids are readable and stable (`hero-1/heading`). Only section roots and keyed items (`item-2`, `tier-pro`) add an id scope.
 - Styles are CSS declarations validated against design tokens; raw values need policy permission. Never store Tailwind classes.
 - Published HTML is light DOM, escaped and URL-sanitised; no scripts in output.
+- Editor: the canvas is light DOM in the host document (no iframe; nothing editable inside a shadow root). Only the panels use the element's shadow root. Canvas chrome classes start with `bbx-`.
+- Editor UI changes go through `EditorController` (`packages/editor/src/controller.ts`), which calls `Store.apply` as the editor's actor. Keep the controller DOM-free so it stays unit-testable.
 - Keep dependencies MIT/BSD/Apache. No AGPL/GPL. Section content must be original (Tailwind Plus and Relume licences forbid builder use).
 
 ## Conventions
 
 - ESM, TypeScript `NodeNext`: relative imports end in `.js`.
-- Tests live in `packages/<name>/test/*.test.ts`.
+- Tests live in `packages/<name>/test/*.test.ts`; browser tests in `e2e/*.e2e.ts`.
 - Agent-facing text (tool descriptions, `AGENT_GUIDE`) should be short and concrete: agents pay for every token.

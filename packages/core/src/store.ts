@@ -236,7 +236,7 @@ function rebuildThemes(entries: Record<string, unknown>): SiteDoc['themes'] {
 
 export class Store {
   readonly registry: Registry;
-  readonly policy: Policy;
+  private currentPolicy: Policy;
   private current: SiteDoc;
   private index: DocIndex | undefined;
   private readonly entries: HistoryEntry[] = [];
@@ -245,9 +245,18 @@ export class Store {
 
   constructor(options: StoreOptions) {
     this.registry = options.registry;
-    this.policy = options.policy ?? createPolicy();
+    this.currentPolicy = options.policy ?? createPolicy();
     this.current = options.doc ?? createEmptyDoc();
     this.historyLimit = options.historyLimit ?? 500;
+  }
+
+  get policy(): Policy {
+    return this.currentPolicy;
+  }
+
+  /** Replaces the policy (e.g. when the person's role changes). Applies to later transactions. */
+  setPolicy(policy: Policy): void {
+    this.currentPolicy = policy;
   }
 
   get doc(): SiteDoc {

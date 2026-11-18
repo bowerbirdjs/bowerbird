@@ -103,6 +103,9 @@ describe('compileCss', () => {
     const css = compileCss(store.doc, store.registry, { mode: 'editor', page: 'home' });
     expect(css).not.toContain('@layer');
     expect(css).toMatch(/^\[data-bb-canvas\] \{\n {2}--color-brand-50:/);
-    expect(css).toContain('[data-bb-canvas] {\n  .bb-page {');
+    // The host-CSS reset comes first so base, section and node rules (same specificity) win.
+    expect(css).toContain('[data-bb-canvas] {\n  .bb-page, .bb-page :where(*)');
+    expect(css.indexOf('all: revert')).toBeLessThan(css.indexOf('container: bb-page'));
+    expect(compileCss(store.doc, store.registry)).not.toContain('all: revert');
   });
 });

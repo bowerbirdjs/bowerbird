@@ -4,7 +4,17 @@
 
 Bowerbird is a page engine you embed in your own product. Pages are built from large, prebuilt sections (hero, pricing, footer …) that stay fully editable inside. People edit on a visual canvas; AI agents edit through a typed API and MCP. Both go through the same validated, attributed and undoable operations. Styles use CSS custom properties and design tokens, so the output is plain HTML and CSS and stays on-brand.
 
-> **Status: early (Phase 0).** The headless engine, starter sections, HTML/CSS renderer, agent tools and MCP server work. The visual editor (web components) comes next. See [`docs/plan.md`](docs/plan.md).
+> **Status: early (Phase 1).** The headless engine, starter sections, HTML/CSS renderer, agent tools, MCP server and the visual editor (`<bowerbird-editor>`, with React and Vue wrappers) work. Linked components, draft changesets and visual tools for agents come next. See [`docs/plan.md`](docs/plan.md) and [`docs/progress.md`](docs/progress.md).
+
+## See it
+
+```bash
+pnpm install
+pnpm build
+pnpm --filter @bowerbirdjs/showcase dev
+```
+
+The showcase is a fictional events product that embeds the editor next to an assistant. The scripted demo agent needs no key; to use Claude, start it with `ANTHROPIC_API_KEY` set (the key stays on the Vite dev server, which proxies `/api/anthropic`). Smaller embeds live in [`examples/`](examples): plain HTML, Vue, and a host page with deliberately hostile CSS.
 
 ## Try it with an agent
 
@@ -26,6 +36,35 @@ To run the scripted end-to-end check (a real MCP client building a page over std
 ```bash
 node packages/mcp/scripts/smoke.mjs --screenshots ./shots
 ```
+
+## Embed the editor
+
+The editor is one custom element. The page you edit renders in your document as ordinary light DOM (no iframe, nothing editable inside a shadow root); the panels sit in the element's shadow root.
+
+```html
+<bowerbird-editor></bowerbird-editor>
+<script type="module">
+  import '@bowerbirdjs/editor/define';
+
+  const editor = document.querySelector('bowerbird-editor');
+  editor.actor = { kind: 'user', id: 'sam', name: 'Sam' };
+  editor.addEventListener('bb-transaction', (e) => save(e.detail.doc));
+</script>
+```
+
+Pass your own `store` to load a saved document, set a policy or register your own sections. React and Vue wrappers set the same properties and turn the `bb-*` events into callbacks:
+
+```tsx
+import { BowerbirdEditor } from '@bowerbirdjs/react';
+
+<BowerbirdEditor
+  store={store}
+  actor={{ kind: 'user', id: 'sam' }}
+  onTransaction={({ doc }) => save(doc)}
+/>;
+```
+
+The editor is themed with `--bb-editor-*` CSS variables. Everything it does goes through the same operations as agents, so people's changes are validated, attributed and undoable too.
 
 ## Use the engine in code
 
@@ -59,15 +98,20 @@ const html = renderDocument(store.doc, store.registry, 'home');
 
 ## Packages
 
-| Package                                  | What it does                                                                                                                         |
-| ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
-| [`@bowerbirdjs/core`](packages/core)     | Document model, operations, validation, transactions, per-actor undo/redo, policy (freedom levels, locks), outline                   |
-| [`@bowerbirdjs/css`](packages/css)       | Tokens → CSS variables; section and node styles → CSS with container-query breakpoints (published or editor mode)                    |
-| [`@bowerbirdjs/html`](packages/html)     | Pages → semantic HTML (escaped, URL-sanitised)                                                                                       |
-| [`@bowerbirdjs/blocks`](packages/blocks) | Default design tokens, dark theme and starter sections                                                                               |
-| [`@bowerbirdjs/agent`](packages/agent)   | Agent tools (`get_context`, `get_outline`, `get_nodes`, `list_sections`, `list_tokens`, `apply`, `undo`) and JSON Schema definitions |
-| [`@bowerbirdjs/mcp`](packages/mcp)       | MCP server (stdio), live preview server, CLI with file persistence                                                                   |
-| [`bench`](bench)                         | PageBench task format (runner planned)                                                                                               |
+| Package                                  | What it does                                                                                                                    |
+| ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| [`@bowerbirdjs/core`](packages/core)     | Document model, operations, validation, transactions, per-actor undo/redo, policy (freedom levels, locks), outline              |
+| [`@bowerbirdjs/css`](packages/css)       | Tokens → CSS variables; section and node styles → CSS with container-query breakpoints (published or editor mode)               |
+| [`@bowerbirdjs/html`](packages/html)     | Pages → semantic HTML (escaped, URL-sanitised)                                                                                  |
+| [`@bowerbirdjs/blocks`](packages/blocks) | Default design tokens, dark theme and starter sections                                                                          |
+| [`@bowerbirdjs/import`](packages/import) | HTML → nodes (sanitised; keeps token-based inline styles)                                                                       |
+| [`@bowerbirdjs/agent`](packages/agent)   | Agent tools (`get_context`, `get_outline`, `get_nodes`, `list_sections`, `list_tokens`, `apply`, `import_html`, `lint`, `undo`) |
+| [`@bowerbirdjs/mcp`](packages/mcp)       | MCP server (stdio), live preview server, CLI with file persistence                                                              |
+| [`@bowerbirdjs/editor`](packages/editor) | `<bowerbird-editor>` (Lit): same-document canvas, overlays, inline editing, drag and drop, layers, insert, inspector, history   |
+| [`@bowerbirdjs/react`](packages/react)   | React wrapper                                                                                                                   |
+| [`@bowerbirdjs/vue`](packages/vue)       | Vue wrapper                                                                                                                     |
+| [`bench`](bench)                         | PageBench: page-editing tasks for agents, with a Claude runner and a scripted offline mode                                      |
+| [`apps/showcase`](apps/showcase)         | Demo product embedding the editor with an assistant panel                                                                       |
 
 ## Core ideas
 
@@ -83,6 +127,7 @@ const html = renderDocument(store.doc, store.registry, 'home');
 ```bash
 pnpm build      # tsc project build
 pnpm test       # vitest (runs against sources)
+pnpm test:e2e   # builds the examples and showcase, drives them in Chromium (needs Playwright)
 pnpm lint       # biome
 pnpm format     # biome --write
 ```

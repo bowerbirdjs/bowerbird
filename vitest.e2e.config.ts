@@ -1,0 +1,13 @@
+import { defineConfig } from 'vitest/config';
+
+// Browser tests: the global setup builds the examples and the showcase with Vite, serves them and
+// drives them with Playwright. Run with `pnpm test:e2e`; skipped when Playwright isn't installed.
+export default defineConfig({
+  test: {
+    include: ['e2e/**/*.e2e.ts'],
+    globalSetup: ['e2e/setup.ts'],
+    testTimeout: 60_000,
+    hookTimeout: 180_000,
+    fileParallelism: false,
+  },
+});

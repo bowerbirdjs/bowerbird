@@ -1,0 +1,144 @@
+import { ancestors, type NodeInput } from '@bowerbirdjs/core';
+import type { EditorController, Position } from './controller.js';
+
+/** What is being dragged. Kept in memory because `dataTransfer` is unreadable during `dragover`. */
+export type DragPayload =
+  | { kind: 'section'; name: string; variant?: Record<string, string> }
+  | { kind: 'node'; input: NodeInput }
+  | { kind: 'move'; id: string };
+
+let active: DragPayload | null = null;
+
+export const DRAG_MIME = 'application/x-bowerbird';
+
+export function startDrag(event: DragEvent, payload: DragPayload): void {
+  active = payload;
+  event.dataTransfer?.setData(DRAG_MIME, JSON.stringify(payload));
+  event.dataTransfer?.setData('text/plain', payload.kind === 'move' ? payload.id : payload.kind);
+  if (event.dataTransfer)
+    event.dataTransfer.effectAllowed = payload.kind === 'move' ? 'move' : 'copy';
+}
+
+export function endDrag(): void {
+  active = null;
+}
+
+export function currentDrag(): DragPayload | null {
+  return active;
+}
+
+export interface DropTarget extends Position {
+  /** Where to draw the indicator, in viewport coordinates. */
+  indicator: { kind: 'line' | 'box'; rect: DOMRect; orientation: 'horizontal' | 'vertical' };
+}
+
+const EDGE = 10;
+
+function isHorizontal(parentEl: Element | null): boolean {
+  if (!parentEl) return false;
+  const style = getComputedStyle(parentEl);
+  if (style.display.includes('flex')) return style.flexDirection.startsWith('row');
+  if (style.display.includes('grid'))
+    return style.gridTemplateColumns.trim().split(/\s+/).length > 1;
+  return false;
+}
+
+function lineRect(rect: DOMRect, side: 'before' | 'after', horizontal: boolean): DOMRect {
+  if (horizontal)
+    return new DOMRect(
+      side === 'before' ? rect.left - 1 : rect.right - 1,
+      rect.top,
+      2,
+      rect.height,
+    );
+  return new DOMRect(rect.left, side === 'before' ? rect.top - 1 : rect.bottom - 1, rect.width, 2);
+}
+
+/**
+ * Where a drop at (x, y) over `el` would go, or null if nowhere valid. Sections go between the
+ * page's top-level sections; nodes go inside a container (away from its edges) or before/after
+ * the hovered node, following the parent's layout direction.
+ */
+export function dropTarget(
+  controller: EditorController,
+  payload: DragPayload,
+  el: Element | null,
+  x: number,
+  y: number,
+  content: Element,
+): DropTarget | null {
+  const page = controller.currentPage;
+  if (!page) return null;
+  const view = controller.store.view;
+  const registry = controller.store.registry;
+  const nodeEl = el?.closest('[data-bb-node]') ?? null;
+  const id = nodeEl?.getAttribute('data-bb-node') ?? null;
+  const elementOf = (nid: string) => content.querySelector(`[data-bb-node="${CSS.escape(nid)}"]`);
+
+  if (payload.kind === 'section') {
+    let top = id ? view.node(id) : undefined;
+    while (top?.parent && top.parent !== page.rootId) top = view.node(top.parent);
+    const topEl = top && top.parent === page.rootId ? elementOf(top.id) : null;
+    if (top && topEl) {
+      const rect = topEl.getBoundingClientRect();
+      const side = y < rect.top + rect.height / 2 ? 'before' : 'after';
+      return {
+        parent: page.rootId,
+        [side]: top.id,
+        indicator: { kind: 'line', rect: lineRect(rect, side, false), orientation: 'vertical' },
+      };
+    }
+    const rootEl = elementOf(page.rootId);
+    const rect = rootEl?.getBoundingClientRect() ?? content.getBoundingClientRect();
+    return {
+      parent: page.rootId,
+      indicator: { kind: 'line', rect: lineRect(rect, 'after', false), orientation: 'vertical' },
+    };
+  }
+
+  const type = payload.kind === 'node' ? payload.input.type : view.node(payload.id)?.type;
+  if (!type || !id || !nodeEl) return null;
+  const node = view.node(id);
+  if (!node) return null;
+  if (payload.kind === 'move') {
+    if (id === payload.id || ancestors(view, id).some((a) => a.id === payload.id)) return null;
+  }
+  const rect = nodeEl.getBoundingClientRect();
+  const nearEdge =
+    y - rect.top < EDGE || rect.bottom - y < EDGE || x - rect.left < EDGE || rect.right - x < EDGE;
+  if (node.parent === null || (registry.accepts(node.type, type) && !nearEdge)) {
+    if (!registry.accepts(node.type, type)) return null;
+    return { parent: node.id, indicator: { kind: 'box', rect, orientation: 'vertical' } };
+  }
+  const parent = view.node(node.parent);
+  if (!parent || !registry.accepts(parent.type, type)) return null;
+  const horizontal = isHorizontal(nodeEl.parentElement);
+  const side = (horizontal ? x < rect.left + rect.width / 2 : y < rect.top + rect.height / 2)
+    ? 'before'
+    : 'after';
+  return {
+    parent: parent.id,
+    [side]: node.id,
+    indicator: {
+      kind: 'line',
+      rect: lineRect(rect, side, horizontal),
+      orientation: horizontal ? 'horizontal' : 'vertical',
+    },
+  };
+}
+
+/** Applies a drop as one transaction. */
+export function performDrop(controller: EditorController, payload: DragPayload, target: Position) {
+  const position: Position = {
+    ...(target.parent ? { parent: target.parent } : {}),
+    ...(target.before ? { before: target.before } : {}),
+    ...(target.after ? { after: target.after } : {}),
+  };
+  if (payload.kind === 'section')
+    return controller.insertSection(payload.name, position, payload.variant);
+  if (payload.kind === 'node')
+    return controller.insertNode(payload.input, position as Position & { parent: string });
+  const result = controller.move(payload.id, position);
+  if (result.ok) controller.select(payload.id);
+  return result;
+}

@@ -50,6 +50,15 @@ export const BASE_CSS = `.bb-page {
 .bb-page :where(a) { color: inherit; }
 .bb-page :where(button) { font: inherit; }`;
 
+/**
+ * Editor mode only: the canvas shares the host document, so host element rules (`h1 { … }`,
+ * `.prose p { … }`) would reach page content. This reverts everything the host sets on content
+ * elements back to browser defaults. It comes first, so base, section and node rules (same
+ * specificity, later) still win. SVG, media and host code components keep their own styling.
+ * Host `!important` rules and selectors more specific than two classes still get through.
+ */
+export const EDITOR_RESET_CSS = `.bb-page, .bb-page :where(*):where(:not(svg, svg *, img, video, iframe, [data-bb-code], [data-bb-code] *)) { all: revert; }`;
+
 export const nodeSelector = (id: string) => `[data-bb-node="${id}"]`;
 
 const indent = (css: string, by = '  ') =>
@@ -193,6 +202,6 @@ export function compileCss(
     ...themes.map(([name, decls]) =>
       block(`${scope}[data-theme="${name}"], ${scope} [data-theme="${name}"]`, decls),
     ),
-    `${scope} {\n${indent(join([BASE_CSS, sections, nodeRules]))}\n}`,
+    `${scope} {\n${indent(join([EDITOR_RESET_CSS, BASE_CSS, sections, nodeRules]))}\n}`,
   ])}\n`;
 }

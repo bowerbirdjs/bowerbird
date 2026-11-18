@@ -246,6 +246,8 @@ editor.registry.component({
 
 ## 6. Phase 1: the editor and the showcase (about 6–8 weeks)
 
+> **As built** (see [`progress.md`](progress.md)): drag and drop uses native HTML5 drag and drop instead of `@dnd-kit/dom`; the canvas is a light-DOM child of `<bowerbird-editor>` rather than a separate `<bowerbird-canvas>` element; the showcase is Vite + React instead of Next.js. Storage and asset adapters, the extension API, section thumbnails, the Svelte example and host components rendered on the canvas move to Phase 2.
+
 - **`editor`** (Lit):
   - `<bowerbird-editor>` shell with a **same-document canvas** (`<bowerbird-canvas>`: a container-query viewport with zoom), hover and selection overlays, and drag and drop (`@dnd-kit/dom`) behind an adapter.
   - Panels: layers, section catalog with thumbnails, auto-generated panels for props and variables, a style panel with token pickers.

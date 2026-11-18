@@ -16,11 +16,12 @@ The working log for building Bowerbird phase by phase. Each phase ends with a re
 
 ## Phase 1: editor and showcase
 
-- [ ] `@bowerbirdjs/editor`: `<bowerbird-editor>` (Lit), same-document canvas, overlays, selection, inline text editing, drag and drop, layers / insert / inspector panels, breakpoint switcher, undo/redo, host API and events
-- [ ] `@bowerbirdjs/react` and `@bowerbirdjs/vue` wrappers
-- [ ] Showcase app (fictional events product embedding the editor) with an agent panel
-- [ ] Examples: plain HTML, Vue
-- [ ] End-to-end tests (Playwright)
+- [x] `@bowerbirdjs/editor`: `<bowerbird-editor>` (Lit), same-document canvas, overlays, selection, inline text editing, drag and drop, layers / insert / inspector / history panels, breakpoint switcher, zoom, theme preview, undo/redo, keyboard shortcuts, host API and events
+- [x] `@bowerbirdjs/react` and `@bowerbirdjs/vue` wrappers
+- [x] Showcase app (fictional events product embedding the editor) with an assistant panel (scripted demo agent, or Claude through a dev-server proxy), role switch, palettes, developer panel, HTML export
+- [x] Examples: plain HTML, Vue, hostile host CSS
+- [x] Scoped reset so host element CSS doesn't reach the canvas (content and chrome)
+- [x] End-to-end tests (`pnpm test:e2e`: Vitest + Playwright against built apps); controller unit tests
 - [ ] Review pass and fixes
 
 ## Phase 2: sections and safety
@@ -45,6 +46,8 @@ The working log for building Bowerbird phase by phase. Each phase ends with a re
 
 - Phase 0 review fixes: prototype-safe lookups, CSS-injection hardening (property names, balanced value syntax, token/theme values, compile-time re-checks), lock checks on whole subtrees and pages, design-level checks for styling inside inserts, depth limit, ids never reused (per-prefix counters), undo that can't get stuck and merges tokens/themes per path, unique order keys after undo, section.variant rebuilt as a merge, shared URL sanitiser, importer hardening, preview host check, benchmark accounting.
 - Drag and drop: native HTML5 drag and drop instead of `@dnd-kit/dom` (pre-1.0; native DnD works across the panels' shadow root into the light-DOM canvas).
+- Showcase: Vite + React instead of Next.js. It needs no server beyond the API-key proxy, and React is the part that matters for the embedding story. Svelte example and code components rendered by the wrappers are deferred to Phase 2.
+- Host CSS isolation: editor-mode CSS starts with `all: revert` on content (except SVG, media and `[data-bb-code]` subtrees), at a specificity that host element and single-class rules can't beat; base, section and node rules come after it at the same specificity. Host `!important` and very specific host selectors can still leak.
 
 - No GitHub remote yet: `bowerbirdjs/bowerbird` must be created before pushing.
 - No model API key in this environment: the benchmark runner is tested with a scripted agent.
