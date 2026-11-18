@@ -145,6 +145,14 @@ export function newIdProblem(draft: Draft, id: string): string | undefined {
   return undefined;
 }
 
+/**
+ * Whether an explicit id fits where it is created: a scoped id (`cta-1/heading`) must continue
+ * the scope it is created in; plain ids (`note`) fit anywhere.
+ */
+export function fitsScope(id: string, scope: string): boolean {
+  return !id.includes('/') || (id.startsWith(scope) && !id.slice(scope.length).includes('/'));
+}
+
 /** A node whose id is inside `id`'s scope (`id/…`), if any. */
 function scopeInUse(draft: Draft, id: string): string | undefined {
   const prefix = `${id}/`;
@@ -587,10 +595,7 @@ function createTree(
     }
     // A scoped id (`cta-1/heading`) must continue the scope it is created in, or it would take
     // the place of another section's part.
-    if (
-      explicit.includes('/') &&
-      (!explicit.startsWith(scope) || explicit.slice(scope.length).includes('/'))
-    ) {
+    if (!fitsScope(explicit, scope)) {
       return fail(ctx, {
         code: 'invalid_id',
         nodeId: explicit,
@@ -908,13 +913,29 @@ function nodeDuplicate(ctx: OpContext, op: OpOf<'node.duplicate'>) {
       message: `"${node.id}" is a page or symbol root and can't be duplicated.`,
     });
   if (!guardInstance(ctx, node, 'duplicate it')) return;
+  // An explicit id for the copy (pinned by proposals and sync, so later ops can refer to it).
+  if (op.copy) {
+    const problem = !isValidId(op.copy)
+      ? `"${op.copy}" is not a valid id.`
+      : !fitsScope(op.copy, scopeFor(draft, node.parent))
+        ? `"${op.copy}" doesn't fit next to "${node.id}": ids there look like "${scopeFor(draft, node.parent)}<name>".`
+        : newIdProblem(draft, op.copy);
+    if (problem) {
+      return fail(ctx, {
+        code: 'invalid_id',
+        nodeId: op.copy,
+        message: problem,
+        hint: 'Leave "copy" out to get an id generated.',
+      });
+    }
+  }
   const order = orderNextTo(draft.children(node.parent), node.order, 'after');
   // Instance copies keep their links (a copy of an instance is another instance), and start
   // from the same definition state as their source, so sync in this transaction treats them alike.
   const idMap = copySubtree(ctx, node, {
     parent: node.parent,
     order,
-    rootId: allocateCopyId(ctx, node.id),
+    rootId: op.copy ?? allocateCopyId(ctx, node.id),
   });
   for (const [from, to] of idMap) {
     const src = draft.node(from);

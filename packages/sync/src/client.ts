@@ -7,6 +7,7 @@ import {
   type HistoryEntry,
   type Issue,
   type Op,
+  opIdUse,
   type ProposeResult,
   renameOpIds,
   type SiteDoc,
@@ -243,21 +244,32 @@ export class SyncedStore extends Store {
     return rest;
   }
 
-  override undo(options: { actorId?: string; actor?: Actor } = {}): ApplyResult {
+  override undo(
+    options: { actorId?: string; actor?: Actor; overwrite?: boolean } = {},
+  ): ApplyResult {
     if (!this.syncing) return super.undo(options);
     if (!this.connected) return this.offline();
     const actorId = options.actorId;
     const own = !actorId || actorId === this.claimed?.id || actorId === this.serverActor?.id;
+    const overwrite = options.overwrite ? { overwrite: true } : {};
     this.channel!.send(
-      own ? { type: 'undo', id: this.nextId() } : { type: 'undo-by', actorId, id: this.nextId() },
+      own
+        ? { type: 'undo', id: this.nextId(), ...overwrite }
+        : { type: 'undo-by', actorId, id: this.nextId(), ...overwrite },
     );
     return this.sent('Undo sent to the server.');
   }
 
-  override redo(options: { actorId?: string; actor?: Actor } = {}): ApplyResult {
+  override redo(
+    options: { actorId?: string; actor?: Actor; overwrite?: boolean } = {},
+  ): ApplyResult {
     if (!this.syncing) return super.redo(options);
     if (!this.connected) return this.offline();
-    this.channel!.send({ type: 'redo', id: this.nextId() });
+    this.channel!.send({
+      type: 'redo',
+      id: this.nextId(),
+      ...(options.overwrite ? { overwrite: true } : {}),
+    });
     return this.sent('Redo sent to the server.');
   }
 
@@ -391,6 +403,12 @@ export class SyncedStore extends Store {
         this.serverHistory = message.history.slice(-this.limit);
         // Changes the server handled before the connection dropped are already in its document.
         const settled = new Map((message.settled ?? []).map((s) => [s.id, s.errors]));
+        // What refused changes would have created doesn't exist: changes built on it are dropped.
+        const gone = new Set(
+          this.pending
+            .filter((p) => settled.get(p.id)?.length)
+            .flatMap((p) => createdIds(p.input.ops as Op[])),
+        );
         this.pending = this.pending.filter((p) => !settled.has(p.id));
         for (const p of this.pending) p.sent = false;
         if (first) {
@@ -400,10 +418,10 @@ export class SyncedStore extends Store {
             reset: true,
           });
           // Changes made before the server's document arrived are replayed on it.
-          if (this.pending.length) this.rebase();
+          if (this.pending.length) this.rebase(undefined, false, gone);
         } else {
           this.replace(this.doc, { changesets: message.changesets });
-          this.rebase();
+          this.rebase(undefined, false, gone);
         }
         this.flush();
         if (this.presence) this.channel?.send({ type: 'presence', state: this.presence });
@@ -468,8 +486,8 @@ export class SyncedStore extends Store {
       case 'rejected': {
         const index = message.id ? this.pending.findIndex((p) => p.id === message.id) : -1;
         if (index >= 0) {
-          this.pending.splice(index, 1);
-          this.rebase();
+          const [refused] = this.pending.splice(index, 1);
+          this.rebase(undefined, false, new Set(createdIds(refused!.input.ops as Op[])));
           this.flush();
         }
         if (message.errors.length) this.emitErrors(message.errors);
@@ -493,7 +511,7 @@ export class SyncedStore extends Store {
    * Rebuilds the local document: the server's state plus local changes it hasn't confirmed yet,
    * replayed in order. Local changes that no longer apply are dropped and reported.
    */
-  private rebase(entry?: HistoryEntry, echo = false): void {
+  private rebase(entry?: HistoryEntry, echo = false, gone = new Set<string>()): void {
     const scratch = createStore({
       registry: this.registry,
       doc: this.confirmed,
@@ -505,10 +523,24 @@ export class SyncedStore extends Store {
     this.pending = this.pending.filter((p) => {
       const ops = local.size
         ? (p.input.ops as Op[]).map((op) => renameOpIds(op, local))
-        : p.input.ops;
+        : (p.input.ops as Op[]);
+      // A change that builds on something a refused change would have created (a page made
+      // offline whose path was taken meanwhile) would land on whatever has that id now: drop it.
+      const missing = ops
+        .flatMap((op) => opIdUse(op).refers)
+        .find((id) => [...gone].some((g) => id === g || id.startsWith(`${g}/`)));
+      if (missing) {
+        dropped.push({
+          code: 'conflict',
+          message: `A change of yours was dropped: it used "${missing}", which an earlier change of yours would have created, but that change was refused.`,
+        });
+        for (const id of createdIds(ops)) gone.add(id);
+        return false;
+      }
       const result = scratch.apply({ ...p.input, ops, renameTaken: true });
       if (!result.ok) {
         dropped.push(...result.errors);
+        for (const id of createdIds(ops)) gone.add(id);
         return false;
       }
       for (const [from, to] of Object.entries(result.renamed ?? {})) local.set(from, to);
@@ -526,6 +558,11 @@ export class SyncedStore extends Store {
     });
     if (dropped.length) this.emitErrors(dropped);
   }
+}
+
+/** Ids a change's ops create (pinned ids). */
+function createdIds(ops: Op[]): string[] {
+  return ops.flatMap((op) => opIdUse(op).creates);
 }
 
 /** A store with the given options that syncs over `channel` as `actor`. */

@@ -87,7 +87,11 @@ export const OpSchema = z.discriminatedUnion('op', [
     .strictObject({ op: z.literal('node.remove'), id: Id })
     .describe('Remove a node and its subtree.'),
   z
-    .strictObject({ op: z.literal('node.duplicate'), id: Id })
+    .strictObject({
+      op: z.literal('node.duplicate'),
+      id: Id,
+      copy: Id.optional().describe('Id for the copy; normally generated.'),
+    })
     .describe('Copy a node and its subtree after itself.'),
   z
     .strictObject({

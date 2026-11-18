@@ -63,6 +63,17 @@ describe('preview review panel', () => {
       },
     });
     expect(crossSite.status).toBe(403);
+    // Unparseable and opaque origins are refused too (not a server error).
+    for (const origin of ['not a url', 'null']) {
+      const odd = await fetch(`${url}/__bowerbird/changesets/${id}/accept`, {
+        ...form([
+          ['token', token],
+          ['ops', '0'],
+        ]),
+        headers: { 'content-type': 'application/x-www-form-urlencoded', origin },
+      });
+      expect(odd.status).toBe(403);
+    }
     expect(store.view.node('hero-1')).toBeUndefined();
 
     const ok = await fetch(

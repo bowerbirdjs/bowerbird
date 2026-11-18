@@ -1,4 +1,12 @@
-import { applyOp, idTaken, isValidPagePath, type OpContext, orderNextTo } from './apply.js';
+import {
+  applyOp,
+  fitsScope,
+  isValidPagePath,
+  newIdProblem,
+  type OpContext,
+  orderNextTo,
+  scopeFor,
+} from './apply.js';
 import { createEmptyDoc, DocIndex, descendants } from './doc.js';
 import { type Change, Draft } from './draft.js';
 import { type Issue, listPreview } from './errors.js';
@@ -227,6 +235,9 @@ function pinIds(op: Op, created: { nodes: string[]; pages: string[]; symbols: st
       }
       break;
     }
+    case 'node.duplicate':
+      if (!pinned.copy && created.nodes[0]) pinned.copy = created.nodes[0];
+      break;
     case 'page.create':
       if (!pinned.id && created.pages[0]) pinned.id = created.pages[0];
       break;
@@ -235,6 +246,42 @@ function pinIds(op: Op, created: { nodes: string[]; pages: string[]; symbols: st
       break;
   }
   return pinned;
+}
+
+/**
+ * Ids an op creates (as pinned: `section.insert` id, `node.insert` ids, `node.duplicate` copy,
+ * `page.create` id, `symbol.create` symbol) and ids it refers to. A sync client uses it to drop
+ * queued changes that build on a change the server refused.
+ */
+export function opIdUse(op: Op): { creates: string[]; refers: string[] } {
+  const creates: string[] = [];
+  const o = op as Record<string, unknown>;
+  switch (op.op) {
+    case 'section.insert':
+    case 'symbol.insert':
+    case 'page.create':
+      if (op.id) creates.push(op.id);
+      break;
+    case 'node.insert': {
+      const walk = (n: NodeInput) => {
+        if (n.id) creates.push(n.id);
+        for (const c of n.children ?? []) walk(c);
+      };
+      walk(op.node);
+      break;
+    }
+    case 'node.duplicate':
+      if (op.copy) creates.push(op.copy);
+      break;
+    case 'symbol.create':
+      if (op.symbol) creates.push(op.symbol, `symbol-${op.symbol}`);
+      break;
+  }
+  const own = new Set(creates);
+  const refers = ID_FIELDS.flatMap((f) =>
+    typeof o[f] === 'string' && !own.has(o[f] as string) ? [o[f] as string] : [],
+  );
+  return { creates, refers };
 }
 
 /** Three-way merge of one value: revert `after` → `before` unless `current` changed since. */
@@ -455,25 +502,40 @@ type Pinned = {
   symbol?: string;
 };
 
-/** Records the ids an op pinned and drops those that are already taken. */
+/**
+ * Records the ids an op pinned and drops those that can't be used any more: taken meanwhile, or no
+ * longer fitting where they go (the parent moved into another section, or a keyed parent got
+ * another id). Dropped ids are generated afresh and later ops are rewritten to match.
+ */
 function unpinTaken(op: Op, draft: Draft): Pinned {
   const out = clone(op);
   switch (out.op) {
     case 'section.insert':
     case 'symbol.insert': {
       const id = out.id;
-      if (id && idTaken(draft, id)) delete out.id;
+      if (id && newIdProblem(draft, id)) delete out.id;
       return { op: out, nodes: [id] };
     }
     case 'node.insert': {
       const nodes: (string | undefined)[] = [];
-      const walk = (n: { id?: string; children?: unknown[] }) => {
+      // `undefined` scope: the parent's id will be generated, so pinned ids under it can't fit.
+      const walk = (n: NodeInput, scope: string | undefined) => {
         nodes.push(n.id);
-        if (n.id && idTaken(draft, n.id)) delete n.id;
-        for (const c of n.children ?? []) walk(c as typeof n);
+        if (n.id && (scope === undefined || !fitsScope(n.id, scope) || newIdProblem(draft, n.id)))
+          delete n.id;
+        const childScope = n.key ? (n.id ? `${n.id}/` : undefined) : scope;
+        for (const c of n.children ?? []) walk(c, childScope);
       };
-      walk(out.node);
+      walk(out.node, draft.has(out.parent) ? scopeFor(draft, out.parent) : undefined);
       return { op: out, nodes };
+    }
+    case 'node.duplicate': {
+      const id = out.copy;
+      const source = draft.node(out.id);
+      const scope = source?.parent ? scopeFor(draft, source.parent) : undefined;
+      if (id && (scope === undefined || !fitsScope(id, scope) || newIdProblem(draft, id)))
+        delete out.copy;
+      return { op: out, nodes: [id] };
     }
     case 'page.create': {
       const id = out.id;
@@ -504,6 +566,9 @@ export function substitute(op: Op, map: Map<string, string>): Op {
   const out = clone(op) as Record<string, unknown>;
   for (const f of ID_FIELDS)
     if (typeof out[f] === 'string') out[f] = renameId(out[f] as string, map);
+  // A copy's pinned id lives under the same scope as its source.
+  if (out.op === 'node.duplicate' && typeof out.copy === 'string')
+    out.copy = renameId(out.copy, map);
   if (out.op === 'node.insert') {
     const walk = (n: { id?: string; children?: unknown[] }) => {
       if (n.id) n.id = renameId(n.id, map);

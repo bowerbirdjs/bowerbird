@@ -103,6 +103,7 @@ export {
   isSiteDoc,
   LOCAL_USER,
   normalizeDoc,
+  opIdUse,
   type ProposeResult,
   renameId,
   Store,

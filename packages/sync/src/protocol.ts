@@ -48,8 +48,9 @@ export type ClientMessage =
       pending?: string[];
     }
   | { type: 'tx'; id: string; input: WireInput }
-  | { type: 'undo' | 'redo'; id?: string }
-  | { type: 'undo-by'; actorId: string; id?: string }
+  /** `overwrite`: undo even over people's later edits (agents, when the person asked). */
+  | { type: 'undo' | 'redo'; id?: string; overwrite?: boolean }
+  | { type: 'undo-by'; actorId: string; id?: string; overwrite?: boolean }
   | { type: 'propose'; id: string; input: WireInput }
   | { type: 'accept' | 'reject'; changeset: string; ops?: number[]; id?: string }
   | { type: 'presence'; state: PresenceState };

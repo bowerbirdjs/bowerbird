@@ -326,4 +326,16 @@ describe('agent tools (phase 2)', () => {
     expect((await runTool(tools, 'undo', { overwrite: true })).isError).toBeFalsy();
     expect(store.view.node('hero-1')).toBeUndefined();
   });
+
+  it('misspelled tool arguments are refused with a suggestion', async () => {
+    const { run } = setup();
+    const res = await run('get_outline', { pgae: 'home' });
+    expect(res.isError).toBe(true);
+    expect(res.text).toContain('- pgae: not an argument of this tool. Did you mean "page"?');
+    const apply = await run('apply', {
+      ops: [{ op: 'section.insert', section: 'hero' }],
+      overwrit: true,
+    });
+    expect(apply.text).toContain('Did you mean "overwrite"?');
+  });
 });

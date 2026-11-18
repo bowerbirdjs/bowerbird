@@ -45,16 +45,34 @@ export function memoryChannelPair(): {
 
 /** Minimal WebSocket shape (browser `WebSocket`, or `ws` on Node). */
 export interface SocketLike {
+  /** 0 while connecting (WebSocket.CONNECTING); messages sent meanwhile wait for `open`. */
+  readonly readyState?: number;
   send(data: string): void;
   close(): void;
   addEventListener(type: 'message', listener: (event: { data: unknown }) => void): void;
-  addEventListener(type: 'close', listener: () => void): void;
+  addEventListener(type: 'open' | 'close', listener: () => void): void;
 }
 
-/** Wraps a WebSocket as a channel (JSON messages). Works for either end. */
+/**
+ * Wraps a WebSocket as a channel (JSON messages). Works for either end, and with a socket that is
+ * still connecting (`socketChannel(new WebSocket(url))`): messages wait until it opens.
+ */
 export function socketChannel<In, Out>(socket: SocketLike): Channel<In, Out> {
+  let waiting: string[] | undefined;
+  if (socket.readyState === 0) {
+    waiting = [];
+    socket.addEventListener('open', () => {
+      const queued = waiting ?? [];
+      waiting = undefined;
+      for (const data of queued) socket.send(data);
+    });
+  }
   return {
-    send: (m) => socket.send(JSON.stringify(m)),
+    send: (m) => {
+      const data = JSON.stringify(m);
+      if (waiting) waiting.push(data);
+      else socket.send(data);
+    },
     receive: (handler) =>
       socket.addEventListener('message', (event) => {
         try {

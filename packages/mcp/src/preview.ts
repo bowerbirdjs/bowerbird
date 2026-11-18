@@ -245,8 +245,15 @@ export async function startPreview(options: PreviewOptions): Promise<PreviewServ
     const url = new URL(req.url ?? '/', 'http://localhost');
     const match = /^\/__bowerbird\/changesets\/([^/]+)\/(accept|reject)$/.exec(url.pathname);
     const origin = req.headers.origin;
-    const sameOrigin =
-      !origin || allowedHosts.has(new URL(origin).hostname.replace(/^\[|\]$/g, ''));
+    // An unparseable or opaque ("null") Origin is a foreign page: refuse, don't crash.
+    const originHost = (() => {
+      try {
+        return origin ? new URL(origin).hostname.replace(/^\[|\]$/g, '') : undefined;
+      } catch {
+        return null;
+      }
+    })();
+    const sameOrigin = !origin || (originHost !== null && allowedHosts.has(originHost ?? ''));
     const form = await readForm(req);
     // Accepting or rejecting is for the person at this machine, even when the preview is shared
     // on the network (--host): others can read the page (and its token) but not act on it.

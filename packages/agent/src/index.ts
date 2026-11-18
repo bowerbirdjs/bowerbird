@@ -6,6 +6,7 @@ import {
   checkReadLocale,
   DocIndex,
   describeNode,
+  didYouMean,
   flattenTokens,
   formatIssue,
   instancesOf,
@@ -309,6 +310,26 @@ function parseInput<T extends z.ZodType>(
   schema: T,
   input: unknown,
 ): { data: z.infer<T> } | { error: ToolResult } {
+  // A misspelled argument (overwrit, pgae) would otherwise be ignored without a word.
+  if (
+    schema instanceof z.ZodObject &&
+    input &&
+    typeof input === 'object' &&
+    !Array.isArray(input)
+  ) {
+    const known = Object.keys(schema.shape);
+    const unknown = Object.keys(input).filter((k) => !known.includes(k));
+    if (unknown.length) {
+      return {
+        error: {
+          isError: true,
+          text: `Invalid input:\n${unknown
+            .map((k) => `- ${k}: not an argument of this tool.${didYouMean(k, known)}`)
+            .join('\n')}\nArguments: ${known.join(', ') || '(none)'}.`,
+        },
+      };
+    }
+  }
   const res = schema.safeParse(input ?? {});
   if (res.success) return { data: res.data };
   return {

@@ -329,12 +329,14 @@ export function createSyncServer(store: Store, options: SyncServerOptions = {}):
       case 'undo':
       case 'redo':
       case 'undo-by': {
+        const overwrite = message.overwrite === true ? { overwrite: true } : {};
         const result = runFor(client, id, () =>
           message.type === 'redo'
-            ? store.redo({ actorId: actor.id, actor })
+            ? store.redo({ actorId: actor.id, actor, ...overwrite })
             : store.undo({
                 actorId: message.type === 'undo-by' ? String(message.actorId) : actor.id,
                 actor,
+                ...overwrite,
               }),
         );
         if (!result.ok) reject(client, result.errors, id);
