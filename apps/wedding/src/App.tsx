@@ -4,6 +4,8 @@ import { BowerbirdEditor } from '@bowerbirdjs/react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { DesignPanel } from './DesignPanel.js';
 import { Details } from './Details.js';
+import { JOY_ICONS } from './joy/icons.js';
+import { JoyMark } from './joy/mark.js';
 import type { EventInfo, SiteLocale } from './site/facts.js';
 import { OCCASIONS } from './site/facts.js';
 import {
@@ -25,6 +27,8 @@ const HOST: Actor = { kind: 'user', id: 'host', name: 'You' };
  */
 const EDITOR_UI: EditorUI = {
   preset: 'full',
+  // Joy Phone's icon set (the rest of the theme is CSS: ./joy/editor-theme.css).
+  icons: JOY_ICONS,
   sections: EVENT_BLOCK_TYPES,
   features: {
     'insert.elements': false,
@@ -140,8 +144,8 @@ export function App() {
     <div className="app">
       <header className="topbar">
         <span className="brand">
-          <span className="logo" aria-hidden="true">
-            ✿
+          <span className="logo">
+            <JoyMark size={26} />
           </span>
           Wedding planner
         </span>
@@ -203,7 +207,7 @@ export function App() {
       <main className="workspace">
         <BowerbirdEditor
           ref={editor}
-          className="editor"
+          className="editor joy-editor"
           store={store}
           actor={HOST}
           ui={EDITOR_UI}

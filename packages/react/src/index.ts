@@ -25,10 +25,12 @@ export {
   type EditorAppearance,
   type EditorDensity,
   type EditorFeature,
+  type EditorIcons,
   type EditorPreset,
   type EditorToken,
   type EditorTokens,
   type EditorUI,
+  ICON_NAMES,
 } from '@bowerbirdjs/editor';
 
 export interface BowerbirdEditorProps {

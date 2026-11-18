@@ -63,13 +63,34 @@ const PATHS = {
 
 export type IconName = keyof typeof PATHS;
 
+/** Icons a host puts in place of the built-in ones: SVG markup, e.g. from an icon package. */
+export type EditorIcons = Partial<Record<IconName, string>>;
+
+/** Only plain SVG drawings are taken as icons (no scripts, handlers or embedded HTML). */
+const SAFE_SVG = /^\s*<svg[\s>]/i;
+const UNSAFE_SVG = /<\s*(script|foreignObject|iframe|style)\b|\son[a-z]+\s*=|javascript:/i;
+
+/** Whether markup can stand in for an icon (see `EditorUI.icons`). */
+export const isIconMarkup = (markup: unknown): markup is string =>
+  typeof markup === 'string' && SAFE_SVG.test(markup) && !UNSAFE_SVG.test(markup);
+
 /**
  * The icon as SVG markup, sized by CSS (`.bb-icon` in the panels, `.bbx-icon` on the canvas).
- * Stroke-only: the canvas chrome sets the stroke in CSS too, since its reset reverts attributes.
+ * Built-in icons are stroke drawings; a host's icon (`custom`) keeps its own fill and stroke and
+ * gets `<class>-custom`, so the canvas styles it by size only.
  */
-export function iconMarkup(name: IconName, className = 'bb-icon'): string {
+export function iconMarkup(name: IconName, className = 'bb-icon', custom?: EditorIcons): string {
+  const own = custom?.[name];
+  if (isIconMarkup(own))
+    return own.replace(
+      /^\s*<svg/i,
+      `<svg class="${className} ${className}-custom" aria-hidden="true" focusable="false"`,
+    );
   return `<svg class="${className}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">${PATHS[name]}</svg>`;
 }
+
+/** The names of the editor's icons, for hosts that replace them (`ui.icons`). */
+export const ICON_NAMES = Object.keys(PATHS) as IconName[];
 
 /** The icon for a node type in the layers tree and the inspector. */
 export function iconForType(

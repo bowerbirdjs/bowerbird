@@ -34,7 +34,7 @@ export {
   type FeatureSettings,
   presetForLevel,
 } from './features.js';
-export { type IconName, iconMarkup } from './icons.js';
+export { type EditorIcons, ICON_NAMES, type IconName, iconMarkup, isIconMarkup } from './icons.js';
 export { type Field, type FieldKind, fieldsFor, fieldValue } from './schema-form.js';
 export { editorStyles } from './styles.js';
 export {

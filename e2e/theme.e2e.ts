@@ -84,4 +84,49 @@ describe.skipIf(!apps)('editor look', () => {
     expect(warnings.join('\n')).toMatch(/"accnt" is not an editor token/);
     expect(errors).toEqual([]);
   });
+
+  test("a brand's icons, parts and canvas pattern", async () => {
+    const { page, editor, errors } = await open(url);
+    await editor.getByRole('button', { name: /Hero/ }).first().click();
+    await page.locator('[data-bb-node="hero-1/heading"]').click();
+    await page.locator('.bbx-toolbar').waitFor();
+    const dot =
+      '<svg viewBox="0 0 256 256" fill="currentColor"><circle cx="128" cy="128" r="96"/></svg>';
+    await page.addStyleTag({
+      content: `bowerbird-editor::part(danger) { border-color: rgb(1, 2, 3); }
+        bowerbird-editor::part(heading) { text-transform: uppercase; }
+        bowerbird-editor { --bb-editor-canvas-bg: radial-gradient(red 1px, transparent 1px) 0 0 / 20px 20px, rgb(9, 9, 9); }`,
+    });
+    await editor.evaluate((e, dot) => {
+      (e as unknown as { ui: unknown }).ui = { icons: { trash: dot, undo: dot, nope: dot } };
+    }, dot);
+    const seen = () =>
+      page.evaluate(() => {
+        const root = document.querySelector('bowerbird-editor')!.shadowRoot!;
+        const del = [...root.querySelectorAll('button')].find(
+          (b) => b.textContent?.trim() === 'Delete',
+        )!;
+        const frame = getComputedStyle(document.querySelector('.bbx-frame')!);
+        return {
+          panelIcon: !!root.querySelector('[aria-label="Undo"] circle'),
+          canvasIcon: !!document.querySelector('.bbx-toolbar [data-action="delete"] circle'),
+          canvasFill: getComputedStyle(
+            document.querySelector('.bbx-toolbar [data-action="delete"] svg')!,
+          ).fill,
+          danger: getComputedStyle(del).borderTopColor,
+          heading: getComputedStyle(root.querySelector('[part~="heading"]')!).textTransform,
+          canvas: [frame.backgroundColor, frame.backgroundImage.startsWith('radial-gradient')],
+        };
+      });
+    await expect.poll(seen).toMatchObject({
+      panelIcon: true,
+      canvasIcon: true,
+      danger: 'rgb(1, 2, 3)',
+      heading: 'uppercase',
+      canvas: ['rgb(9, 9, 9)', true],
+    });
+    // The host's icon keeps its own fill on the canvas (not the built-in icons' stroke style).
+    expect((await seen()).canvasFill).not.toBe('none');
+    expect(errors).toEqual([]);
+  });
 });

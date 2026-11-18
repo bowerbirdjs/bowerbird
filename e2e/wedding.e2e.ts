@@ -306,4 +306,47 @@ describe.skipIf(!apps)('wedding planner POC', () => {
     expect(await site.getByText(/^\+ /).count()).toBe(0);
     expect(errors).toEqual([]);
   });
+  test('the editor wears the Joy Phone theme: palette, Phosphor icons, micro labels, the Joy corner', async () => {
+    const { page, errors } = await open(apps?.wedding ?? '', { width: 1440, height: 900 });
+    const warnings: string[] = [];
+    page.on('console', (m) => {
+      if (m.type() === 'warning') warnings.push(m.text());
+    });
+    const canvas = page.locator('[data-bb-canvas]');
+    await canvas.locator('[data-bb-node="story-1/heading"]').click();
+    await page.locator('.bbx-select').waitFor();
+    const look = await page.evaluate(() => {
+      const el = document.querySelector('bowerbird-editor')!;
+      const root = el.shadowRoot!;
+      const cs = (e: Element | null) => getComputedStyle(e!);
+      return {
+        theme: el.classList.contains('joy-editor'),
+        panel: cs(root.querySelector('.left')).backgroundColor,
+        select: cs(document.querySelector('.bbx-select')).borderTopColor,
+        input: cs(root.querySelector('[part~="input"]')).borderTopLeftRadius,
+        heading: [
+          cs(root.querySelector('[part~="heading"]')).textTransform,
+          cs(root.querySelector('[part~="heading"]')).letterSpacing,
+        ],
+        icon: root.querySelector('[aria-label="Undo"] svg')?.getAttribute('viewBox'),
+        canvasIcon: document
+          .querySelector('.bbx-itembar svg, .bbx-toolbar svg')
+          ?.getAttribute('viewBox'),
+        publish: cs(document.querySelector('.topbar .button.primary')).borderBottomLeftRadius,
+      };
+    });
+    expect(look).toEqual({
+      theme: true,
+      panel: 'rgb(250, 244, 236)',
+      select: 'rgb(232, 44, 104)',
+      input: '999px',
+      heading: ['uppercase', '1.47px'],
+      icon: '0 0 256 256',
+      canvasIcon: '0 0 256 256',
+      publish: '4px',
+    });
+    // Every icon name in the theme is one the editor knows.
+    expect(warnings.filter((w) => w.includes('ui.icons'))).toEqual([]);
+    expect(errors).toEqual([]);
+  });
 });
