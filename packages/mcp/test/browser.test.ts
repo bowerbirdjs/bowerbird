@@ -8,7 +8,9 @@ import { afterAll, describe, expect, it } from 'vitest';
 const PIXEL =
   'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=';
 
-describe.skipIf(!hasPlaywright())('rendered layout in Chromium', () => {
+// Launching Chromium and laying out whole pages can take longer than the 5s default on a busy or
+// cold machine.
+describe.skipIf(!hasPlaywright())('rendered layout in Chromium', { timeout: 30_000 }, () => {
   // Playwright is optional and not a dependency here, so type just what the tests use.
   type Page = {
     setContent(html: string): Promise<void>;
