@@ -52,12 +52,29 @@ export const BASE_CSS = `.bb-page {
 
 /**
  * Editor mode only: the canvas shares the host document, so host element rules (`h1 { … }`,
- * `.prose p { … }`) would reach page content. This reverts everything the host sets on content
- * elements back to browser defaults. It comes first, so base, section and node rules (same
- * specificity, later) still win. SVG, media and host code components keep their own styling.
+ * `.prose p { … }`) would reach page content, and the page would inherit the host's (or the
+ * editor's) fonts. The page root starts from initial values, so nothing is inherited, and
+ * everything the host sets on content elements and their pseudo-elements is reverted to browser
+ * defaults. It comes first, so base, section and node rules (same specificity, later) still win.
+ * Images and media keep their size attributes; SVG and host code components keep their styling.
  * Host `!important` rules and selectors more specific than two classes still get through.
  */
-export const EDITOR_RESET_CSS = `.bb-page, .bb-page :where(*):where(:not(svg, svg *, img, video, iframe, [data-bb-code], [data-bb-code] *)) { all: revert; }`;
+export const EDITOR_RESET_CSS = `.bb-page { all: initial; display: block; }
+.bb-page :where(*):where(:not(svg, svg *, img, video, iframe, [data-bb-code], [data-bb-code] *)),
+.bb-page :where(*:not(svg *, [data-bb-code], [data-bb-code] *))::before,
+.bb-page :where(*:not(svg *, [data-bb-code], [data-bb-code] *))::after,
+.bb-page :where(*:not(svg *, [data-bb-code], [data-bb-code] *))::marker,
+.bb-page :where(*:not(svg *, [data-bb-code], [data-bb-code] *))::first-letter,
+.bb-page :where(*:not(svg *, [data-bb-code], [data-bb-code] *))::first-line { all: revert; }
+.bb-page :where(img, video, iframe) {
+  margin: 0; padding: 0; border: 0; border-radius: 0; outline: 0; box-shadow: none; background: none;
+  opacity: 1; filter: none; transform: none; object-fit: fill; vertical-align: baseline;
+}`;
+
+/** `1.5rem` → `calc(1.5 * 16px)`: the editor canvas must not depend on the host's root font size. */
+export function remToPx(css: string): string {
+  return css.replace(/(?<![\w.-])(\d*\.?\d+)rem\b/g, 'calc($1 * 16px)');
+}
 
 export const nodeSelector = (id: string) => `[data-bb-node="${id}"]`;
 
@@ -114,12 +131,23 @@ export function sectionCss(registry: Registry, names: Iterable<string>): string 
 }
 
 /** Rules for node-level variables and styles, with breakpoints as container queries. */
-export function nodeCss(nodes: Iterable<BNode>, breakpoints: Breakpoint[]): string {
+/**
+ * Editor mode has no cascade layers, so node rules get ID-level specificity (`:is(#x, *)` matches
+ * every element but counts as an id) to beat compound section selectors, as the `bb.nodes` layer
+ * does in published CSS.
+ */
+const EDITOR_BOOST = ':is(#bb-node, *)';
+
+export function nodeCss(
+  nodes: Iterable<BNode>,
+  breakpoints: Breakpoint[],
+  mode: CssMode = 'published',
+): string {
   const base: string[] = [];
   const byBreakpoint = new Map<string, string[]>();
   for (const n of nodes) {
     if (!isValidId(n.id)) continue;
-    const sel = nodeSelector(n.id);
+    const sel = nodeSelector(n.id) + (mode === 'editor' ? EDITOR_BOOST : '');
     if (n.vars)
       base.push(
         block(
@@ -178,7 +206,7 @@ export function compileCss(
     registry,
     nodes.filter((n) => n.section).map((n) => n.section!.name),
   );
-  const nodeRules = nodeCss(nodes, doc.breakpoints);
+  const nodeRules = nodeCss(nodes, doc.breakpoints, mode);
 
   if (mode === 'published') {
     return `${join([
@@ -195,13 +223,16 @@ export function compileCss(
     ])}\n`;
   }
 
-  // Editor mode: no layers (unlayered host CSS would beat any layer), everything scoped to the canvas.
+  // Editor mode: no layers (unlayered host CSS would beat any layer), everything scoped to the
+  // canvas, and rem converted to px so the host's root font size doesn't rescale the page.
   const scope = options.canvasSelector ?? '[data-bb-canvas]';
-  return `${join([
-    block(scope, base),
-    ...themes.map(([name, decls]) =>
-      block(`${scope}[data-theme="${name}"], ${scope} [data-theme="${name}"]`, decls),
-    ),
-    `${scope} {\n${indent(join([EDITOR_RESET_CSS, BASE_CSS, sections, nodeRules]))}\n}`,
-  ])}\n`;
+  return `${remToPx(
+    join([
+      block(scope, base),
+      ...themes.map(([name, decls]) =>
+        block(`${scope}[data-theme="${name}"], ${scope} [data-theme="${name}"]`, decls),
+      ),
+      `${scope} {\n${indent(join([EDITOR_RESET_CSS, BASE_CSS, sections, nodeRules]))}\n}`,
+    ]),
+  )}\n`;
 }

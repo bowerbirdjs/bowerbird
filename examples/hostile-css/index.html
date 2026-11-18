@@ -26,9 +26,19 @@
       button { background: black; color: white; border-radius: 0; padding: 30px; }
       .title, .heading, .button { font-size: 80px; }
       header.app { padding: 10px 16px; border: 0; display: flex; gap: 12px; align-items: center; }
+      /* Inherited properties on ancestors, and a root font size that rescales rem. */
+      html { font-size: 62.5%; }
+      body { text-align: center; letter-spacing: 0.1em; word-spacing: 0.5em; text-transform: uppercase; }
+      bowerbird-editor { font-size: 20px; line-height: 3; }
+      /* One class plus an element: outranks single-class rules. */
+      .app div { position: static; border: 0; padding: 7px; background: white; }
+      /* Pseudo-elements and media. */
+      a::after { content: " ↗"; }
+      li::marker { color: red; }
+      img { border: 6px solid red; opacity: 0.4; filter: grayscale(1); padding: 10px; }
     </style>
   </head>
-  <body>
+  <body class="app">
     <header class="app">
       <strong>Hostile host CSS</strong>
       <span>The page below should look the same as with <a href="?clean">?clean</a>.</span>

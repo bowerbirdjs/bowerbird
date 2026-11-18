@@ -22,7 +22,8 @@
   "types": "./dist/index.d.ts",
   "files": [
     "dist",
-    "src"
+    "src",
+    "!dist/.tsbuildinfo"
   ],
   "repository": {
     "type": "git",

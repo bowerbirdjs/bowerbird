@@ -35,12 +35,14 @@ export { NodeInputSchema, OP_NAMES, type Op, type OpName, OpSchema, parseOps } f
 export { compareOrder, keyBetween } from './order.js';
 export { describeNode, type OutlineOptions, outline } from './outline.js';
 export {
+  type ChangesContext,
   createPolicy,
   type FreedomLevel,
   type Policy,
   type PolicyContext,
   type PolicyOptions,
   requiredLevel,
+  requiredLevelForChanges,
 } from './policy.js';
 export { PRIMITIVES } from './primitives.js';
 export {

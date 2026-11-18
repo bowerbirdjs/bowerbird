@@ -1,10 +1,11 @@
 import { createDefaultRegistry, createStarterDoc } from '@bowerbirdjs/blocks';
-import { createPolicy, createStore, type Store } from '@bowerbirdjs/core';
+import { createPolicy, createStore, defineComponent, type Store } from '@bowerbirdjs/core';
 import { beforeEach, describe, expect, test } from 'vitest';
+import { z } from 'zod';
 // DOM-free modules only: the Lit element and canvas need a browser (see e2e/).
 import { EditorController, type EditorEvent } from '../src/controller.js';
 import { performDrop } from '../src/dnd.js';
-import { fieldsFor } from '../src/schema-form.js';
+import { fieldsFor, fieldValue } from '../src/schema-form.js';
 
 const SAM = { kind: 'user' as const, id: 'sam', name: 'Sam' };
 const BOT = { kind: 'agent' as const, id: 'bot', name: 'Bot' };
@@ -142,12 +143,76 @@ describe('EditorController', () => {
     const next = setup().store;
     c.setStore(next);
     expect(c.selected).toBeNull();
-    expect(events.at(-1)).toMatchObject({ type: 'store' });
+    expect(events.slice(-2)).toEqual([{ type: 'store' }, { type: 'selection', id: null }]);
     const before = events.length;
     next.apply({ actor: BOT, ops: [{ op: 'section.insert', section: 'cta', page: c.page }] });
     expect(events.length).toBe(before + 1);
     store.apply({ actor: BOT, ops: [{ op: 'section.insert', section: 'cta', page: c.page }] });
     expect(events.length).toBe(before + 1);
+  });
+});
+
+describe('EditorController (review regressions)', () => {
+  test('preview width stays inside the breakpoint range', () => {
+    const store = createStore({
+      registry: createDefaultRegistry(),
+      doc: {
+        ...createStarterDoc(),
+        breakpoints: [
+          { id: 'base', minWidth: 0 },
+          { id: 'md', minWidth: 900 },
+          { id: 'lg', minWidth: 1024 },
+          { id: 'xl', minWidth: 1280 },
+        ],
+      },
+    });
+    const c = new EditorController(store);
+    c.setBreakpoint('md');
+    expect(c.previewWidth()).toBe(900);
+    c.setBreakpoint('lg');
+    expect(c.previewWidth()).toBe(1279);
+    c.setBreakpoint('xl');
+    expect(c.previewWidth()).toBe(1280);
+  });
+
+  test('an unknown initial page falls back to the home page', () => {
+    const { store } = setup();
+    const c = new EditorController(store, { page: 'contact' });
+    expect(c.currentPage?.path).toBe('/');
+  });
+
+  test('selecting a node on another page switches to that page', () => {
+    const { store, controller: c } = setup();
+    store.apply({ ops: [{ op: 'page.create', id: 'about', path: '/about', title: 'About' }] });
+    store.apply({ ops: [{ op: 'section.insert', section: 'hero', page: 'about' }] });
+    c.select('hero-1/heading');
+    expect(c.page).toBe('about');
+    expect(c.selected).toBe('hero-1/heading');
+  });
+
+  test('a commit that removes the selection reports it', () => {
+    const { store, controller: c, events } = setup();
+    c.insertSection('hero');
+    c.select('hero-1/heading');
+    store.apply({ actor: BOT, ops: [{ op: 'node.remove', id: 'hero-1' }] });
+    expect(events.at(-1)).toEqual({ type: 'selection', id: null });
+  });
+
+  test('undoBy reports policy refusals as error events', () => {
+    const { store, controller: c, events } = setup();
+    store.apply({ actor: BOT, ops: [{ op: 'section.insert', section: 'hero', page: c.page }] });
+    store.setPolicy(createPolicy({ levels: { user: 'content' } }));
+    expect(c.undoBy(BOT.id).ok).toBe(false);
+    expect(events.at(-1)).toMatchObject({ type: 'error', label: 'Undo' });
+  });
+
+  test('store.load resets the view like a store swap', () => {
+    const { store, controller: c, events } = setup();
+    c.insertSection('hero');
+    c.select('hero-1');
+    store.load(setup().store.doc);
+    expect(c.selected).toBeNull();
+    expect(events.slice(-2)).toEqual([{ type: 'store' }, { type: 'selection', id: null }]);
   });
 });
 
@@ -191,5 +256,22 @@ describe('fieldsFor', () => {
     const text = fieldsFor(registry.component('text')!);
     expect(text.find((f) => f.key === 'tag')).toMatchObject({ kind: 'select' });
     expect(text.find((f) => f.key === 'tag')?.options).toContain('h1');
+  });
+
+  test('array and object props are edited as JSON', () => {
+    const def = defineComponent({
+      name: 'plans',
+      kind: 'code',
+      tag: 'acme-plans',
+      description: 'Plans',
+      children: false,
+      props: z.object({ plans: z.array(z.string()), title: z.string().optional() }),
+    });
+    const fields = fieldsFor(def);
+    const plans = fields.find((f) => f.key === 'plans')!;
+    expect(plans.kind).toBe('json');
+    expect(fieldValue(plans, { value: '["a","b"]' } as HTMLTextAreaElement)).toEqual(['a', 'b']);
+    expect(() => fieldValue(plans, { value: '[a' } as HTMLTextAreaElement)).toThrow(/JSON/);
+    expect(fields.find((f) => f.key === 'title')?.kind).toBe('text');
   });
 });

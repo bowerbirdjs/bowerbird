@@ -5,7 +5,8 @@ import type { EditorController, Position } from './controller.js';
 export type DragPayload =
   | { kind: 'section'; name: string; variant?: Record<string, string> }
   | { kind: 'node'; input: NodeInput }
-  | { kind: 'move'; id: string };
+  /** Moves only make sense within the editor (and document) they started in. */
+  | { kind: 'move'; id: string; source?: EditorController };
 
 let active: DragPayload | null = null;
 
@@ -13,7 +14,8 @@ export const DRAG_MIME = 'application/x-bowerbird';
 
 export function startDrag(event: DragEvent, payload: DragPayload): void {
   active = payload;
-  event.dataTransfer?.setData(DRAG_MIME, JSON.stringify(payload));
+  const { source: _, ...data } = payload as DragPayload & { source?: unknown };
+  event.dataTransfer?.setData(DRAG_MIME, JSON.stringify(data));
   event.dataTransfer?.setData('text/plain', payload.kind === 'move' ? payload.id : payload.kind);
   if (event.dataTransfer)
     event.dataTransfer.effectAllowed = payload.kind === 'move' ? 'move' : 'copy';
@@ -23,7 +25,16 @@ export function endDrag(): void {
   active = null;
 }
 
-export function currentDrag(): DragPayload | null {
+/**
+ * The payload being dragged, if this drag started in a Bowerbird editor. With an event, drags
+ * that don't carry the Bowerbird type (files, text, a cancelled earlier drag) are ignored; with a
+ * controller, moves from another editor are ignored.
+ */
+export function currentDrag(event?: DragEvent, controller?: EditorController): DragPayload | null {
+  if (!active) return null;
+  if (event?.dataTransfer && !event.dataTransfer.types.includes(DRAG_MIME)) return null;
+  if (controller && active.kind === 'move' && active.source && active.source !== controller)
+    return null;
   return active;
 }
 

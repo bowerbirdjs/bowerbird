@@ -1,8 +1,15 @@
 import { createDefaultRegistry, createStarterDoc } from '@bowerbirdjs/blocks';
-import { createStore, type Store } from '@bowerbirdjs/core';
+import {
+  createEmptyDoc,
+  createRegistry,
+  createStore,
+  defineComponent,
+  type Store,
+} from '@bowerbirdjs/core';
 import { compileCss } from '@bowerbirdjs/css';
 import { renderDocument, renderPage, sanitizeUrl } from '@bowerbirdjs/html';
 import { describe, expect, it } from 'vitest';
+import { z } from 'zod';
 
 function site(): Store {
   const store = createStore({ registry: createDefaultRegistry(), doc: createStarterDoc() });
@@ -104,8 +111,42 @@ describe('compileCss', () => {
     expect(css).not.toContain('@layer');
     expect(css).toMatch(/^\[data-bb-canvas\] \{\n {2}--color-brand-50:/);
     // The host-CSS reset comes first so base, section and node rules (same specificity) win.
-    expect(css).toContain('[data-bb-canvas] {\n  .bb-page, .bb-page :where(*)');
+    expect(css).toContain('[data-bb-canvas] {\n  .bb-page { all: initial; display: block; }');
     expect(css.indexOf('all: revert')).toBeLessThan(css.indexOf('container: bb-page'));
+    expect(css.indexOf('all: initial')).toBeLessThan(css.indexOf('container: bb-page'));
     expect(compileCss(store.doc, store.registry)).not.toContain('all: revert');
+  });
+});
+
+describe('code components', () => {
+  it('are marked with data-bb-code in editor mode so host styles keep applying', () => {
+    const registry = createRegistry({
+      components: [
+        defineComponent({
+          name: 'ticket-badge',
+          kind: 'code',
+          tag: 'acme-ticket-badge',
+          description: 'Badge',
+          children: false,
+          props: z.object({ label: z.string().optional() }),
+        }),
+      ],
+    });
+    const store = createStore({ registry, doc: createEmptyDoc() });
+    store.apply({ ops: [{ op: 'page.create', path: '/', title: 'Home' }] });
+    store.apply({
+      ops: [
+        {
+          op: 'node.insert',
+          parent: 'root-home',
+          node: { type: 'ticket-badge', props: { label: 'VIP' } },
+        },
+      ],
+    });
+    const editor = renderPage(store.doc, registry, 'home', { mode: 'editor' }).html;
+    expect(editor).toContain(
+      '<acme-ticket-badge label="VIP" data-bb-node="ticket-badge-1" data-bb-code="ticket-badge">',
+    );
+    expect(renderPage(store.doc, registry, 'home').html).not.toContain('data-bb-code');
   });
 });

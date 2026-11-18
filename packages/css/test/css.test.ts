@@ -88,6 +88,24 @@ describe('compileCss', () => {
     const doc = createEmptyDoc({ tokens: { space: { sm: '4px' } } });
     const css = compileCss(doc, createRegistry(), { mode: 'editor', canvasSelector: '#canvas' });
     expect(css.startsWith('#canvas {\n  --space-sm: 4px;\n}')).toBe(true);
-    expect(css).toContain('#canvas {\n  .bb-page, .bb-page :where(*)');
+    expect(css).toContain('#canvas {\n  .bb-page { all: initial; display: block; }');
+  });
+
+  it('editor mode converts rem to px and boosts node rules above section rules', () => {
+    const doc = createEmptyDoc({ tokens: { space: { lg: '1.5rem' } } });
+    doc.nodes['box-1'] = {
+      id: 'box-1',
+      type: 'box',
+      parent: null,
+      order: 'a0',
+      props: {},
+      styles: { base: { default: { padding: 'var(--space-lg)' } } },
+    };
+    const css = compileCss(doc, createRegistry(), { mode: 'editor' });
+    expect(css).toContain('--space-lg: calc(1.5 * 16px);');
+    expect(css).toContain('[data-bb-node="box-1"]:is(#bb-node, *) {');
+    const published = compileCss(doc, createRegistry());
+    expect(published).toContain('--space-lg: 1.5rem;');
+    expect(published).not.toContain(':is(#bb-node');
   });
 });

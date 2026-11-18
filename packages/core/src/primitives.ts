@@ -38,6 +38,9 @@ const TEXT_TAGS = [
 ] as const;
 
 const str = (s: unknown) => (typeof s === 'string' ? s : undefined);
+/** A value from an allowed list (documents loaded from storage are not re-validated). */
+const pick = <T extends string>(value: unknown, allowed: readonly T[], fallback: T): T =>
+  allowed.includes(value as T) ? (value as T) : fallback;
 
 export const root: ComponentDef = {
   name: 'root',
@@ -60,7 +63,7 @@ export const box: ComponentDef = {
   children: true,
   contentProps: ['label'],
   render: (node) => ({
-    tag: str(node.props.tag) ?? 'div',
+    tag: pick(node.props.tag, BOX_TAGS, 'div'),
     attrs: { 'aria-label': str(node.props.label) },
   }),
 };
@@ -75,7 +78,10 @@ export const text: ComponentDef = {
   }),
   children: false,
   contentProps: ['text'],
-  render: (node) => ({ tag: str(node.props.tag) ?? 'p', text: str(node.props.text) ?? '' }),
+  render: (node) => ({
+    tag: pick(node.props.tag, TEXT_TAGS, 'p'),
+    text: str(node.props.text) ?? '',
+  }),
 };
 
 export const link: ComponentDef = {
@@ -116,7 +122,10 @@ export const button: ComponentDef = {
   contentProps: ['text', 'label'],
   render: (node) => ({
     tag: 'button',
-    attrs: { type: str(node.props.type) ?? 'button', 'aria-label': str(node.props.label) },
+    attrs: {
+      type: pick(node.props.type, ['button', 'submit', 'reset'] as const, 'button'),
+      'aria-label': str(node.props.label),
+    },
     text: str(node.props.text) ?? '',
   }),
 };

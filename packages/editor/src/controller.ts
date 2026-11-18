@@ -7,6 +7,7 @@ import {
   LOCAL_USER,
   type NodeInput,
   type Page,
+  pageOf,
   type Store,
   sectionRootOf,
 } from '@bowerbirdjs/core';
@@ -51,9 +52,18 @@ export class EditorController {
   constructor(store: Store, options: { actor?: Actor; page?: string } = {}) {
     this.store = store;
     this.actor = options.actor ?? LOCAL_USER;
-    this.page = options.page ?? this.firstPage();
+    this.page = options.page && store.doc.pages[options.page] ? options.page : this.firstPage();
     this.breakpoint = store.doc.breakpoints.at(-1)?.id ?? 'base';
-    this.unsubscribe = store.subscribe((event) => this.onCommit(event));
+    this.unsubscribe = this.listen(store);
+  }
+
+  private listen(store: Store): () => void {
+    const offCommit = store.subscribe((event) => this.onCommit(event));
+    const offLoad = store.onLoad(() => this.reset());
+    return () => {
+      offCommit();
+      offLoad();
+    };
   }
 
   on(listener: (event: EditorEvent) => void): () => void {
@@ -76,23 +86,40 @@ export class EditorController {
   }
 
   private onCommit(event: CommitEvent): void {
-    if (!this.store.doc.pages[this.page]) this.page = this.firstPage();
-    if (this.selected && !this.store.doc.nodes[this.selected]) this.selected = null;
+    const pageGone = !this.store.doc.pages[this.page];
+    if (pageGone) this.page = this.firstPage();
+    const lostSelection = !!this.selected && !this.store.doc.nodes[this.selected];
+    if (lostSelection) this.selected = null;
     if (this.hovered && !this.store.doc.nodes[this.hovered]) this.hovered = null;
     this.emit({ type: 'commit', event });
+    if (pageGone) this.emit({ type: 'view' });
+    if (lostSelection) this.emit({ type: 'selection', id: null });
   }
 
   setStore(store: Store): void {
     this.unsubscribe();
     this.store = store;
-    this.unsubscribe = store.subscribe((event) => this.onCommit(event));
-    this.page = this.store.doc.pages[this.page] ? this.page : this.firstPage();
+    this.unsubscribe = this.listen(store);
+    this.reset();
+  }
+
+  /** After a store swap or `store.load()`: keep what still applies, drop the rest. */
+  private reset(): void {
+    const store = this.store;
+    this.page = store.doc.pages[this.page] ? this.page : this.firstPage();
+    const hadSelection = this.selected !== null;
     this.selected = null;
     this.hovered = null;
     if (!store.doc.breakpoints.some((b) => b.id === this.breakpoint)) {
       this.breakpoint = store.doc.breakpoints.at(-1)?.id ?? 'base';
     }
     this.emit({ type: 'store' });
+    if (hadSelection) this.emit({ type: 'selection', id: null });
+  }
+
+  /** Reports problems to the host (as `error` events), e.g. from the canvas. */
+  report(errors: Issue[], label?: string): void {
+    this.emit({ type: 'error', errors, ...(label ? { label } : {}) });
   }
 
   // -------------------------------------------------------------------------------------------
@@ -122,24 +149,34 @@ export class EditorController {
     return sectionRootOf(this.store.view, id);
   }
 
-  /** Width the canvas renders at for the active breakpoint. */
+  /**
+   * Width the canvas renders at for the active breakpoint: a typical device width, kept within
+   * the breakpoint's range so exactly its styles apply.
+   */
   previewWidth(): number {
     const bps = this.store.doc.breakpoints;
     const i = bps.findIndex((b) => b.id === this.breakpoint);
     const bp = bps[i];
     if (!bp) return 1280;
-    if (PREVIEW_WIDTH[bp.id] !== undefined) return PREVIEW_WIDTH[bp.id]!;
     const next = bps[i + 1];
-    return next
-      ? Math.max(bp.minWidth, Math.round((bp.minWidth + next.minWidth) / 2))
-      : Math.max(bp.minWidth, 1280);
+    const max = next ? next.minWidth - 1 : Number.POSITIVE_INFINITY;
+    const preferred =
+      PREVIEW_WIDTH[bp.id] ??
+      (next ? Math.round((bp.minWidth + next.minWidth) / 2) : Math.max(bp.minWidth, 1280));
+    return Math.max(bp.minWidth, Math.min(preferred, max));
   }
 
   // -------------------------------------------------------------------------------------------
   // View state
 
+  /** Selects a node (switching to its page if needed). Roots and unknown ids select nothing. */
   select(id: string | null): void {
     const next = id && this.store.doc.nodes[id] && !this.isRoot(id) ? id : null;
+    if (next) {
+      const page = pageOf(this.store.view, next);
+      if (!page) return;
+      if (page.id !== this.page) this.setPage(page.id);
+    }
     if (next === this.selected) return;
     this.selected = next;
     this.emit({ type: 'selection', id: next });
@@ -190,6 +227,13 @@ export class EditorController {
     const result = this.store.apply({ ops, actor: this.actor, ...(label ? { label } : {}) });
     if (!result.ok)
       this.emit({ type: 'error', errors: result.errors, ...(label ? { label } : {}) });
+    return result;
+  }
+
+  /** Undoes the latest change by another actor (e.g. an agent), as this editor's actor. */
+  undoBy(actorId: string): ApplyResult {
+    const result = this.store.undo({ actorId, actor: this.actor });
+    if (!result.ok) this.emit({ type: 'error', errors: result.errors, label: 'Undo' });
     return result;
   }
 

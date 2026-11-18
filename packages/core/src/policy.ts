@@ -1,4 +1,5 @@
 import { ancestors, type DocView, descendants } from './doc.js';
+import type { Change } from './draft.js';
 import type { Issue } from './errors.js';
 import type { Op } from './ops.js';
 import { type NodeInput, type Registry, resolveVariant, templateParts } from './registry.js';
@@ -21,9 +22,23 @@ export interface PolicyContext {
   registry: Registry;
 }
 
+export interface ChangesContext {
+  actor: Actor;
+  /** Record changes a transaction would commit (e.g. an undo). */
+  changes: Change[];
+  /** The document as it would be after the changes. */
+  view: DocView;
+  registry: Registry;
+}
+
 export interface Policy {
   /** Returns an issue if the actor may not perform the op. */
   check(ctx: PolicyContext): Issue | undefined;
+  /**
+   * Returns an issue if the actor may not make these record changes. Used for undo, redo and
+   * revert, which change records directly rather than through ops.
+   */
+  checkChanges?(ctx: ChangesContext): Issue | undefined;
   /** Whether raw CSS values (px, hex colours, …) are allowed for this actor. */
   allowRawValues(actor: Actor): boolean;
 }
@@ -127,6 +142,44 @@ function touched(op: Op, view: DocView): { nodes: string[]; subtrees: string[] }
   }
 }
 
+/** The level needed to make a set of record changes (for undo, redo and revert). */
+export function requiredLevelForChanges(changes: Change[], registry: Registry): FreedomLevel {
+  let level: FreedomLevel = 'content';
+  const raise = (l: FreedomLevel) => {
+    if (RANK[l] > RANK[level]) level = l;
+  };
+  for (const c of changes) {
+    if (c.kind === 'tokens' || c.kind === 'themes') raise('design');
+    else if (c.kind === 'page') raise('layout');
+    else {
+      const node = c.after ?? c.before!;
+      if (!c.before || !c.after) {
+        raise(registry.component(node.type)?.kind === 'code' ? 'code' : 'layout');
+        continue;
+      }
+      const b = c.before;
+      const a = c.after;
+      if (b.parent !== a.parent || b.order !== a.order || b.type !== a.type) raise('layout');
+      if (
+        JSON.stringify([b.section, b.part, b.key, b.name]) !==
+        JSON.stringify([a.section, a.part, a.key, a.name])
+      )
+        raise('layout');
+      if (
+        JSON.stringify(b.styles) !== JSON.stringify(a.styles) ||
+        JSON.stringify(b.vars) !== JSON.stringify(a.vars)
+      )
+        raise('design');
+      const keys = new Set([...Object.keys(b.props), ...Object.keys(a.props)]);
+      const changed = [...keys].filter(
+        (k) => JSON.stringify(b.props[k]) !== JSON.stringify(a.props[k]),
+      );
+      if (changed.length && !contentOnly(registry, a.type, changed)) raise('design');
+    }
+  }
+  return level;
+}
+
 export function createPolicy(options: PolicyOptions = {}): Policy {
   const locked = new Set(options.lockedNodes ?? []);
   const levelOf = (actor: Actor): FreedomLevel =>
@@ -168,6 +221,35 @@ export function createPolicy(options: PolicyOptions = {}): Policy {
             code: 'policy',
             nodeId: id,
             message: `"${id}" contains locked "${inside.id}", so it can't be ${op.op === 'node.move' ? 'moved' : 'removed or rebuilt'}.`,
+          };
+        }
+      }
+      return undefined;
+    },
+    checkChanges({ actor, changes, view, registry }) {
+      const needed = requiredLevelForChanges(changes, registry);
+      const has = levelOf(actor);
+      if (RANK[has] < RANK[needed]) {
+        return {
+          code: 'policy',
+          message: `${actor.kind} "${actor.id}" may make ${has} changes, but reverting this needs ${needed} access.`,
+          hint: 'Ask a person with more access to undo it.',
+        };
+      }
+      if (!locked.size) return undefined;
+      for (const c of changes) {
+        if (c.kind !== 'node') continue;
+        const parents = [c.before?.parent, c.after?.parent].filter((p): p is string => !!p);
+        const chain = [
+          c.id,
+          ...parents.flatMap((p) => [p, ...ancestors(view, p).map((a) => a.id)]),
+        ];
+        const hit = chain.find((id) => locked.has(id));
+        if (hit) {
+          return {
+            code: 'policy',
+            nodeId: c.id,
+            message: `"${c.id}" is locked${hit !== c.id ? ` (inside locked "${hit}")` : ''}, so this can't be reverted.`,
           };
         }
       }

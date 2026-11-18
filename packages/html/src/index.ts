@@ -28,6 +28,38 @@ export interface RenderedPage {
 }
 
 const VOID = new Set(['img', 'br', 'hr', 'input', 'meta', 'link', 'source', 'wbr']);
+/**
+ * Never emitted, whatever a component or a stored document says: these run code, load resources
+ * or change how the rest of the page is parsed or styled.
+ */
+const DENIED_TAGS = new Set([
+  'script',
+  'style',
+  'iframe',
+  'frame',
+  'frameset',
+  'object',
+  'embed',
+  'applet',
+  'template',
+  'base',
+  'meta',
+  'link',
+  'title',
+  'head',
+  'html',
+  'body',
+  'svg',
+  'math',
+  'noscript',
+  'xmp',
+  'plaintext',
+  'textarea',
+  'form',
+  'input',
+  'select',
+  'portal',
+]);
 const TAG_RE = /^[a-z][a-z0-9-]*$/;
 const ATTR_RE = /^[a-z][a-z0-9-]*$/;
 
@@ -76,7 +108,7 @@ function renderNode(ctx: Ctx, node: BNode, sectionName: string | undefined, dept
   else if (def?.kind === 'code' && def.tag)
     spec = { tag: def.tag, attrs: codeComponentAttrs(node.props) };
   else spec = { tag: 'div', attrs: { 'data-bb-missing': node.type } };
-  const tag = TAG_RE.test(spec.tag) ? spec.tag : 'div';
+  const tag = TAG_RE.test(spec.tag) && !DENIED_TAGS.has(spec.tag) ? spec.tag : 'div';
 
   const { class: specClass, ...specAttrs } = spec.attrs ?? {};
   const classes = specClass ? [String(specClass)] : [];
@@ -94,6 +126,8 @@ function renderNode(ctx: Ctx, node: BNode, sectionName: string | undefined, dept
     attrs['data-bb-node'] = node.id;
   }
   if (ctx.mode === 'editor' && node.section) attrs['data-bb-section'] = node.section.name;
+  // Host code components keep the host's own styling inside the editor canvas (see the reset).
+  if (ctx.mode === 'editor' && def?.kind === 'code') attrs['data-bb-code'] = node.type;
   if (typeof attrs.href === 'string') attrs.href = sanitizeUrl(attrs.href, 'href');
   if (typeof attrs.src === 'string') attrs.src = sanitizeUrl(attrs.src, 'src');
 

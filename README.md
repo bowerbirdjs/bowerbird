@@ -14,7 +14,7 @@ pnpm build
 pnpm --filter @bowerbirdjs/showcase dev
 ```
 
-The showcase is a fictional events product that embeds the editor next to an assistant. The scripted demo agent needs no key; to use Claude, start it with `ANTHROPIC_API_KEY` set (the key stays on the Vite dev server, which proxies `/api/anthropic`). Smaller embeds live in [`examples/`](examples): plain HTML, Vue, and a host page with deliberately hostile CSS.
+The showcase is a fictional events product that embeds the editor next to an assistant. The scripted demo agent needs no key; to use Claude, start it with `ANTHROPIC_API_KEY` set. The key stays on the Vite server, which proxies `/api/anthropic`; the proxy only forwards `POST /v1/messages` from this machine (`SHOWCASE_ALLOW_REMOTE=1` opens it to your network, which lets anyone there spend your key). Smaller embeds live in [`examples/`](examples): plain HTML, Vue, and a host page with deliberately hostile CSS.
 
 ## Try it with an agent
 

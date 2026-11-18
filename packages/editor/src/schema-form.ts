@@ -1,7 +1,16 @@
 import type { ComponentDef } from '@bowerbirdjs/core';
 import { z } from 'zod';
 
-export type FieldKind = 'text' | 'textarea' | 'select' | 'number' | 'checkbox' | 'url' | 'image';
+export type FieldKind =
+  | 'text'
+  | 'textarea'
+  | 'select'
+  | 'number'
+  | 'checkbox'
+  | 'url'
+  | 'image'
+  /** Arrays and objects (e.g. code component props), edited as JSON. */
+  | 'json';
 
 export interface Field {
   key: string;
@@ -44,6 +53,7 @@ export function fieldsFor(def: ComponentDef): Field[] {
     if (options) kind = 'select';
     else if (type === 'number' || type === 'integer') kind = 'number';
     else if (type === 'boolean') kind = 'checkbox';
+    else if (type === 'array' || type === 'object' || (!type && !prop.enum)) kind = 'json';
     else if (key === 'href') kind = 'url';
     else if (key === 'src') kind = 'image';
     else if (key === 'text' && typeof prop.maxLength === 'number' && prop.maxLength > 500)
@@ -68,6 +78,15 @@ export function fieldValue(
   input: HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement,
 ): unknown {
   if (field.kind === 'checkbox') return (input as HTMLInputElement).checked;
+  if (field.kind === 'json') {
+    const raw = input.value.trim();
+    if (!raw) return null;
+    try {
+      return JSON.parse(raw);
+    } catch {
+      throw new Error(`${field.label}: not valid JSON.`);
+    }
+  }
   const raw = input.value;
   if (field.kind === 'number') return raw.trim() === '' ? null : Number(raw);
   if (raw === '' && !field.required && field.kind !== 'textarea' && field.key !== 'text')

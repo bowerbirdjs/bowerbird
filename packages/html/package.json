@@ -15,7 +15,8 @@
   "types": "./dist/index.d.ts",
   "files": [
     "dist",
-    "src"
+    "src",
+    "!dist/.tsbuildinfo"
   ],
   "repository": {
     "type": "git",
@@ -25,5 +26,8 @@
   "dependencies": {
     "@bowerbirdjs/core": "workspace:*",
     "@bowerbirdjs/css": "workspace:*"
+  },
+  "devDependencies": {
+    "zod": "^4.6.7"
   }
 }

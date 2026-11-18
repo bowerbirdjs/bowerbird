@@ -66,6 +66,7 @@ export function App() {
   const [panel, setPanel] = useState<'agent' | 'developer'>('agent');
   const [last, setLast] = useState<HistoryEntry | null>(null);
   const [, setRevision] = useState(0);
+  const [notice, setNotice] = useState<string | null>(null);
 
   useEffect(() => {
     for (const s of stores.values()) s.setPolicy(ROLE_POLICY[role]);
@@ -73,7 +74,7 @@ export function App() {
 
   const applyPalette = (name: string) => {
     const palette = PALETTES[name]!;
-    store.apply({
+    const result = store.apply({
       actor: USER,
       label: `Palette: ${name}`,
       ops: Object.entries(palette).map(([step, value]) => ({
@@ -82,6 +83,9 @@ export function App() {
         value,
       })),
     });
+    setNotice(
+      result.ok ? null : (result.errors[0]?.message ?? 'The palette could not be changed.'),
+    );
   };
 
   const exportHtml = () => {
@@ -125,7 +129,7 @@ export function App() {
         </label>
         <label className="control">
           Brand{' '}
-          <select defaultValue="" onChange={(e) => e.target.value && applyPalette(e.target.value)}>
+          <select value="" onChange={(e) => e.target.value && applyPalette(e.target.value)}>
             <option value="" disabled>
               Palette…
             </option>
@@ -138,6 +142,14 @@ export function App() {
           Export HTML
         </button>
       </header>
+      {notice ? (
+        <div className="notice" role="status">
+          {notice}
+          <button type="button" className="link" onClick={() => setNotice(null)}>
+            Dismiss
+          </button>
+        </div>
+      ) : null}
       <nav className="sidebar" aria-label="Events">
         <p className="label">Your events</p>
         {EVENTS.map((e) => (
@@ -196,6 +208,9 @@ export function App() {
   );
 }
 
+/** Stores with an assistant run in progress: one run per event at a time, across remounts. */
+const running = new WeakSet<Store>();
+
 function AgentPanel({ store }: { store: Store }) {
   const [runner, setRunner] = useState<AgentRunner>(demoAgent);
   const [lines, setLines] = useState<ChatLine[]>([
@@ -209,6 +224,9 @@ function AgentPanel({ store }: { store: Store }) {
   const abort = useRef<AbortController | null>(null);
   const log = useRef<HTMLOListElement>(null);
 
+  // Leaving the event (the panel is keyed by it) stops the run in progress.
+  useEffect(() => () => abort.current?.abort(), []);
+
   useEffect(() => {
     // Scroll to the newest line whenever one is added.
     if (lines.length) log.current?.lastElementChild?.scrollIntoView({ block: 'end' });
@@ -216,6 +234,17 @@ function AgentPanel({ store }: { store: Store }) {
 
   const send = async (prompt: string) => {
     if (!prompt.trim() || busy) return;
+    if (running.has(store)) {
+      setLines((l) => [
+        ...l,
+        {
+          kind: 'note',
+          text: 'The assistant is still finishing an earlier request for this event.',
+        },
+      ]);
+      return;
+    }
+    running.add(store);
     setInput('');
     setBusy(true);
     setLines((l) => [...l, { kind: 'user', text: prompt }]);
@@ -230,6 +259,7 @@ function AgentPanel({ store }: { store: Store }) {
     } catch (error) {
       setLines((l) => [...l, { kind: 'error', text: describeError(error) }]);
     } finally {
+      running.delete(store);
       setBusy(false);
     }
   };

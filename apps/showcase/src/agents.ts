@@ -127,17 +127,33 @@ const REBRAND: Step[] = [
   { say: 'Done.' },
 ];
 
-const LAYOUT: Step[] = [
-  { tool: 'get_outline', input: { depth: 1 } },
-  { say: 'Switching the hero to the split layout; your text stays.' },
-  {
-    tool: 'apply',
-    input: {
-      label: 'Split hero',
-      ops: [{ op: 'section.variant', id: 'hero-1', variant: { layout: 'split' } }],
+/** Reads the page like a real agent would: find the hero first, don't assume its id. */
+function layoutSteps(store: Store): Step[] {
+  const hero = Object.values(store.doc.nodes).find(
+    (n) => n.section?.name === 'hero' && store.view.node(n.parent ?? '')?.parent === null,
+  );
+  if (!hero)
+    return [
+      { tool: 'get_outline', input: { depth: 1 } },
+      { say: 'There is no hero section on this page to change.' },
+    ];
+  if (hero.section?.variant.layout === 'split')
+    return [
+      { tool: 'get_outline', input: { depth: 1 } },
+      { say: `The hero (${hero.id}) already uses the split layout.` },
+    ];
+  return [
+    { tool: 'get_outline', input: { depth: 1 } },
+    { say: 'Switching the hero to the split layout; your text stays.' },
+    {
+      tool: 'apply',
+      input: {
+        label: 'Split hero',
+        ops: [{ op: 'section.variant', id: hero.id, variant: { layout: 'split' } }],
+      },
     },
-  },
-];
+  ];
+}
 
 const REVIEW: Step[] = [
   { tool: 'lint' },
@@ -153,7 +169,7 @@ function scriptFor(prompt: string, store: Store): Step[] {
   );
   if (/speaker/.test(p)) return SPEAKERS;
   if (/teal|brand|colou?r/.test(p)) return REBRAND;
-  if (/split|layout|image/.test(p)) return LAYOUT;
+  if (/split|layout|image/.test(p)) return layoutSteps(store);
   if (empty || /build|create|page/.test(p))
     return empty
       ? BUILD
@@ -213,59 +229,89 @@ export const claudeAgent: AgentRunner = {
     const definitions = toolDefinitions(tools) as Anthropic.Beta.BetaTool[];
     const messages = conversations.get(store) ?? [];
     conversations.set(store, messages);
+    // If this send is stopped or fails, the conversation goes back to where it was, so a
+    // cancelled request can't be carried out by a later one.
+    const start = messages.length;
     messages.push({ role: 'user', content: prompt });
-    for (let turn = 0; turn < 25; turn++) {
-      const response = await client.beta.messages.create(
-        {
-          model: 'claude-opus-5-5',
-          max_tokens: 16000,
-          system: SYSTEM,
-          tools: definitions,
-          messages,
-          output_config: { effort: 'medium' },
-          cache_control: { type: 'ephemeral' },
-          betas: ['server-side-fallback-2026-07-01'],
-          fallbacks: 'default',
-        },
-        { signal },
-      );
-      messages.push({ role: 'assistant', content: response.content });
-      for (const block of response.content) {
-        if (block.type === 'text' && block.text.trim()) onLine({ kind: 'agent', text: block.text });
-      }
-      if (response.stop_reason === 'pause_turn') continue;
-      if (response.stop_reason === 'refusal') {
-        onLine({ kind: 'error', text: 'Claude declined this request.' });
-        return;
-      }
-      if (response.stop_reason !== 'tool_use') return;
-      const results: Anthropic.Beta.BetaToolResultBlockParam[] = [];
-      for (const block of response.content) {
-        if (block.type !== 'tool_use') continue;
-        const result = runTool(tools, block.name, block.input);
-        onLine({
-          kind: result.isError ? 'error' : 'tool',
-          text: `${block.name}: ${result.isError ? result.text.split('\n').slice(0, 3).join('\n') : firstLine(result.text)}`,
-        });
-        results.push({
-          type: 'tool_result',
-          tool_use_id: block.id,
-          content: result.text,
-          ...(result.isError ? { is_error: true } : {}),
-        });
-      }
-      messages.push({ role: 'user', content: results });
+    try {
+      await loop();
+    } catch (error) {
+      messages.length = start;
+      throw error;
     }
-    onLine({ kind: 'note', text: 'Stopped after 25 turns.' });
+
+    async function loop() {
+      for (let turn = 0; turn < 25; turn++) {
+        const response = await client.beta.messages.create(
+          {
+            model: 'claude-opus-5-5',
+            max_tokens: 16000,
+            system: SYSTEM,
+            tools: definitions,
+            messages,
+            output_config: { effort: 'medium' },
+            cache_control: { type: 'ephemeral' },
+            betas: ['server-side-fallback-2026-07-01'],
+            fallbacks: 'default',
+          },
+          { signal },
+        );
+        for (const block of response.content) {
+          if (block.type === 'text' && block.text.trim())
+            onLine({ kind: 'agent', text: block.text });
+        }
+        if (response.stop_reason === 'pause_turn') {
+          messages.push({ role: 'assistant', content: response.content });
+          continue;
+        }
+        if (response.stop_reason !== 'tool_use') {
+          // A tool call without its result would make every later request fail, so keep only
+          // complete blocks (e.g. when the response was cut off at max_tokens).
+          const content = response.content.filter((b) => b.type !== 'tool_use');
+          messages.push({
+            role: 'assistant',
+            content: content.length ? content : [{ type: 'text', text: '(no reply)' }],
+          });
+          if (response.stop_reason === 'refusal')
+            onLine({ kind: 'error', text: 'Claude declined this request.' });
+          else if (response.stop_reason === 'max_tokens')
+            onLine({
+              kind: 'note',
+              text: 'The reply was cut off (length limit); ask Claude to continue.',
+            });
+          return;
+        }
+        messages.push({ role: 'assistant', content: response.content });
+        const results: Anthropic.Beta.BetaToolResultBlockParam[] = [];
+        for (const block of response.content) {
+          if (block.type !== 'tool_use') continue;
+          const result = runTool(tools, block.name, block.input);
+          onLine({
+            kind: result.isError ? 'error' : 'tool',
+            text: `${block.name}: ${result.isError ? result.text.split('\n').slice(0, 3).join('\n') : firstLine(result.text)}`,
+          });
+          results.push({
+            type: 'tool_result',
+            tool_use_id: block.id,
+            content: result.text,
+            ...(result.isError ? { is_error: true } : {}),
+          });
+        }
+        messages.push({ role: 'user', content: results });
+      }
+      onLine({ kind: 'note', text: 'Stopped after 25 turns.' });
+    }
   },
 };
 
 export function describeError(error: unknown): string {
+  if (error instanceof Anthropic.APIUserAbortError) return 'Stopped.';
   if (error instanceof DOMException && error.name === 'AbortError') return 'Stopped.';
   if (error instanceof Anthropic.AuthenticationError) {
     return 'No API key: start the showcase with ANTHROPIC_API_KEY set, or use the demo agent.';
   }
   if (error instanceof Anthropic.RateLimitError) return 'Rate limited; try again in a moment.';
-  if (error instanceof Anthropic.APIError) return `API error ${error.status}: ${error.message}`;
+  if (error instanceof Anthropic.APIError)
+    return `API error${error.status ? ` ${error.status}` : ''}: ${error.apiMessage ?? error.message}`;
   return error instanceof Error ? error.message : String(error);
 }

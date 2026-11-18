@@ -20,7 +20,8 @@ An embeddable, agent-first visual page editor. Read `docs/plan.md` for decisions
 - Ids are readable and stable (`hero-1/heading`). Only section roots and keyed items (`item-2`, `tier-pro`) add an id scope.
 - Styles are CSS declarations validated against design tokens; raw values need policy permission. Never store Tailwind classes.
 - Published HTML is light DOM, escaped and URL-sanitised; no scripts in output.
-- Editor: the canvas is light DOM in the host document (no iframe; nothing editable inside a shadow root). Only the panels use the element's shadow root. Canvas chrome classes start with `bbx-`.
+- Editor: the canvas is light DOM in the host document (no iframe; nothing editable inside a shadow root). Only the panels use the element's shadow root. Canvas chrome classes start with `bbx-` and are scoped under `.bbx-host`.
+- What the editor shows must match published output: `e2e/hostile-css.e2e.ts` compares computed styles of the canvas with the published page. Run it after changing CSS generation or canvas styles.
 - Editor UI changes go through `EditorController` (`packages/editor/src/controller.ts`), which calls `Store.apply` as the editor's actor. Keep the controller DOM-free so it stays unit-testable.
 - Keep dependencies MIT/BSD/Apache. No AGPL/GPL. Section content must be original (Tailwind Plus and Relume licences forbid builder use).
 

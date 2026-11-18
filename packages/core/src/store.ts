@@ -241,6 +241,7 @@ export class Store {
   private index: DocIndex | undefined;
   private readonly entries: HistoryEntry[] = [];
   private readonly listeners = new Set<(event: CommitEvent) => void>();
+  private readonly loadListeners = new Set<(doc: SiteDoc) => void>();
   private readonly historyLimit: number;
 
   constructor(options: StoreOptions) {
@@ -273,11 +274,26 @@ export class Store {
     return this.entries;
   }
 
-  /** Replaces the document and clears history. */
+  /** Replaces the document and clears history. Listeners registered with `onLoad` are told. */
   load(doc: SiteDoc): void {
     this.current = doc;
     this.index = undefined;
     this.entries.length = 0;
+    for (const listener of this.loadListeners) {
+      try {
+        listener(doc);
+      } catch (error) {
+        queueMicrotask(() => {
+          throw error;
+        });
+      }
+    }
+  }
+
+  /** Called after `load` replaces the document (commit listeners are not called for loads). */
+  onLoad(listener: (doc: SiteDoc) => void): () => void {
+    this.loadListeners.add(listener);
+    return () => this.loadListeners.delete(listener);
   }
 
   subscribe(listener: (event: CommitEvent) => void): () => void {
@@ -527,6 +543,13 @@ export class Store {
         });
     }
     if (integrity.length) return { ok: false, revision: this.current.revision, errors: integrity };
+    const denied = this.policy.checkChanges?.({
+      actor,
+      changes: draft.changes(),
+      view: draft,
+      registry: this.registry,
+    });
+    if (denied) return { ok: false, revision: this.current.revision, errors: [denied] };
 
     const result = this.commit(draft, actor, {
       kind,

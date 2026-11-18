@@ -12,35 +12,37 @@ import {
 let counter = 0;
 
 /**
- * Chrome for the canvas itself (light DOM, so every class is prefixed). The first rule reverts host
- * element styles (`div { … }`) on the chrome; page content has its own reset in the page CSS.
+ * Chrome for the canvas itself (light DOM, so every class is prefixed). Host page CSS reaches
+ * light DOM, so the first rules revert host styles on the chrome (`.app div { … }`, inherited
+ * fonts) and every chrome rule is scoped under `.bbx-host` to outrank typical host selectors.
+ * Page content has its own reset in the page CSS.
  */
 export const CANVAS_CSS = `
-.bbx-frame, .bbx-frame :where(:not(.bb-page, .bb-page *)) { all: revert; }
-.bbx-frame { position: relative; height: 100%; overflow: auto; background: var(--bb-editor-canvas-bg, #e9ebf0); outline: none; }
-.bbx-frame:focus-visible { box-shadow: inset 0 0 0 2px var(--bb-editor-accent, #4f46e5); }
-.bbx-stage { position: relative; margin: 24px auto 48px; }
-.bbx-viewport { position: absolute; top: 0; left: 0; transform-origin: top left; contain: layout paint; background: #fff;
+.bbx-host.bbx-host, .bbx-host.bbx-host :where(:not(.bb-page, .bb-page *)) { all: revert; }
+.bbx-host.bbx-host { position: absolute; inset: 0; display: block; font: 13px/1.4 system-ui, sans-serif; color: #111827; }
+.bbx-host .bbx-frame { position: relative; height: 100%; overflow: auto; background: var(--bb-editor-canvas-bg, #e9ebf0); outline: none; }
+.bbx-host .bbx-frame:focus-visible { box-shadow: inset 0 0 0 2px var(--bb-editor-accent, #4f46e5); }
+.bbx-host .bbx-stage { position: relative; margin: 24px auto 48px; }
+.bbx-host .bbx-viewport { position: absolute; top: 0; left: 0; transform-origin: top left; contain: layout paint; background: #fff;
   box-shadow: 0 1px 2px rgb(15 23 42 / .08), 0 8px 28px rgb(15 23 42 / .10); }
-.bbx-overlay { position: absolute; inset: 0; pointer-events: none; z-index: 1; }
-.bbx-box { position: absolute; border: 1.5px solid var(--bb-editor-accent, #4f46e5); border-radius: 2px; box-sizing: border-box; }
-.bbx-box[hidden], .bbx-toolbar[hidden], .bbx-drop[hidden] { display: none; }
-.bbx-hover { border-style: dashed; }
-.bbx-label { position: absolute; left: -1.5px; bottom: 100%; padding: 0 6px; border-radius: 4px 4px 0 0; white-space: nowrap;
+.bbx-host .bbx-overlay { position: absolute; inset: 0; pointer-events: none; z-index: 1; }
+.bbx-host .bbx-box { position: absolute; border: 1.5px solid var(--bb-editor-accent, #4f46e5); border-radius: 2px; box-sizing: border-box; }
+.bbx-host .bbx-box[hidden], .bbx-host .bbx-toolbar[hidden], .bbx-host .bbx-drop[hidden] { display: none; }
+.bbx-host .bbx-hover { border-style: dashed; }
+.bbx-host .bbx-label { position: absolute; left: -1.5px; bottom: 100%; padding: 0 6px; border-radius: 4px 4px 0 0; white-space: nowrap;
   background: var(--bb-editor-accent, #4f46e5); color: #fff; font: 600 11px/20px system-ui, sans-serif; }
-.bbx-toolbar { position: absolute; display: flex; gap: 1px; padding: 2px; border-radius: 6px; pointer-events: auto;
+.bbx-host .bbx-toolbar { position: absolute; display: flex; gap: 1px; padding: 2px; border-radius: 6px; pointer-events: auto;
   background: #111827; box-shadow: 0 4px 12px rgb(0 0 0 / .2); }
-.bbx-toolbar button { all: unset; display: grid; place-items: center; width: 24px; height: 24px; border-radius: 4px; color: #e5e7eb;
+.bbx-host .bbx-toolbar button { all: unset; display: grid; place-items: center; width: 24px; height: 24px; border-radius: 4px; color: #e5e7eb;
   cursor: pointer; font: 13px/1 system-ui, sans-serif; }
-.bbx-toolbar button:hover, .bbx-toolbar button:focus-visible { background: #374151; color: #fff; }
-.bbx-toolbar [draggable="true"] { cursor: grab; }
-.bbx-drop { position: absolute; background: var(--bb-editor-accent, #4f46e5); border-radius: 2px; }
-.bbx-drop.bbx-inside { background: color-mix(in srgb, var(--bb-editor-accent, #4f46e5) 10%, transparent);
+.bbx-host .bbx-toolbar button:hover, .bbx-host .bbx-toolbar button:focus-visible { background: #374151; color: #fff; }
+.bbx-host .bbx-toolbar [draggable="true"] { cursor: grab; }
+.bbx-host .bbx-drop { position: absolute; background: var(--bb-editor-accent, #4f46e5); border-radius: 2px; }
+.bbx-host .bbx-drop.bbx-inside { background: color-mix(in srgb, var(--bb-editor-accent, #4f46e5) 10%, transparent);
   outline: 2px dashed var(--bb-editor-accent, #4f46e5); outline-offset: -2px; }
-.bbx-empty { padding: 64px 24px; text-align: center; font: 15px/1.5 system-ui, sans-serif; color: #64748b; }
-/* Three classes deep so these beat the content reset (EDITOR_RESET_CSS). */
-.bbx-frame .bbx-content [contenteditable] { outline: 2px solid var(--bb-editor-accent, #4f46e5); outline-offset: 2px; cursor: text; }
-.bbx-frame .bbx-content :is(a, button) { cursor: default; }
+.bbx-host .bbx-empty { padding: 64px 24px; text-align: center; font: 15px/1.5 system-ui, sans-serif; color: #64748b; }
+.bbx-host .bbx-content [contenteditable] { outline: 2px solid var(--bb-editor-accent, #4f46e5); outline-offset: 2px; cursor: text; }
+.bbx-host .bbx-content :is(a, button) { cursor: default; }
 `;
 
 const TOOLBAR: [action: string, label: string, glyph: string][] = [
@@ -142,6 +144,20 @@ export class CanvasView {
   private onEvent(event: EditorEvent): void {
     if (event.type === 'hover' || event.type === 'selection') this.updateOverlays();
     else if (event.type !== 'error') {
+      // Someone else removed (or the page switched away from) the node being edited.
+      if (this.editing && !this.controller.node(this.editing.id)) {
+        const { id, el } = this.editing;
+        // biome-ignore lint/performance/useDomNodeTextContent: innerText keeps the typed line breaks
+        const typed = (el.innerText ?? el.textContent ?? '').trim();
+        this.finishEditing(false);
+        this.controller.report([
+          {
+            code: 'conflict',
+            nodeId: id,
+            message: `"${id}" was removed while you were editing it, so your text wasn't saved${typed ? `: “${typed.slice(0, 120)}”` : ''}.`,
+          },
+        ]);
+      }
       this.needsRender = true;
       this.schedule();
     }
@@ -282,15 +298,19 @@ export class CanvasView {
       else if (action === 'up') c.nudge(-1);
       else if (action === 'down') c.nudge(1);
       else if (action === 'duplicate') c.duplicateSelected();
-      else if (action === 'delete') c.removeSelected();
+      else if (action === 'delete' && c.removeSelected()?.ok)
+        this.frame.focus({ preventScroll: true });
     });
     this.toolbar.addEventListener('dragstart', (e) => {
-      if (c.selected) startDrag(e, { kind: 'move', id: c.selected });
+      if (c.selected) startDrag(e, { kind: 'move', id: c.selected, source: c });
     });
-    this.toolbar.addEventListener('dragend', () => this.clearDrop());
+    this.toolbar.addEventListener('dragend', () => {
+      endDrag();
+      this.clearDrop();
+    });
 
     this.frame.addEventListener('dragover', (e) => {
-      const payload = currentDrag();
+      const payload = currentDrag(e, c);
       if (!payload || c.preview) return;
       const target = dropTarget(c, payload, e.target as Element, e.clientX, e.clientY, content);
       this.dropTargetState = target;
@@ -304,7 +324,7 @@ export class CanvasView {
       if (!this.frame.contains(e.relatedTarget as Node | null)) this.clearDrop();
     });
     this.frame.addEventListener('drop', (e) => {
-      const payload = currentDrag();
+      const payload = currentDrag(e, c);
       const target = this.dropTargetState;
       this.clearDrop();
       endDrag();
@@ -324,7 +344,7 @@ export class CanvasView {
     const c = this.controller;
     const node = c.node(id);
     const el = this.element(id);
-    if (!node || !el || !TEXT_TYPES.has(node.type) || c.store.view.children(id).length)
+    if (c.preview || !node || !el || !TEXT_TYPES.has(node.type) || c.store.view.children(id).length)
       return false;
     if (this.editing) this.finishEditing(true);
     const original = typeof node.props.text === 'string' ? node.props.text : '';
@@ -370,15 +390,37 @@ export class CanvasView {
     this.editing = null;
     this.cleanupEditing();
     const focused = state.el.contains(state.el.ownerDocument.activeElement);
-    const text = (state.el.textContent ?? '').replace(/\s+/g, ' ').trim();
+    // Keep line breaks (Shift+Enter); collapse other runs of whitespace.
+    const normalize = (t: string) =>
+      t
+        .replace(/\r\n?/g, '\n')
+        .replace(/[^\S\n]+/g, ' ')
+        .replace(/ ?\n ?/g, '\n')
+        .trim();
+    // biome-ignore lint/performance/useDomNodeTextContent: innerText keeps the typed line breaks
+    const text = normalize(state.el.innerText ?? state.el.textContent ?? '');
     state.el.removeAttribute('contenteditable');
     // Enter or Escape: keep keyboard focus in the canvas. A blur moved it elsewhere already.
     if (focused) this.frame.focus({ preventScroll: true });
-    if (commit && text !== state.original) {
-      const result = this.controller.setProps(state.id, { text }, 'Edit text');
-      if (!result.ok) state.el.textContent = state.original;
+    const current = this.controller.node(state.id)?.props.text;
+    if (commit && text !== normalize(state.original)) {
+      if (typeof current === 'string' && current !== state.original) {
+        // Someone else changed this text while it was being edited: don't overwrite it silently.
+        state.el.textContent = current;
+        this.controller.report([
+          {
+            code: 'conflict',
+            nodeId: state.id,
+            message: `Someone else changed "${state.id}" while you were editing, so your text wasn't saved: “${text.slice(0, 120)}”.`,
+            hint: 'Edit it again to replace their version.',
+          },
+        ]);
+      } else {
+        const result = this.controller.setProps(state.id, { text }, 'Edit text');
+        if (!result.ok) state.el.textContent = state.original;
+      }
     } else {
-      state.el.textContent = state.original;
+      state.el.textContent = typeof current === 'string' ? current : state.original;
     }
     this.needsRender = true;
     this.schedule();
