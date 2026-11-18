@@ -125,6 +125,7 @@ function cleanAttrs(ctx: Ctx, attrs: Record<string, unknown>): Record<string, un
     delete out['data-bb-data'];
     delete out['data-bb-edit'];
     delete out['data-bb-item'];
+    delete out['data-bb-add'];
   }
   if (typeof out.href === 'string') out.href = sanitizeUrl(out.href, 'href');
   if (typeof out.src === 'string') out.src = sanitizeUrl(out.src, 'src');
@@ -146,13 +147,14 @@ function varsAttr(vars: ElementSpec['vars']): string {
 
 /** Editor marks for data a spec shows (`ElementSpec.edit` and `item`); none when published. */
 function dataMarks(ctx: Ctx, spec: ElementSpec): Record<string, unknown> {
-  if (ctx.mode !== 'editor' || (!spec.edit && !spec.item)) return {};
+  if (ctx.mode !== 'editor' || (!spec.edit && !spec.item && !spec.add)) return {};
   const fields = spec.edit ? (Array.isArray(spec.edit) ? spec.edit : [spec.edit]) : [];
   return {
     ...(fields[0]
       ? { 'data-bb-data': fields[0].path, 'data-bb-edit': JSON.stringify(fields) }
       : {}),
     ...(spec.item ? { 'data-bb-item': JSON.stringify(spec.item) } : {}),
+    ...(spec.add ? { 'data-bb-add': JSON.stringify(spec.add), role: 'button', tabindex: 0 } : {}),
   };
 }
 

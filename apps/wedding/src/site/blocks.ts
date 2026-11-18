@@ -194,7 +194,10 @@ ${s} .ev-subheading { font-family: var(--font-heading); font-weight: var(--weigh
 ${s} .ev-button { display: inline-flex; align-self: start; justify-self: start; padding: .55em 1.2em; border-radius: var(--radius-button); background: var(--color-accent); color: var(--color-on-accent-button, var(--color-on-accent)); text-decoration: none; font-weight: 600; font-size: var(--text-sm); }
 ${s} .ev-card { display: grid; gap: var(--space-xs); align-content: start; padding: var(--space-lg); border-radius: var(--radius-card); background: var(--color-card); border: 1px solid var(--color-line); }
 ${s} .ev-hint { padding: var(--space-md); border: 1px dashed var(--color-line); border-radius: var(--radius-card); color: var(--color-muted); text-align: center; font-size: var(--text-sm); }
-${s}[data-empty] { opacity: .75; }
+${s}[data-empty] ${s}__heading { opacity: .55; }
+${s} .ev-hint { display: grid; gap: var(--space-sm); justify-items: center; }
+${s} .ev-add-row { display: flex; flex-wrap: wrap; gap: var(--space-xs); justify-content: center; margin: 0; }
+${s} .ev-add { display: inline-flex; padding: .4em 1em; border: 1px dashed currentColor; border-radius: 999px; color: var(--color-accent); font-size: var(--text-md); font-weight: 600; }
 ${css}`;
 }
 

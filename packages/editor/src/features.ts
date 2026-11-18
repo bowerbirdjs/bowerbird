@@ -46,7 +46,7 @@ export const EDITOR_FEATURES = {
   text: 'Editing text on the page (double-click or Enter).',
   'text.formatting': 'Bold, italic and links in rich text (Ctrl+B, Ctrl+I, Ctrl+K).',
   data: 'Editing site data on the page: double-click text shown from data (a form opens for times, dates, links and colours).',
-  'data.items': 'List items shown from data: move, copy or remove them on the page.',
+  'data.items': 'List items shown from data: add, move, copy or remove them on the page.',
   'canvas.fields':
     'Fields on the page for what isn’t text on the selected element (a photo, its alt text, a link’s address).',
   components: 'Linked components: their panel, editing a definition, detaching an instance.',

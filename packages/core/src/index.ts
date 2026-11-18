@@ -71,6 +71,7 @@ export {
 export { PRIMITIVES } from './primitives.js';
 export { changedFields, humanEditConflicts, stampFor } from './provenance.js';
 export {
+  type AddData,
   type ComponentDef,
   createRegistry,
   type DataDef,

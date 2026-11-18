@@ -1,4 +1,5 @@
 import {
+  type AddData,
   type BNode,
   type ComponentDef,
   defineComponent,
@@ -38,11 +39,35 @@ export const event = (ctx: RenderContext): EventInfo =>
   };
 const locale = (ctx: RenderContext): SiteLocale => event(ctx).locale;
 const copy = (ctx: RenderContext) => COPY[locale(ctx)];
-const hint = (text: string): ElementSpec => ({
-  tag: 'p',
-  attrs: { class: 'ev-hint' },
-  text,
-});
+/** An editor-only button that adds what's missing (see `ElementSpec.add`). */
+interface Adder {
+  label: string;
+  add: AddData;
+}
+const addRow = (ctx: RenderContext, adds: Adder[]): ElementSpec[] =>
+  ctx.mode === 'editor' && adds.length
+    ? [
+        {
+          tag: 'p',
+          attrs: { class: 'ev-add-row' },
+          children: adds.map((a) => ({
+            tag: 'span',
+            attrs: { class: 'ev-add' },
+            add: a.add,
+            text: `+ ${a.label}`,
+          })),
+        },
+      ]
+    : [];
+/** What a section shows with no facts: nothing when published; in the editor, buttons to add them. */
+const emptyState = (ctx: RenderContext, text: string, adds: Adder[]): ElementSpec =>
+  ctx.mode === 'editor'
+    ? {
+        tag: 'div',
+        attrs: { class: 'ev-hint' },
+        children: [{ tag: 'p', text }, ...addRow(ctx, adds)],
+      }
+    : { tag: 'div' };
 const layoutOf = (node: BNode, ctx: RenderContext): string | undefined =>
   sectionRootOf(ctx.view, node.id)?.section?.variant.layout;
 
@@ -181,8 +206,14 @@ const scheduleItems = defineComponent({
   render: (_node, ctx) => {
     const items = facts<ScheduleItem[]>(ctx, 'schedule') ?? [];
     const venues = facts<Venue[]>(ctx, 'venues') ?? [];
+    const c = copy(ctx);
     if (!items.length)
-      return ctx.mode === 'editor' ? hint(copy(ctx).empty.schedule) : { tag: 'div' };
+      return emptyState(ctx, c.empty.schedule, [
+        {
+          label: c.add.schedule,
+          add: { path: 'schedule', value: { time: '12:00', title: c.starter.item }, edit: 'title' },
+        },
+      ]);
     const places: [string, string][] = [
       ['', '—'],
       ...venues.map((v) => [v.id, v.name] as [string, string]),
@@ -256,8 +287,14 @@ const venueCards = defineComponent({
   insertable: false,
   render: (_node, ctx) => {
     const venues = facts<Venue[]>(ctx, 'venues') ?? [];
+    const c = copy(ctx);
     if (!venues.length)
-      return ctx.mode === 'editor' ? hint(copy(ctx).empty.venues) : { tag: 'div' };
+      return emptyState(ctx, c.empty.venues, [
+        {
+          label: c.add.venue,
+          add: { path: 'venues', value: { id: 'venue-1', name: c.starter.venue }, edit: 'name' },
+        },
+      ]);
     return {
       tag: 'div',
       attrs: { class: 'ev-cards' },
@@ -420,8 +457,38 @@ const travelInfo = defineComponent({
           },
         ],
       });
-    if (!blocks.length) return ctx.mode === 'editor' ? hint(c.empty.travel) : { tag: 'div' };
-    return { tag: 'div', attrs: { class: 'ev-travel' }, children: blocks };
+    const adds: Adder[] = [
+      ...(travel.text
+        ? []
+        : [
+            {
+              label: c.add.travel,
+              add: { path: 'travel.text', value: c.starter.travel, edit: '' },
+            },
+          ]),
+      ...(travel.parking
+        ? []
+        : [
+            {
+              label: c.add.parking,
+              add: { path: 'travel.parking', value: c.starter.parking, edit: '' },
+            },
+          ]),
+      ...(stays.length
+        ? []
+        : [
+            {
+              label: c.add.stay,
+              add: { path: 'stays', value: { name: c.starter.stay }, edit: 'name' },
+            },
+          ]),
+    ];
+    if (!blocks.length) return emptyState(ctx, c.empty.travel, adds);
+    return {
+      tag: 'div',
+      attrs: { class: 'ev-travel' },
+      children: [...blocks, ...addRow(ctx, adds)],
+    };
   },
 });
 
@@ -434,8 +501,36 @@ const dresscodeInfo = defineComponent({
   insertable: false,
   render: (_node, ctx) => {
     const d = facts<Dresscode>(ctx, 'dresscode');
+    const c = copy(ctx);
+    const adds: Adder[] = [
+      ...(d?.style
+        ? []
+        : [
+            {
+              label: c.add.style,
+              add: { path: 'dresscode.style', value: c.starter.style, edit: '' },
+            },
+          ]),
+      ...(d?.text
+        ? []
+        : [
+            { label: c.add.text, add: { path: 'dresscode.text', value: c.starter.text, edit: '' } },
+          ]),
+      ...(d?.colors.length
+        ? []
+        : [
+            {
+              label: c.add.colour,
+              add: {
+                path: 'dresscode.colors',
+                value: { hex: '#c9a27e', name: c.starter.colour },
+                edit: 'name',
+              },
+            },
+          ]),
+    ];
     if (!d || (!d.style && !d.text && !d.colors.length))
-      return ctx.mode === 'editor' ? hint(copy(ctx).empty.dresscode) : { tag: 'div' };
+      return emptyState(ctx, c.empty.dresscode, adds);
     return {
       tag: 'div',
       attrs: { class: 'ev-dress' },
@@ -483,6 +578,7 @@ const dresscodeInfo = defineComponent({
               },
             ]
           : []),
+        ...addRow(ctx, adds),
       ],
     };
   },
@@ -497,7 +593,14 @@ const faqItems = defineComponent({
   insertable: false,
   render: (node, ctx) => {
     const items = facts<FaqItem[]>(ctx, 'faq') ?? [];
-    if (!items.length) return ctx.mode === 'editor' ? hint(copy(ctx).empty.faq) : { tag: 'div' };
+    const c = copy(ctx);
+    if (!items.length)
+      return emptyState(ctx, c.empty.faq, [
+        {
+          label: c.add.faq,
+          add: { path: 'faq', value: { q: c.starter.q, a: c.starter.a }, edit: 'q' },
+        },
+      ]);
     const open = layoutOf(node, ctx) === 'open';
     return {
       tag: 'div',
@@ -540,8 +643,25 @@ const giftLinks = defineComponent({
   insertable: false,
   render: (_node, ctx) => {
     const g = facts<Gifts>(ctx, 'gifts');
-    if (!g || (!g.text && !g.links.length))
-      return ctx.mode === 'editor' ? hint(copy(ctx).empty.gifts) : { tag: 'div' };
+    const c = copy(ctx);
+    const adds: Adder[] = [
+      ...(g?.text
+        ? []
+        : [{ label: c.add.text, add: { path: 'gifts.text', value: c.starter.text, edit: '' } }]),
+      ...(g?.links.length
+        ? []
+        : [
+            {
+              label: c.add.link,
+              add: {
+                path: 'gifts.links',
+                value: { label: c.starter.link, url: 'https://example.com' },
+                edit: 'label',
+              },
+            },
+          ]),
+    ];
+    if (!g || (!g.text && !g.links.length)) return emptyState(ctx, c.empty.gifts, adds);
     return {
       tag: 'div',
       attrs: { class: 'ev-gifts' },
@@ -587,6 +707,7 @@ const giftLinks = defineComponent({
               },
             ]
           : []),
+        ...addRow(ctx, adds),
       ],
     };
   },

@@ -77,6 +77,9 @@ export const CANVAS_CSS = `
 .bbx-host .bbx-mark.bbx-created { outline: 2px solid #16a34a; background: rgb(22 163 74 / .08); }
 .bbx-host .bbx-mark.bbx-updated { outline: 2px dashed #d97706; background: rgb(217 119 6 / .06); }
 .bbx-host .bbx-frame:not([data-preview]) .bbx-content [data-bb-edit]:hover { outline: 1px dashed var(--bb-editor-accent, #4f46e5); outline-offset: 2px; cursor: text; }
+.bbx-host .bbx-frame:not([data-preview]) .bbx-content [data-bb-add] { cursor: pointer; }
+.bbx-host .bbx-frame:not([data-preview]) .bbx-content [data-bb-add]:hover { outline: 1px dashed var(--bb-editor-accent, #4f46e5); outline-offset: 2px; }
+.bbx-host .bbx-frame[data-preview] .bbx-content [data-bb-add], .bbx-host .bbx-content [data-bb-add][data-bbx-off] { display: none !important; }
 .bbx-host .bbx-item-box { position: absolute; border: 1.5px dotted var(--bb-editor-accent, #4f46e5); border-radius: 4px; pointer-events: none; }
 .bbx-host .bbx-item-box[hidden], .bbx-host .bbx-itembar[hidden] { display: none; }
 .bbx-host .bbx-itembar { position: absolute; z-index: 2; display: flex; gap: 1px; padding: 2px; border-radius: 6px; pointer-events: auto;
@@ -234,6 +237,8 @@ export class CanvasView {
   private activeField: string | null = null;
   /** The list item from site data last clicked. */
   private activeItem: { path: string; unique?: string[] } | null = null;
+  /** Data just added: once it's on the page, its field is edited. */
+  private pendingEdit: string | null = null;
   private dropTargetState: DropTarget | null = null;
   private scale = 1;
 
@@ -390,15 +395,22 @@ export class CanvasView {
       return;
     }
     this.pageStyle.textContent = css;
+    queueMicrotask(() => this.runPendingEdit());
     this.content.innerHTML = empty
       ? `${html}<div class="bbx-empty">${c.can('insert') ? 'This page is empty. Add a section from the Insert panel, or drag one here.' : 'This page is empty.'}</div>`
       : html;
     // The page's links and buttons are content being edited, not controls: keep them out of the
-    // Tab order (the canvas itself is focusable, and nodes are reached through Layers).
+    // Tab order (the canvas itself is focusable, and nodes are reached through Layers). The
+    // editor's own add buttons stay reachable.
     for (const el of this.content.querySelectorAll<HTMLElement>(
       'a[href], button, input, select, textarea, summary, [tabindex]',
     ))
-      el.tabIndex = -1;
+      if (!el.hasAttribute('data-bb-add')) el.tabIndex = -1;
+    // Add buttons only where a click would add something (the host may have turned adding off).
+    for (const el of this.content.querySelectorAll<HTMLElement>('[data-bb-add]')) {
+      const add = readAdd(el);
+      el.toggleAttribute('data-bbx-off', !add || !c.canAdd(add.path, add.value));
+    }
     if (c.theme) this.frame.setAttribute('data-theme', c.theme);
     else this.frame.removeAttribute('data-theme');
     this.frame.toggleAttribute('data-preview', c.preview);
@@ -745,6 +757,34 @@ export class CanvasView {
     return { left: r.left - s.left, top: r.top - s.top, bottom: r.bottom - s.top, width: r.width };
   }
 
+  /** Adds what a `data-bb-add` placeholder offers, then edits it once it's on the page. */
+  addFrom(el: HTMLElement): boolean {
+    const c = this.controller;
+    const add = readAdd(el);
+    if (!add || c.readOnly) return false;
+    const at = c.addData(add.path, add.value);
+    if (!at) return false;
+    const isItem = /\.\d+$/.test(at);
+    if (isItem) this.activeItem = { path: at };
+    const field = add.edit;
+    this.pendingEdit = field === undefined ? null : field ? `${at}.${field}` : at;
+    this.frame.focus({ preventScroll: true });
+    return true;
+  }
+
+  private runPendingEdit(): void {
+    const path = this.pendingEdit;
+    if (!path || this.editing) return;
+    this.pendingEdit = null;
+    const el = this.content.querySelector<HTMLElement>(
+      `[data-bb-data="${CSS.escape(path)}"][data-bb-edit]`,
+    );
+    if (el) {
+      this.activeField = path;
+      this.startDataEditing(el);
+    }
+  }
+
   /** Edits the data field last clicked (Enter on the canvas). */
   editActiveField(): boolean {
     if (!this.activeField) return false;
@@ -819,11 +859,18 @@ export class CanvasView {
     selection?.removeAllRanges();
     selection?.addRange(range);
     const multiline = kind === 'multiline';
+    const inSummary = !!el.closest('summary');
     const onKey = (e: KeyboardEvent) => {
       e.stopPropagation();
       // No formatting in data: it's plain text.
       if ((e.metaKey || e.ctrlKey) && ['b', 'i', 'k', 'u'].includes(e.key.toLowerCase())) {
         e.preventDefault();
+        return;
+      }
+      // Inside a <summary>, Space would toggle its <details>: type the space ourselves.
+      if (e.key === ' ' && inSummary) {
+        e.preventDefault();
+        el.ownerDocument.execCommand('insertText', false, ' ');
         return;
       }
       if (e.key === 'Enter' && (!multiline || e.metaKey || e.ctrlKey)) {
@@ -865,6 +912,12 @@ export class CanvasView {
         if (c.readOnly) return;
         const id = this.idAt(e.target);
         const target = e.target as Element;
+        // A placeholder that adds data (the first item of an empty list, a missing value).
+        const adder = target.closest?.<HTMLElement>('[data-bb-add]');
+        if (adder && this.content.contains(adder)) {
+          this.addFrom(adder);
+          return;
+        }
         // Remember the data field and list item clicked (Enter edits the field; the item gets a toolbar).
         this.activeField = target.closest?.('[data-bb-edit]')?.getAttribute('data-bb-data') ?? null;
         const itemEl = target.closest?.<HTMLElement>('[data-bb-item]');
@@ -884,6 +937,14 @@ export class CanvasView {
       true,
     );
     content.addEventListener('submit', (e) => e.preventDefault(), true);
+    // Add placeholders are buttons for the keyboard too.
+    content.addEventListener('keydown', (e) => {
+      const adder = (e.target as Element).closest?.<HTMLElement>('[data-bb-add]');
+      if (!adder || (e.key !== 'Enter' && e.key !== ' ')) return;
+      e.preventDefault();
+      e.stopPropagation();
+      this.addFrom(adder);
+    });
     content.addEventListener('dblclick', (e) => {
       // Site data first: its text sits inside a component node that isn't text itself.
       const field = (e.target as Element).closest?.<HTMLElement>('[data-bb-edit]');
@@ -1172,6 +1233,25 @@ function readItem(el: Element): { path: string; unique?: string[] } | null {
       ...(Array.isArray(item.unique)
         ? { unique: item.unique.filter((u): u is string => typeof u === 'string') }
         : {}),
+    };
+  } catch {
+    return null;
+  }
+}
+
+/** What an add placeholder adds (`data-bb-add`, see `ElementSpec.add`). */
+function readAdd(el: Element): { path: string; value: unknown; edit?: string } | null {
+  try {
+    const add = JSON.parse(el.getAttribute('data-bb-add') ?? 'null') as {
+      path?: unknown;
+      value?: unknown;
+      edit?: unknown;
+    } | null;
+    if (!add || typeof add.path !== 'string') return null;
+    return {
+      path: add.path,
+      value: add.value,
+      ...(typeof add.edit === 'string' ? { edit: add.edit } : {}),
     };
   } catch {
     return null;
