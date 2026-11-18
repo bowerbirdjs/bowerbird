@@ -156,4 +156,44 @@ describe('lintPage', () => {
     expect(rules).toContain('unsafe-url:hero-1/cta');
     expect(issues[0]?.severity).toBe('error');
   });
+
+  it('requires an accessible name for links that only wrap an image, and agrees with the renderer on URLs', () => {
+    const store = makeStore();
+    ok(
+      store.apply({
+        ops: [
+          {
+            op: 'node.insert',
+            parent: 'root-home',
+            node: {
+              type: 'link',
+              id: 'logo',
+              props: { href: '/' },
+              children: [{ type: 'image', props: { src: '/logo.png', alt: '' } }],
+            },
+          },
+          {
+            op: 'node.insert',
+            parent: 'root-home',
+            node: {
+              type: 'link',
+              id: 'bad',
+              props: { href: 'data:image/png;base64,AAAA', text: 'x' },
+            },
+          },
+          {
+            op: 'node.insert',
+            parent: 'root-home',
+            node: { type: 'link', id: 'ctl', props: { href: 'java\nscript:alert(1)', text: 'x' } },
+          },
+        ],
+      }),
+    );
+    const rules = lintPage(store.view, store.registry, 'home').map(
+      (i) => `${i.rule}:${i.nodeId ?? ''}`,
+    );
+    expect(rules).toContain('link-name:logo');
+    expect(rules).toContain('unsafe-url:bad');
+    expect(rules).toContain('unsafe-url:ctl');
+  });
 });

@@ -32,12 +32,16 @@ export function formatResults(agent: string, results: TaskResult[]): string {
     lines.push(
       `${r.passed ? '✓' : '✗'} ${r.task}  turns=${r.run.turns} tools=${r.run.toolCalls} errors=${r.run.toolErrors} ` +
         `in=${u.inputTokens} out=${u.outputTokens} cache=${u.cacheReadTokens} ` +
-        `${r.run.costUsd !== undefined ? `$${r.run.costUsd.toFixed(4)} ` : ''}${(r.run.latencyMs / 1000).toFixed(1)}s` +
+        `${r.run.costUsd !== undefined ? `$${r.run.costUsd.toFixed(4)} ` : 'cost n/a '}${(r.run.latencyMs / 1000).toFixed(1)}s` +
         `${r.run.servedBy ? ` (served by ${r.run.servedBy})` : ''}`,
     );
     for (const c of r.checks.filter((c) => !c.passed))
       lines.push(`    ✗ ${c.check.type}: ${c.message}`);
   }
-  if (cost) lines.push(`total cost ≈ $${cost.toFixed(4)}`);
+  const unpriced = results.filter((r) => r.run.costUsd === undefined).length;
+  if (cost)
+    lines.push(
+      `total cost ≈ $${cost.toFixed(4)}${unpriced ? ` (excludes ${unpriced} unpriced runs)` : ''}`,
+    );
   return lines.join('\n');
 }

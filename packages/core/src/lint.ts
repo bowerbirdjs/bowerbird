@@ -1,6 +1,7 @@
-import { type DocView, pageNodes, sectionRootOf } from './doc.js';
+import { type DocView, descendants, pageNodes, sectionRootOf } from './doc.js';
 import { type Registry, templateParts } from './registry.js';
 import type { BNode, PageId } from './types.js';
+import { isUnsafeUrl } from './url.js';
 
 export type LintSeverity = 'error' | 'warning' | 'info';
 
@@ -13,10 +14,18 @@ export interface LintIssue {
 }
 
 const HEADING = /^h([1-6])$/;
-const SAFE_URL = /^(https?:|mailto:|tel:|data:image\/)/i;
-const HAS_SCHEME = /^[a-z][a-z0-9+.-]*:/i;
 
 const str = (v: unknown) => (typeof v === 'string' ? v : '');
+
+/** Whether a node's subtree has text, a label or an image with alt text to name it by. */
+function hasAccessibleContent(view: DocView, id: string): boolean {
+  return descendants(view, id).some(
+    (d) =>
+      str(d.props.text).trim() !== '' ||
+      str(d.props.label).trim() !== '' ||
+      (d.type === 'image' && str(d.props.alt).trim() !== ''),
+  );
+}
 
 /** Example copy each section part starts with, keyed by node id. */
 function templateCopy(registry: Registry, nodes: BNode[]): Map<string, string> {
@@ -86,7 +95,6 @@ export function lintPage(view: DocView, registry: Registry, pageId: PageId): Lin
 
   const copy = templateCopy(registry, nodes);
   for (const n of nodes) {
-    const children = view.children(n.id);
     if ((n.type === 'text' || n.type === 'button') && !str(n.props.text).trim()) {
       issues.push({
         rule: 'empty-text',
@@ -97,7 +105,11 @@ export function lintPage(view: DocView, registry: Registry, pageId: PageId): Lin
     }
     if (n.type === 'link') {
       const href = str(n.props.href).trim();
-      if (!str(n.props.text).trim() && !str(n.props.label).trim() && !children.length) {
+      if (
+        !str(n.props.text).trim() &&
+        !str(n.props.label).trim() &&
+        !hasAccessibleContent(view, n.id)
+      ) {
         issues.push({
           rule: 'link-name',
           severity: 'error',
@@ -112,7 +124,7 @@ export function lintPage(view: DocView, registry: Registry, pageId: PageId): Lin
           nodeId: n.id,
           message: `Link "${n.id}" doesn't go anywhere yet (href "${href || ''}").`,
         });
-      } else if (HAS_SCHEME.test(href) && !SAFE_URL.test(href)) {
+      } else if (isUnsafeUrl(href, 'href')) {
         issues.push({
           rule: 'unsafe-url',
           severity: 'error',
@@ -131,7 +143,7 @@ export function lintPage(view: DocView, registry: Registry, pageId: PageId): Lin
         });
       }
       const src = str(n.props.src).trim();
-      if (HAS_SCHEME.test(src) && !SAFE_URL.test(src)) {
+      if (isUnsafeUrl(src, 'src')) {
         issues.push({
           rule: 'unsafe-url',
           severity: 'error',

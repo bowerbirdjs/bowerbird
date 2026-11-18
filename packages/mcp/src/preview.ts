@@ -1,4 +1,4 @@
-import { createServer, type ServerResponse } from 'node:http';
+import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import type { Store } from '@bowerbirdjs/core';
 import { escapeHtml, renderDocument } from '@bowerbirdjs/html';
@@ -31,6 +31,7 @@ export async function startPreview(options: PreviewOptions): Promise<PreviewServ
   const { store } = options;
   const host = options.host ?? '127.0.0.1';
   const clients = new Set<ServerResponse>();
+  const allowedHosts = new Set(['localhost', '127.0.0.1', '::1', host]);
   let lastChange = 'No changes yet';
 
   const unsubscribe = store.subscribe(({ entry }) => {
@@ -39,6 +40,23 @@ export async function startPreview(options: PreviewOptions): Promise<PreviewServ
   });
 
   const server = createServer((req, res) => {
+    // Only answer requests addressed to this machine, so a web page can't read the site through
+    // DNS rebinding.
+    const hostname = (req.headers.host ?? '').replace(/:\d+$/, '').replace(/^\[|\]$/g, '');
+    if (!allowedHosts.has(hostname)) {
+      res.writeHead(403, { 'content-type': 'text/plain' });
+      res.end('Forbidden host');
+      return;
+    }
+    try {
+      handle(req, res);
+    } catch (error) {
+      if (!res.headersSent) res.writeHead(500, { 'content-type': 'text/plain; charset=utf-8' });
+      res.end(`Preview failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  });
+
+  function handle(req: IncomingMessage, res: ServerResponse) {
     const url = new URL(req.url ?? '/', 'http://localhost');
     if (url.pathname === EVENTS_PATH) {
       res.writeHead(200, {
@@ -83,7 +101,7 @@ export async function startPreview(options: PreviewOptions): Promise<PreviewServ
     });
     res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
     res.end(html);
-  });
+  }
 
   await new Promise<void>((resolve, reject) => {
     server.once('error', reject);

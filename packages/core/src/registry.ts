@@ -161,7 +161,7 @@ export function resolveVariant(
   const errors: string[] = [];
   const axes = def.variants ?? {};
   for (const [axis, values] of Object.entries(axes)) {
-    const wanted = input[axis];
+    const wanted = Object.hasOwn(input, axis) ? input[axis] : undefined;
     if (wanted === undefined) variant[axis] = values[0]!;
     else if (values.includes(wanted)) variant[axis] = wanted;
     else
@@ -170,7 +170,7 @@ export function resolveVariant(
       );
   }
   for (const axis of Object.keys(input)) {
-    if (!(axis in axes)) {
+    if (!Object.hasOwn(axes, axis)) {
       const known = Object.keys(axes);
       errors.push(
         `Section "${def.name}" has no variant axis "${axis}"${known.length ? `; axes: ${known.join(', ')}` : ''}.`,

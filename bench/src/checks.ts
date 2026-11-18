@@ -64,6 +64,8 @@ export function runCheck(check: Check, store: Store, start: SiteDoc): CheckResul
       );
     }
     case 'noPlaceholderText': {
+      const missing = check.ids.filter((id) => !doc.nodes[id]);
+      if (missing.length) return result(false, `missing: ${missing.join(', ')}`);
       const leftovers = lintPage(view, store.registry, Object.keys(doc.pages)[0] ?? 'home')
         .filter((i) => i.rule === 'template-text' && i.nodeId && check.ids.includes(i.nodeId))
         .map((i) => i.nodeId!);
@@ -79,6 +81,9 @@ export function runCheck(check: Check, store: Store, start: SiteDoc): CheckResul
         if (inSubtree(id, check.ids)) continue;
         if (!deepEqualJson(start.nodes[id], doc.nodes[id])) changed.push(id);
       }
+      if (!deepEqualJson(start.tokens, doc.tokens)) changed.push('(design tokens)');
+      if (!deepEqualJson(start.themes, doc.themes)) changed.push('(themes)');
+      if (!deepEqualJson(start.pages, doc.pages)) changed.push('(page settings)');
       return result(
         !changed.length,
         changed.length ? `also changed: ${changed.slice(0, 10).join(', ')}` : 'ok',

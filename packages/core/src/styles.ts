@@ -16,18 +16,87 @@ export const BUILTIN_VARS = ['--bb-viewport-height'] as const;
 
 const PROP_RE = /^-?[a-z][a-z0-9-]*$/;
 const UNSAFE_RE = /[{}<>\\;]|\/\*|\*\/|@|expression\s*\(|javascript:|!important/i;
+// biome-ignore lint/suspicious/noControlCharactersInRegex: control characters are what we reject
+const CONTROL_RE = /[\u0000-\u001f\u007f]/;
+
+/** True for the interaction states node styles support (own keys only). */
+export function isStyleState(state: string): boolean {
+  return Object.hasOwn(STATE_PSEUDO, state);
+}
+
+/**
+ * Why a CSS value can't be embedded safely in a stylesheet, or undefined if it can: no braces,
+ * semicolons, angle brackets, backslashes, comments, at-rules, control characters or
+ * `!important`, and parentheses, brackets and quotes must be balanced.
+ */
+export function cssValueSyntaxError(value: string): string | undefined {
+  if (CONTROL_RE.test(value)) return 'contains line breaks or control characters';
+  if (UNSAFE_RE.test(value)) {
+    return "contains characters or syntax that aren't allowed ({ } < > ; \\ @, comments, !important, javascript:)";
+  }
+  const stack: string[] = [];
+  let quote: string | null = null;
+  for (const ch of value) {
+    if (quote) {
+      if (ch === quote) quote = null;
+      continue;
+    }
+    if (ch === '"' || ch === "'") quote = ch;
+    else if (ch === '(' || ch === '[') stack.push(ch);
+    else if (ch === ')' || ch === ']') {
+      const open = stack.pop();
+      if ((ch === ')' && open !== '(') || (ch === ']' && open !== '['))
+        return `has an unmatched "${ch}"`;
+    }
+  }
+  if (quote) return 'has an unclosed quote';
+  if (stack.length) return `has an unclosed "${stack.at(-1)}"`;
+  return undefined;
+}
+
+/** Problem with a CSS property name used in node styles, if any. */
+export function checkProperty(prop: string): Issue | undefined {
+  if (prop.startsWith('--')) {
+    return {
+      code: 'invalid_style',
+      message: `Custom property "${prop}" can't be set with style.set.`,
+      path: prop,
+      hint: 'Use the vars.set op to set CSS variables on a node.',
+    };
+  }
+  if (!PROP_RE.test(prop)) {
+    return {
+      code: 'invalid_style',
+      message: `"${prop}" is not a valid CSS property name.`,
+      path: prop,
+    };
+  }
+  return undefined;
+}
 const VAR_REF_RE = /var\(\s*(--[A-Za-z0-9_-]+)/g;
 const LENGTH_RE =
-  /(?:^|[\s(,/+*-])(-?(?:\d+\.?\d*|\.\d+)(?:px|rem|em|ex|ch|cap|lh|rlh|vw|vh|vmin|vmax|svw|svh|lvw|lvh|dvw|dvh|cqw|cqh|cqi|cqb|cqmin|cqmax|pt|pc|cm|mm|q|in))\b/i;
+  /(?:^|[\s(,/+*-])(-?(?:\d+\.?\d*|\.\d+)(?:e[+-]?\d+)?(?:px|rem|em|ex|ch|cap|lh|rlh|vw|vh|vmin|vmax|svw|svh|lvw|lvh|dvw|dvh|cqw|cqh|cqi|cqb|cqmin|cqmax|pt|pc|cm|mm|q|in))\b/i;
 const COLOR_FN_RE = /\b(rgba?|hsla?|hwb|lab|lch|oklab|oklch|color|color-mix)\s*\(/i;
 const HEX_RE = /#[0-9a-f]{3,8}\b/i;
 const URL_RE = /\burl\s*\(/i;
 const STRING_RE = /["']/;
 const NAMED_COLORS = new Set(
   (
-    'aqua azure beige black blue brown chartreuse chocolate coral crimson cyan fuchsia gold gray green ' +
-    'grey indigo ivory khaki lavender lime magenta maroon navy olive orange orchid pink plum purple red ' +
-    'salmon silver tan teal tomato turquoise violet white yellow'
+    'aliceblue antiquewhite aqua aquamarine azure beige bisque black blanchedalmond blue blueviolet brown ' +
+    'burlywood cadetblue chartreuse chocolate coral cornflowerblue cornsilk crimson cyan darkblue darkcyan ' +
+    'darkgoldenrod darkgray darkgreen darkgrey darkkhaki darkmagenta darkolivegreen darkorange darkorchid ' +
+    'darkred darksalmon darkseagreen darkslateblue darkslategray darkslategrey darkturquoise darkviolet ' +
+    'deeppink deepskyblue dimgray dimgrey dodgerblue firebrick floralwhite forestgreen fuchsia gainsboro ' +
+    'ghostwhite gold goldenrod gray green greenyellow grey honeydew hotpink indianred indigo ivory khaki ' +
+    'lavender lavenderblush lawngreen lemonchiffon lightblue lightcoral lightcyan lightgoldenrodyellow ' +
+    'lightgray lightgreen lightgrey lightpink lightsalmon lightseagreen lightskyblue lightslategray ' +
+    'lightslategrey lightsteelblue lightyellow lime limegreen linen magenta maroon mediumaquamarine ' +
+    'mediumblue mediumorchid mediumpurple mediumseagreen mediumslateblue mediumspringgreen mediumturquoise ' +
+    'mediumvioletred midnightblue mintcream mistyrose moccasin navajowhite navy oldlace olive olivedrab ' +
+    'orange orangered orchid palegoldenrod palegreen paleturquoise palevioletred papayawhip peachpuff peru ' +
+    'pink plum powderblue purple rebeccapurple red rosybrown royalblue saddlebrown salmon sandybrown ' +
+    'seagreen seashell sienna silver skyblue slateblue slategray slategrey snow springgreen steelblue tan ' +
+    'teal thistle tomato turquoise violet wheat white whitesmoke yellow yellowgreen'
   ).split(' '),
 );
 const STRING_PROPS = new Set([
@@ -76,21 +145,9 @@ export function parseDeclarations(css: string): { decls: [string, string][]; iss
     }
     const prop = piece.slice(0, colon).trim().toLowerCase();
     const value = piece.slice(colon + 1).trim();
-    if (prop.startsWith('--')) {
-      issues.push({
-        code: 'invalid_style',
-        message: `Custom property "${prop}" can't be set with style.set.`,
-        path: prop,
-        hint: 'Use the vars.set op to set CSS variables on a node.',
-      });
-      continue;
-    }
-    if (!PROP_RE.test(prop)) {
-      issues.push({
-        code: 'invalid_style',
-        message: `"${prop}" is not a valid CSS property name.`,
-        path: prop,
-      });
+    const propIssue = checkProperty(prop);
+    if (propIssue) {
+      issues.push(propIssue);
       continue;
     }
     if (!value) {
@@ -208,14 +265,10 @@ export function checkValue(prop: string, value: string, ctx: StyleCheckContext):
   if (value.length > 500) {
     return [{ code: 'invalid_style', message: `Value for "${prop}" is too long.`, path: prop }];
   }
-  if (UNSAFE_RE.test(value)) {
+  const syntax = cssValueSyntaxError(value);
+  if (syntax) {
     return [
-      {
-        code: 'invalid_style',
-        message: `Value for "${prop}" contains characters or syntax that aren't allowed: "${value}".`,
-        path: prop,
-        hint: 'Values may not contain { } < > ; \\ @, comments, !important or javascript:.',
-      },
+      { code: 'invalid_style', message: `Value for "${prop}" ${syntax}: "${value}".`, path: prop },
     ];
   }
   for (const match of value.matchAll(VAR_REF_RE)) {

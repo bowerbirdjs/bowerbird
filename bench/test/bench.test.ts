@@ -1,7 +1,9 @@
 import { fileURLToPath } from 'node:url';
+import type Anthropic from '@anthropic-ai/sdk';
 import { describe, expect, it } from 'vitest';
 import {
   type BenchTask,
+  claudeAgent,
   loadTasks,
   runTask,
   type ScriptedCall,
@@ -98,5 +100,47 @@ describe('PageBench harness', () => {
     );
     expect(result.passed).toBe(false);
     expect(result.checks.find((c) => c.check.type === 'noPlaceholderText')?.passed).toBe(false);
+  });
+
+  it('counts token and page changes as changes outside the allowed subtrees', async () => {
+    const extra: ScriptedCall[] = [
+      ...PRICING,
+      {
+        tool: 'apply',
+        input: { ops: [{ op: 'token.set', path: 'color.brand.600', value: '#000000' }] },
+      },
+    ];
+    const result = await runTask(
+      task('precise-pricing-edit'),
+      scriptedAgent({ 'precise-pricing-edit': extra }),
+    );
+    expect(result.checks.find((c) => c.check.type === 'unchangedExcept')?.message).toContain(
+      'design tokens',
+    );
+  });
+
+  it('reports max_turns when the turn limit stops a Claude run', async () => {
+    const toolUse = {
+      model: 'claude-opus-5-5',
+      stop_reason: 'tool_use',
+      content: [{ type: 'tool_use', id: 'tu1', name: 'get_outline', input: {} }],
+      usage: {
+        input_tokens: 10,
+        output_tokens: 5,
+        cache_read_input_tokens: 0,
+        cache_creation_input_tokens: 0,
+      },
+    };
+    const client = { beta: { messages: { create: async () => toolUse } } } as unknown as Anthropic;
+    const result = await runTask(
+      task('precise-pricing-edit'),
+      claudeAgent({ client, maxTurns: 3 }),
+    );
+    expect(result.run.stopReason).toBe('max_turns');
+    expect(result.run.turns).toBe(3);
+    // the last turn's tool calls are not run: there is no turn left to send their results back
+    expect(result.run.toolCalls).toBe(2);
+    expect(result.run.usage.inputTokens).toBe(30);
+    expect(result.run.costUsd).toBeCloseTo((30 * 4 + 15 * 20) / 1e6);
   });
 });

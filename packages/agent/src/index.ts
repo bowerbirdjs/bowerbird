@@ -142,14 +142,17 @@ function compactNode(store: Store, n: BNode) {
   };
 }
 
-export function formatApplyResult(store: Store, result: ApplyResult, opCount: number): ToolResult {
+export function formatApplyResult(
+  store: Store,
+  result: ApplyResult,
+  opCount: number,
+  retryHint = 'fix the error and send all ops again.',
+): ToolResult {
   if (!result.ok) {
     const lines = [`No changes were applied (document is at revision ${result.revision}).`];
     for (const issue of result.errors) lines.push(`- ${formatIssue(issue)}`);
     if (result.failedOp !== undefined && result.failedOp < opCount - 1) {
-      lines.push(
-        `ops after ops[${result.failedOp}] were not checked; fix the error and send all ops again.`,
-      );
+      lines.push(`ops after ops[${result.failedOp}] were not checked; ${retryHint}`);
     }
     return { text: lines.join('\n'), isError: true };
   }
@@ -474,7 +477,12 @@ export function createAgentTools(options: AgentToolsOptions): AgentTool[] {
           label: input.label ?? 'Import HTML',
           ...(input.dryRun ? { dryRun: true } : {}),
         });
-        const formatted = formatApplyResult(store, result, ops.length);
+        const formatted = formatApplyResult(
+          store,
+          result,
+          ops.length,
+          'fix the HTML (or its style attributes) and import it again.',
+        );
         return {
           ...formatted,
           text: [formatted.text, ...warnings.map((w) => `Note: ${w}`)].join('\n'),

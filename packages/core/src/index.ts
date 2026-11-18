@@ -1,4 +1,11 @@
-export { sectionVarNames, tokenValueMap, tokenVarSet } from './apply.js';
+export {
+  isValidPagePath,
+  MAX_DEPTH,
+  orderNextTo,
+  sectionVarNames,
+  tokenValueMap,
+  tokenVarSet,
+} from './apply.js';
 export {
   ancestors,
   buildChildIndex,
@@ -6,10 +13,12 @@ export {
   DEFAULT_BREAKPOINTS,
   DocIndex,
   type DocView,
+  depthOf,
   descendants,
   pageNodes,
   pageOf,
   sectionRootOf,
+  subtreeHeight,
 } from './doc.js';
 export { type Change, Draft } from './draft.js';
 export {
@@ -58,6 +67,7 @@ export {
   type HistoryEntry,
   isSiteDoc,
   LOCAL_USER,
+  normalizeDoc,
   Store,
   type StoreOptions,
   summarize,
@@ -65,9 +75,12 @@ export {
 } from './store.js';
 export {
   BUILTIN_VARS,
+  checkProperty,
   checkValue,
   closestTokens,
+  cssValueSyntaxError,
   findRawValue,
+  isStyleState,
   parseDeclarations,
   STATE_PSEUDO,
   type StyleCheckContext,
@@ -84,3 +97,5 @@ export {
   tokenVar,
 } from './tokens.js';
 export type * from './types.js';
+export { isUnsafeUrl, sanitizeUrl } from './url.js';
+export { isSafeKey } from './util.js';

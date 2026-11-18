@@ -97,6 +97,10 @@ export function claudeAgent(options: ClaudeAgentOptions = {}): BenchAgent {
         usage.cacheWriteTokens += response.usage.cache_creation_input_tokens ?? 0;
         if (response.model !== model) servedBy = response.model;
         stopReason = response.stop_reason ?? 'unknown';
+        if (turns >= maxTurns && stopReason === 'tool_use') {
+          stopReason = 'max_turns';
+          break;
+        }
 
         if (stopReason === 'pause_turn') {
           messages.push({ role: 'assistant', content: response.content });
@@ -122,7 +126,8 @@ export function claudeAgent(options: ClaudeAgentOptions = {}): BenchAgent {
         messages.push({ role: 'user', content: results });
       }
 
-      const cost = estimateCost(servedBy ?? model, usage);
+      // With a fallback, turns ran on different models; price only runs that stayed on one model.
+      const cost = servedBy ? undefined : estimateCost(model, usage);
       return {
         turns,
         toolCalls,

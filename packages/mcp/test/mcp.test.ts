@@ -48,7 +48,7 @@ describe('MCP server', () => {
     expect(res.isError).toBe(false);
     expect(store.history.at(-1)?.actor).toEqual({
       kind: 'agent',
-      id: 'test-client',
+      id: 'mcp-test-client',
       name: 'Test Client',
     });
     expect((await call('get_outline', { depth: 1 })).text).toContain(

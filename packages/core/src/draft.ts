@@ -1,7 +1,7 @@
 import { buildChildIndex, type DocView } from './doc.js';
 import { compareOrder } from './order.js';
 import type { BNode, NodeId, Page, PageId, SiteDoc, TokenTree } from './types.js';
-import { deepEqual, ensureIn } from './util.js';
+import { deepEqual, ensureIn, own } from './util.js';
 
 /** A record-level change: `before` absent = created, `after` absent = removed. */
 export type Change =
@@ -17,6 +17,7 @@ export type Change =
 export class Draft implements DocView {
   private readonly nodeOverlay = new Map<NodeId, BNode | null>();
   private readonly pageOverlay = new Map<PageId, Page | null>();
+  private readonly counterOverlay = new Map<string, number>();
   private readonly childIndex: Map<NodeId, Set<NodeId>>;
   private tokenTree: TokenTree;
   private themeMap: SiteDoc['themes'];
@@ -31,7 +32,7 @@ export class Draft implements DocView {
 
   node(id: NodeId): BNode | undefined {
     if (this.nodeOverlay.has(id)) return this.nodeOverlay.get(id) ?? undefined;
-    return this.base.nodes[id];
+    return own(this.base.nodes, id);
   }
 
   has(id: NodeId): boolean {
@@ -46,7 +47,17 @@ export class Draft implements DocView {
 
   page(id: PageId): Page | undefined {
     if (this.pageOverlay.has(id)) return this.pageOverlay.get(id) ?? undefined;
-    return this.base.pages[id];
+    return own(this.base.pages, id);
+  }
+
+  /** Highest number used so far for an id prefix. */
+  counter(prefix: string): number {
+    return this.counterOverlay.get(prefix) ?? own(this.base.counters ?? {}, prefix) ?? 0;
+  }
+
+  /** Records that numbers up to `n` have been used for `prefix` (never decreases). */
+  useCounter(prefix: string, n: number): void {
+    if (n > this.counter(prefix)) this.counterOverlay.set(prefix, n);
   }
 
   pages(): Page[] {
@@ -112,12 +123,12 @@ export class Draft implements DocView {
   changes(): Change[] {
     const out: Change[] = [];
     for (const [id, after] of this.nodeOverlay) {
-      const before = this.base.nodes[id];
+      const before = own(this.base.nodes, id);
       if (deepEqual(before, after ?? undefined)) continue;
       out.push({ kind: 'node', id, ...(before ? { before } : {}), ...(after ? { after } : {}) });
     }
     for (const [id, after] of this.pageOverlay) {
-      const before = this.base.pages[id];
+      const before = own(this.base.pages, id);
       if (deepEqual(before, after ?? undefined)) continue;
       out.push({ kind: 'page', id, ...(before ? { before } : {}), ...(after ? { after } : {}) });
     }
@@ -142,6 +153,17 @@ export class Draft implements DocView {
       if (p) pages[id] = p;
       else delete pages[id];
     }
-    return { ...this.base, revision, nodes, pages, tokens: this.tokenTree, themes: this.themeMap };
+    const next: SiteDoc = {
+      ...this.base,
+      revision,
+      nodes,
+      pages,
+      tokens: this.tokenTree,
+      themes: this.themeMap,
+    };
+    if (this.counterOverlay.size) {
+      next.counters = { ...(this.base.counters ?? {}), ...Object.fromEntries(this.counterOverlay) };
+    }
+    return next;
   }
 }

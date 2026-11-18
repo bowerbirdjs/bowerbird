@@ -68,6 +68,11 @@ export interface SiteDoc {
   /** Theme name → token path → CSS value (or `{alias}`). */
   themes: Record<string, Record<string, string>>;
   breakpoints: Breakpoint[];
+  /**
+   * Highest number handed out per id prefix (`hero` → 3 means hero-1…hero-3 were used). Ids are
+   * never reused, so undo and references can't land on a different node with an old id.
+   */
+  counters?: Record<string, number>;
 }
 
 export interface Actor {

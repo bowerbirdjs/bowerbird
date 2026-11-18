@@ -1,4 +1,4 @@
-import type { NodeInput } from '@bowerbirdjs/core';
+import { type NodeInput, sanitizeUrl } from '@bowerbirdjs/core';
 import { type ChildNode, type Element, isTag, isText } from 'domhandler';
 import { parseDocument } from 'htmlparser2';
 
@@ -96,12 +96,25 @@ const MAX_DEPTH = 30;
 
 const collapse = (s: string) => s.replace(/\s+/g, ' ');
 
+/** Text content, skipping scripts, styles and other dropped elements. Iterative, so deep markup is safe. */
 function textOf(node: ChildNode): string {
-  if (isText(node)) return node.data;
-  if (!isTag(node)) return '';
-  if (node.name === 'br') return ' ';
-  return node.children.map(textOf).join('');
+  let out = '';
+  const stack: ChildNode[] = [node];
+  while (stack.length) {
+    const n = stack.pop()!;
+    if (isText(n)) out += n.data;
+    else if (isTag(n)) {
+      const name = n.name.toLowerCase();
+      if (name === 'br') out += ' ';
+      else if (!SKIP.has(name))
+        for (let i = n.children.length - 1; i >= 0; i--) stack.push(n.children[i]!);
+    }
+  }
+  return out;
 }
+
+/** Text limits of the primitives, so an import never fails on one long paragraph. */
+const MAX_TEXT: Record<string, number> = { text: 5000, link: 500, button: 200 };
 
 const isInline = (node: ChildNode) =>
   isText(node) || (isTag(node) && INLINE.has(node.name.toLowerCase()));
@@ -122,8 +135,23 @@ export function htmlToNodes(html: string, options: HtmlImportOptions = {}): Html
     return keepStyles && style ? { css: style } : {};
   };
 
-  const textNode = (text: string, tag: string, el?: Element): NodeInput | undefined => {
+  const clip = (text: string, type: string): string => {
     const t = collapse(text).trim();
+    const max = MAX_TEXT[type] ?? 5000;
+    if (t.length <= max) return t;
+    warnings.add(`Some text was longer than ${max} characters and was shortened.`);
+    return `${t.slice(0, max - 1)}…`;
+  };
+
+  const safeUrl = (url: string, kind: 'href' | 'src'): string => {
+    const clean = sanitizeUrl(url, kind);
+    if (clean !== url.trim())
+      warnings.add(`Unsafe ${kind} values (for example javascript: URLs) were removed.`);
+    return clean.length > (kind === 'href' ? 2048 : 100_000) ? (kind === 'href' ? '#' : '') : clean;
+  };
+
+  const textNode = (text: string, tag: string, el?: Element): NodeInput | undefined => {
+    const t = clip(text, 'text');
     if (!t) return undefined;
     count++;
     return { type: 'text', props: { tag, text: t }, ...(el ? common(el) : {}) };
@@ -144,7 +172,10 @@ export function htmlToNodes(html: string, options: HtmlImportOptions = {}): Html
       run = [];
     };
     for (const child of parent.children) {
-      if (count >= maxNodes) break;
+      if (count >= maxNodes) {
+        warnings.add(`Stopped after ${maxNodes} nodes; the rest of the HTML was not imported.`);
+        break;
+      }
       const blockLink = isTag(child) && child.name === 'a';
       if (isInline(child) && !blockLink) {
         run.push(child);
@@ -189,14 +220,20 @@ export function htmlToNodes(html: string, options: HtmlImportOptions = {}): Html
       const { src = '', alt, width, height } = node.attribs;
       if (alt === undefined)
         warnings.add('Some images had no alt attribute; they were given empty alt text.');
+      const size = (v: string | undefined) =>
+        v && /^\d+$/.test(v) && Number(v) > 0 ? Number(v) : undefined;
+      const w = size(width);
+      const h = size(height);
       return [
         {
           type: 'image',
           props: {
-            src,
-            alt: alt ?? '',
-            ...(width && /^\d+$/.test(width) ? { width: Number(width) } : {}),
-            ...(height && /^\d+$/.test(height) ? { height: Number(height) } : {}),
+            src: safeUrl(src, 'src'),
+            alt: collapse(alt ?? '')
+              .trim()
+              .slice(0, 500),
+            ...(w ? { width: w } : {}),
+            ...(h ? { height: h } : {}),
           },
           ...common(node),
         },
@@ -206,14 +243,14 @@ export function htmlToNodes(html: string, options: HtmlImportOptions = {}): Html
       count++;
       const { href = '#', target } = node.attribs;
       const props: Record<string, unknown> = {
-        href,
+        href: safeUrl(href, 'href'),
         ...(target === '_blank' ? { target: '_blank' } : {}),
       };
       if (!hasBlockContent(node))
         return [
           {
             type: 'link',
-            props: { ...props, text: collapse(textOf(node)).trim() },
+            props: { ...props, text: clip(textOf(node), 'link') },
             ...common(node),
           },
         ];
@@ -221,7 +258,7 @@ export function htmlToNodes(html: string, options: HtmlImportOptions = {}): Html
     }
     if (tag === 'button') {
       count++;
-      return [{ type: 'button', props: { text: collapse(textOf(node)).trim() }, ...common(node) }];
+      return [{ type: 'button', props: { text: clip(textOf(node), 'button') }, ...common(node) }];
     }
     const textTag = TEXT_TAGS[tag];
     if (textTag) {
@@ -233,7 +270,21 @@ export function htmlToNodes(html: string, options: HtmlImportOptions = {}): Html
       const t = textNode(textOf(node), textTag, node);
       return t ? [t] : [];
     }
+    // A list item that only holds one link keeps the link (navigation lists).
+    const meaningful = node.children.filter((c) => !(isText(c) && !c.data.trim()));
+    const only = meaningful[0];
+    if (tag === 'li' && meaningful.length === 1 && only && isTag(only) && only.name === 'a') {
+      count++;
+      return [
+        { type: 'box', props: { tag: 'li' }, children: convert(only, depth + 1), ...common(node) },
+      ];
+    }
     if (tag === 'li' && node.children.every(isInline)) {
+      if (node.children.some((c) => isTag(c) && c.name === 'a')) {
+        warnings.add(
+          'Links inside running text were flattened to plain text (rich text is not supported yet).',
+        );
+      }
       const t = textNode(textOf(node), 'li', node);
       return t ? [t] : [];
     }
@@ -249,6 +300,9 @@ export function htmlToNodes(html: string, options: HtmlImportOptions = {}): Html
     ];
   };
 
+  if (html.length > 1_000_000) {
+    return { nodes: [], warnings: ['The HTML is larger than 1 MB; split it into smaller parts.'] };
+  }
   const doc = parseDocument(html, { lowerCaseTags: true, lowerCaseAttributeNames: true });
   const nodes: NodeInput[] = [];
   for (const child of doc.children) nodes.push(...convert(child, 0));

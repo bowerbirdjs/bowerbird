@@ -7,7 +7,7 @@ import {
   createPolicy,
   createStore,
   type FreedomLevel,
-  isSiteDoc,
+  normalizeDoc,
   type SiteDoc,
 } from '@bowerbirdjs/core';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
@@ -54,8 +54,8 @@ async function main() {
   let doc: SiteDoc;
   const file = values.file;
   if (file && existsSync(file)) {
-    const parsed: unknown = JSON.parse(await readFile(file, 'utf8'));
-    if (!isSiteDoc(parsed)) throw new Error(`${file} is not a Bowerbird site file.`);
+    const parsed = normalizeDoc(JSON.parse(await readFile(file, 'utf8')));
+    if (!parsed) throw new Error(`${file} is not a Bowerbird site file.`);
     doc = parsed;
     log(`loaded ${file} (revision ${doc.revision})`);
   } else {
@@ -82,11 +82,14 @@ async function main() {
   let timer: NodeJS.Timeout | undefined;
   const save = () => {
     if (!file) return Promise.resolve();
-    saving = saving.then(async () => {
-      const tmp = `${file}.tmp`;
-      await writeFile(tmp, `${JSON.stringify(store.doc, null, 2)}\n`);
-      await rename(tmp, file);
-    });
+    // A failed write must not poison the chain: later saves still run.
+    saving = saving
+      .catch(() => undefined)
+      .then(async () => {
+        const tmp = `${file}.tmp`;
+        await writeFile(tmp, `${JSON.stringify(store.doc, null, 2)}\n`);
+        await rename(tmp, file);
+      });
     return saving;
   };
   if (file) {

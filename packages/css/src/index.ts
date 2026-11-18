@@ -2,8 +2,12 @@ import {
   aliasToCss,
   type BNode,
   type Breakpoint,
+  checkProperty,
+  cssValueSyntaxError,
   DocIndex,
   flattenTokens,
+  isStyleState,
+  isValidId,
   pageNodes,
   type Registry,
   type SiteDoc,
@@ -60,15 +64,31 @@ const block = (selector: string, decls: string[]) =>
 const join = (parts: string[]) => parts.filter(Boolean).join('\n\n');
 
 /** Token custom properties, plus one declaration list per theme. */
+// Documents loaded from storage may never have passed through validated ops, so everything that
+// ends up in CSS text is checked again here. Anything unsafe is skipped rather than emitted.
+const VAR_NAME = /^--[A-Za-z0-9_-]+$/;
+const THEME_NAME = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+const safeValue = (v: unknown): v is string => typeof v === 'string' && !cssValueSyntaxError(v);
+const safeDecl = (p: string, v: unknown) => !checkProperty(p) && safeValue(v);
+
 export function tokenDeclarations(doc: SiteDoc): { base: string[]; themes: [string, string[]][] } {
-  const base = flattenTokens(doc.tokens).tokens.map((t) => `${t.cssVar}: ${t.value};`);
-  const themes = Object.entries(doc.themes).map(
-    ([name, values]) =>
-      [name, Object.entries(values).map(([path, v]) => `${tokenVar(path)}: ${aliasToCss(v)};`)] as [
-        string,
-        string[],
-      ],
-  );
+  const base = flattenTokens(doc.tokens)
+    .tokens.filter((t) => VAR_NAME.test(t.cssVar) && safeValue(t.value))
+    .map((t) => `${t.cssVar}: ${t.value};`);
+  const themes = Object.entries(doc.themes ?? {})
+    .filter(([name]) => THEME_NAME.test(name))
+    .map(
+      ([name, values]) =>
+        [
+          name,
+          Object.entries(values)
+            .map(
+              ([path, v]) => [tokenVar(path), typeof v === 'string' ? aliasToCss(v) : ''] as const,
+            )
+            .filter(([name, v]) => VAR_NAME.test(name) && safeValue(v))
+            .map(([name, v]) => `${name}: ${v};`),
+        ] as [string, string[]],
+    );
   return { base, themes };
 }
 
@@ -89,21 +109,28 @@ export function nodeCss(nodes: Iterable<BNode>, breakpoints: Breakpoint[]): stri
   const base: string[] = [];
   const byBreakpoint = new Map<string, string[]>();
   for (const n of nodes) {
+    if (!isValidId(n.id)) continue;
     const sel = nodeSelector(n.id);
     if (n.vars)
       base.push(
         block(
           sel,
-          Object.entries(n.vars).map(([k, v]) => `${k}: ${v};`),
+          Object.entries(n.vars)
+            .filter(([k, v]) => VAR_NAME.test(k) && safeValue(v))
+            .map(([k, v]) => `${k}: ${v};`),
         ),
       );
     for (const bp of breakpoints) {
-      const states = n.styles?.[bp.id];
+      if (!Number.isFinite(bp.minWidth)) continue;
+      const states = n.styles && Object.hasOwn(n.styles, bp.id) ? n.styles[bp.id] : undefined;
       if (!states) continue;
       for (const [state, decls] of Object.entries(states)) {
+        if (!isStyleState(state)) continue;
         const rule = block(
-          sel + (STATE_PSEUDO[state] ?? ''),
-          Object.entries(decls).map(([p, v]) => `${p}: ${v};`),
+          sel + STATE_PSEUDO[state],
+          Object.entries(decls)
+            .filter(([p, v]) => safeDecl(p, v))
+            .map(([p, v]) => `${p}: ${v};`),
         );
         if (!rule) continue;
         if (bp.minWidth <= 0) base.push(rule);

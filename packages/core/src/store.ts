@@ -1,11 +1,11 @@
-import { applyOp, type OpContext } from './apply.js';
+import { applyOp, type OpContext, orderNextTo } from './apply.js';
 import { createEmptyDoc, DocIndex, descendants } from './doc.js';
 import { type Change, Draft } from './draft.js';
 import type { Issue } from './errors.js';
 import { parseOps } from './ops.js';
 import { createPolicy, type Policy } from './policy.js';
 import type { Registry } from './registry.js';
-import type { Actor, BNode, NodeId, PageId, SiteDoc } from './types.js';
+import type { Actor, BNode, NodeId, PageId, SiteDoc, TokenTree } from './types.js';
 import { deepEqual, ensure, isPlainObject, pruneEmpty } from './util.js';
 
 export const LOCAL_USER: Actor = { kind: 'user', id: 'local' };
@@ -175,6 +175,65 @@ function revertNode(current: BNode, before: BNode, after: BNode, conflicts: stri
   return next as unknown as BNode;
 }
 
+/** Token leaves keyed by dot path (values are the leaf objects or shorthand values). */
+function tokenLeaves(tree: TokenTree): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  const walk = (node: Record<string, unknown>, path: string[]) => {
+    for (const [key, child] of Object.entries(node)) {
+      if (key.startsWith('$')) continue;
+      const p = [...path, key];
+      if (isPlainObject(child) && !('$value' in child)) walk(child, p);
+      else out[p.join('.')] = child;
+    }
+  };
+  walk(tree, []);
+  return out;
+}
+
+/** Applies merged leaves onto the current tree, keeping group metadata such as `$type`. */
+function rebuildTokens(current: TokenTree, leaves: Record<string, unknown>): TokenTree {
+  const tree = structuredClone(current);
+  const existing = tokenLeaves(tree);
+  const remove = (path: string) => {
+    const segs = path.split('.');
+    const parents: Record<string, unknown>[] = [tree];
+    for (const seg of segs.slice(0, -1)) {
+      const next = parents.at(-1)![seg];
+      if (!isPlainObject(next)) return;
+      parents.push(next);
+    }
+    delete parents.at(-1)![segs.at(-1)!];
+  };
+  for (const path of Object.keys(existing)) if (!Object.hasOwn(leaves, path)) remove(path);
+  for (const [path, leaf] of Object.entries(leaves)) {
+    const segs = path.split('.');
+    let group: Record<string, unknown> = tree;
+    for (const seg of segs.slice(0, -1)) {
+      if (!isPlainObject(group[seg])) group[seg] = {};
+      group = group[seg] as Record<string, unknown>;
+    }
+    group[segs.at(-1)!] = leaf;
+  }
+  return tree;
+}
+
+function themeEntries(themes: SiteDoc['themes']): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [theme, values] of Object.entries(themes)) {
+    for (const [path, value] of Object.entries(values)) out[`${theme}\u0000${path}`] = value;
+  }
+  return out;
+}
+
+function rebuildThemes(entries: Record<string, unknown>): SiteDoc['themes'] {
+  const out: SiteDoc['themes'] = {};
+  for (const [key, value] of Object.entries(entries)) {
+    const [theme, path] = key.split('\u0000') as [string, string];
+    ensure(out, theme, () => ({}))[path] = String(value);
+  }
+  return out;
+}
+
 export class Store {
   readonly registry: Registry;
   readonly policy: Policy;
@@ -313,55 +372,74 @@ export class Store {
     const draft = new Draft(this.current);
     const warnings: Issue[] = [];
     const touched = new Set(entry.changes.map((c) => c.id));
-    for (const change of [...entry.changes].reverse()) {
-      if (change.kind === 'node') {
-        const cur = draft.node(change.id);
-        if (!change.before) {
-          if (!cur) continue;
-          if (!deepEqual(cur, change.after)) {
-            warnings.push({
-              code: 'conflict',
-              nodeId: change.id,
-              message: `"${change.id}" was edited after it was created; those edits were removed with it.`,
-            });
-          }
-          for (const d of descendants(draft, change.id)) {
-            if (!touched.has(d.id)) {
-              warnings.push({
-                code: 'conflict',
-                nodeId: d.id,
-                message: `"${d.id}" was added inside "${change.id}" later and was removed with it.`,
-              });
-            }
-            draft.deleteNode(d.id);
-          }
-          draft.deleteNode(change.id);
-        } else if (!change.after) {
-          if (cur)
-            warnings.push({
-              code: 'conflict',
-              nodeId: change.id,
-              message: `"${change.id}" exists again, so it was not restored.`,
-            });
-          else draft.setNode(change.before);
-        } else if (!cur) {
+    const repositioned = new Set<string>();
+    // Nodes are reverted in phases so moves inside the entry survive: first restore what the entry
+    // removed, then revert updates (including moves), and only then delete what it created.
+    const nodeChanges = entry.changes.filter((c) => c.kind === 'node') as Extract<
+      Change,
+      { kind: 'node' }
+    >[];
+    for (const change of nodeChanges) {
+      if (!change.before || change.after) continue;
+      if (draft.node(change.id)) {
+        warnings.push({
+          code: 'conflict',
+          nodeId: change.id,
+          message: `"${change.id}" exists again, so it was not restored.`,
+        });
+      } else {
+        draft.setNode(change.before);
+        repositioned.add(change.id);
+      }
+    }
+    for (const change of nodeChanges) {
+      if (!change.before || !change.after) continue;
+      const cur = draft.node(change.id);
+      if (!cur) {
+        warnings.push({
+          code: 'conflict',
+          nodeId: change.id,
+          message: `"${change.id}" was removed later, so this change to it can't be reverted.`,
+        });
+        continue;
+      }
+      const conflicts: string[] = [];
+      draft.setNode(revertNode(cur, change.before, change.after, conflicts));
+      repositioned.add(change.id);
+      if (conflicts.length) {
+        warnings.push({
+          code: 'conflict',
+          nodeId: change.id,
+          message: `Kept later edits to "${change.id}": ${conflicts.join(', ')}.`,
+        });
+      }
+    }
+    for (const change of [...nodeChanges].reverse()) {
+      if (change.before) continue;
+      const cur = draft.node(change.id);
+      if (!cur) continue;
+      if (!deepEqual(cur, change.after)) {
+        warnings.push({
+          code: 'conflict',
+          nodeId: change.id,
+          message: `"${change.id}" was edited after it was created; those edits were removed with it.`,
+        });
+      }
+      for (const d of descendants(draft, change.id)) {
+        if (!touched.has(d.id)) {
           warnings.push({
             code: 'conflict',
-            nodeId: change.id,
-            message: `"${change.id}" was removed later, so this change to it can't be reverted.`,
+            nodeId: d.id,
+            message: `"${d.id}" was added inside "${change.id}" later and was removed with it.`,
           });
-        } else {
-          const conflicts: string[] = [];
-          draft.setNode(revertNode(cur, change.before, change.after, conflicts));
-          if (conflicts.length) {
-            warnings.push({
-              code: 'conflict',
-              nodeId: change.id,
-              message: `Kept later edits to "${change.id}": ${conflicts.join(', ')}.`,
-            });
-          }
         }
-      } else if (change.kind === 'page') {
+        draft.deleteNode(d.id);
+      }
+      draft.deleteNode(change.id);
+    }
+    for (const change of [...entry.changes].reverse()) {
+      if (change.kind === 'node') continue;
+      if (change.kind === 'page') {
         const cur = draft.page(change.id);
         const r = revertValue(cur, change.before, change.after);
         if (r.conflict)
@@ -372,19 +450,53 @@ export class Store {
         else if (r.value) draft.setPage(r.value as NonNullable<typeof change.before>);
         else draft.deletePage(change.id);
       } else if (change.kind === 'tokens') {
-        if (deepEqual(draft.tokens(), change.after)) draft.setTokens(change.before);
-        else
+        const conflicts: string[] = [];
+        const merged = revertMap(
+          tokenLeaves(draft.tokens()),
+          tokenLeaves(change.before),
+          tokenLeaves(change.after),
+          'tokens',
+          conflicts,
+        );
+        draft.setTokens(rebuildTokens(draft.tokens(), merged));
+        if (conflicts.length) {
           warnings.push({
             code: 'conflict',
-            message: 'Tokens were changed later; kept the later tokens.',
+            message: `Kept later token edits: ${conflicts.join(', ')}.`,
           });
+        }
       } else {
-        if (deepEqual(draft.themes(), change.after)) draft.setThemes(change.before);
-        else
+        const conflicts: string[] = [];
+        const merged = revertMap(
+          themeEntries(draft.themes()),
+          themeEntries(change.before),
+          themeEntries(change.after),
+          'themes',
+          conflicts,
+        );
+        draft.setThemes(rebuildThemes(merged));
+        if (conflicts.length) {
           warnings.push({
             code: 'conflict',
-            message: 'Themes were changed later; kept the later themes.',
+            message: `Kept later theme edits: ${conflicts.join(', ')}.`,
           });
+        }
+      }
+    }
+    // A restored position may share its order key with a node placed there later; move it just after.
+    for (const id of repositioned) {
+      const n = draft.node(id);
+      if (!n?.parent) continue;
+      const siblings = draft.children(n.parent);
+      if (siblings.some((s) => s.id !== id && s.order === n.order)) {
+        draft.setNode({
+          ...n,
+          order: orderNextTo(
+            siblings.filter((s) => s.id !== id),
+            n.order,
+            'after',
+          ),
+        });
       }
     }
     const integrity: Issue[] = [];
@@ -413,7 +525,9 @@ export class Store {
       label: `${kind === 'undo' ? 'Undo' : 'Redo'}: ${entry.label ?? entry.txId}`,
       warnings,
     });
-    if (result.ok && result.txId) {
+    // Mark the entry resolved even when every change conflicted (nothing left to revert), so the
+    // next undo moves on to earlier work instead of getting stuck here.
+    if (result.ok) {
       if (kind === 'undo') entry.undone = true;
       else entry.redone = true;
     }
@@ -489,6 +603,13 @@ export function isSiteDoc(value: unknown): value is SiteDoc {
     isPlainObject(value.pages) &&
     isPlainObject(value.nodes) &&
     isPlainObject(value.tokens) &&
+    isPlainObject(value.themes) &&
     Array.isArray(value.breakpoints)
   );
+}
+
+/** Fills in fields older documents may lack, then checks the shape. Returns undefined if invalid. */
+export function normalizeDoc(value: unknown): SiteDoc | undefined {
+  if (isPlainObject(value) && value.themes === undefined) value = { ...value, themes: {} };
+  return isSiteDoc(value) ? value : undefined;
 }

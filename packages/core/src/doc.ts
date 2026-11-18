@@ -1,6 +1,6 @@
 import { compareOrder } from './order.js';
 import type { BNode, Breakpoint, NodeId, Page, PageId, SiteDoc, TokenTree } from './types.js';
-import { ensureIn } from './util.js';
+import { ensureIn, own } from './util.js';
 
 /** Read access to a document, implemented by committed docs (`DocIndex`) and drafts. */
 export interface DocView {
@@ -56,17 +56,17 @@ export class DocIndex implements DocView {
   }
 
   node(id: NodeId) {
-    return this.doc.nodes[id];
+    return own(this.doc.nodes, id);
   }
 
   children(id: NodeId): BNode[] {
     const ids = this.childIndex.get(id);
     if (!ids) return [];
-    return [...ids].map((c) => this.doc.nodes[c]!).sort(compareOrder);
+    return [...ids].map((c) => own(this.doc.nodes, c)!).sort(compareOrder);
   }
 
   page(id: PageId) {
-    return this.doc.pages[id];
+    return own(this.doc.pages, id);
   }
 
   pages() {
@@ -102,14 +102,37 @@ export function ancestors(view: DocView, id: NodeId): BNode[] {
 /** All descendants in document order (depth-first, pre-order). */
 export function descendants(view: DocView, id: NodeId): BNode[] {
   const out: BNode[] = [];
-  const walk = (pid: NodeId) => {
-    for (const child of view.children(pid)) {
-      out.push(child);
-      walk(child.id);
-    }
-  };
-  walk(id);
+  const stack = [...view.children(id)].reverse();
+  const seen = new Set<NodeId>([id]);
+  while (stack.length) {
+    const node = stack.pop()!;
+    if (seen.has(node.id)) continue;
+    seen.add(node.id);
+    out.push(node);
+    const children = view.children(node.id);
+    for (let i = children.length - 1; i >= 0; i--) stack.push(children[i]!);
+  }
   return out;
+}
+
+/** Depth of a node below its page root (the root is 0). */
+export function depthOf(view: DocView, id: NodeId): number {
+  return ancestors(view, id).length;
+}
+
+/** How many levels a subtree spans below its root (a leaf is 0). */
+export function subtreeHeight(view: DocView, id: NodeId): number {
+  let height = 0;
+  const stack: [NodeId, number][] = [[id, 0]];
+  const seen = new Set<NodeId>();
+  while (stack.length) {
+    const [nid, depth] = stack.pop()!;
+    if (seen.has(nid)) continue;
+    seen.add(nid);
+    height = Math.max(height, depth);
+    for (const child of view.children(nid)) stack.push([child.id, depth + 1]);
+  }
+  return height;
 }
 
 /** The nearest section root at or above `id`. */

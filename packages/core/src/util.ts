@@ -22,9 +22,22 @@ export function clone<T>(value: T): T {
   return structuredClone(value);
 }
 
+const UNSAFE_KEYS = new Set(['__proto__', 'prototype', 'constructor']);
+
+/** False for keys that would reach an object's prototype (`__proto__`, `constructor`, `prototype`). */
+export function isSafeKey(key: string): boolean {
+  return !UNSAFE_KEYS.has(key);
+}
+
+/** `record[key]` if it's an own property, otherwise undefined. */
+export function own<V>(record: Record<string, V>, key: string): V | undefined {
+  return Object.hasOwn(record, key) ? record[key] : undefined;
+}
+
 /** Returns `record[key]`, creating it with `make()` first if it's missing. */
 export function ensure<V>(record: Record<string, V>, key: string, make: () => NoInfer<V>): V {
-  const existing = record[key];
+  if (!isSafeKey(key)) throw new Error(`Unsafe key "${key}".`);
+  const existing = own(record, key);
   if (existing !== undefined) return existing;
   const created = make();
   record[key] = created;

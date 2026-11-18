@@ -6,6 +6,7 @@ import {
   type Page,
   type Registry,
   type SiteDoc,
+  sanitizeUrl,
 } from '@bowerbirdjs/core';
 import { type CompileCssOptions, type CssMode, compileCss } from '@bowerbirdjs/css';
 
@@ -38,20 +39,7 @@ export function escapeAttr(text: string): string {
   return escapeHtml(text).replace(/"/g, '&quot;');
 }
 
-/**
- * Allows http(s), mailto, tel and relative URLs (plus raster/SVG data URIs for images).
- * Anything else, such as `javascript:`, is replaced.
- */
-export function sanitizeUrl(url: string, kind: 'href' | 'src' = 'href'): string {
-  const trimmed = url.trim();
-  // biome-ignore lint/suspicious/noControlCharactersInRegex: browsers ignore these inside schemes
-  const probe = trimmed.replace(/[\u0000- \u007f-\u009f]/g, '');
-  if (/^(https?:|mailto:|tel:)/i.test(probe)) return trimmed;
-  if (!/^[a-z][a-z0-9+.-]*:/i.test(probe)) return trimmed;
-  if (kind === 'src' && /^data:image\/(png|jpe?g|gif|webp|avif|svg\+xml)[;,]/i.test(probe))
-    return trimmed;
-  return kind === 'src' ? '' : '#';
-}
+export { sanitizeUrl };
 
 function attrString(attrs: Record<string, unknown>): string {
   let out = '';
@@ -79,7 +67,9 @@ interface Ctx {
   nodeIds: NonNullable<RenderOptions['nodeIds']>;
 }
 
-function renderNode(ctx: Ctx, node: BNode, sectionName: string | undefined): string {
+function renderNode(ctx: Ctx, node: BNode, sectionName: string | undefined, depth = 0): string {
+  // Validated documents are at most MAX_DEPTH deep; this guards documents loaded from elsewhere.
+  if (depth > 200) return '';
   const def = ctx.registry.component(node.type);
   let spec: ElementSpec;
   if (def?.render) spec = def.render(node);
@@ -111,7 +101,9 @@ function renderNode(ctx: Ctx, node: BNode, sectionName: string | undefined): str
   if (spec.void || VOID.has(tag)) return open;
   const children = ctx.view.children(node.id);
   const inner = children.length
-    ? children.map((c) => renderNode(ctx, c, scope)).join(node.parent === null ? '\n' : '')
+    ? children
+        .map((c) => renderNode(ctx, c, scope, depth + 1))
+        .join(node.parent === null ? '\n' : '')
     : escapeHtml(spec.text ?? '');
   return node.parent === null ? `${open}\n${inner}\n</${tag}>` : `${open}${inner}</${tag}>`;
 }

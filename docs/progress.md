@@ -12,7 +12,7 @@ The working log for building Bowerbird phase by phase. Each phase ends with a re
 - [x] Value-aware token hints for raw values; warnings for dangling token references
 - [x] CSS package tests; type-check tests
 - [x] PageBench runner (Claude API) with a scripted offline mode
-- [ ] Review pass and fixes
+- [x] Review pass and fixes: two independent reviews, 29 findings (27 reproduced), all fixed with regression tests
 
 ## Phase 1: editor and showcase
 
@@ -42,6 +42,9 @@ The working log for building Bowerbird phase by phase. Each phase ends with a re
 - [ ] Review pass and fixes
 
 ## Notes
+
+- Phase 0 review fixes: prototype-safe lookups, CSS-injection hardening (property names, balanced value syntax, token/theme values, compile-time re-checks), lock checks on whole subtrees and pages, design-level checks for styling inside inserts, depth limit, ids never reused (per-prefix counters), undo that can't get stuck and merges tokens/themes per path, unique order keys after undo, section.variant rebuilt as a merge, shared URL sanitiser, importer hardening, preview host check, benchmark accounting.
+- Drag and drop: native HTML5 drag and drop instead of `@dnd-kit/dom` (pre-1.0; native DnD works across the panels' shadow root into the light-DOM canvas).
 
 - No GitHub remote yet: `bowerbirdjs/bowerbird` must be created before pushing.
 - No model API key in this environment: the benchmark runner is tested with a scripted agent.

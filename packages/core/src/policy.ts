@@ -1,7 +1,7 @@
-import { ancestors, type DocView } from './doc.js';
+import { ancestors, type DocView, descendants } from './doc.js';
 import type { Issue } from './errors.js';
 import type { Op } from './ops.js';
-import type { NodeInput, Registry } from './registry.js';
+import { type NodeInput, type Registry, resolveVariant, templateParts } from './registry.js';
 import type { Actor } from './types.js';
 
 /**
@@ -46,17 +46,44 @@ function containsCode(input: NodeInput, registry: Registry): boolean {
   );
 }
 
+function containsStyling(input: NodeInput): boolean {
+  return (
+    !!input.css ||
+    !!(input.styles && Object.keys(input.styles).length) ||
+    !!(input.vars && Object.keys(input.vars).length) ||
+    (input.children ?? []).some(containsStyling)
+  );
+}
+
+function contentOnly(registry: Registry, type: string | undefined, keys: string[]): boolean {
+  const content = new Set(type ? (registry.component(type)?.contentProps ?? []) : []);
+  return keys.every((k) => content.has(k));
+}
+
 export function requiredLevel(op: Op, view: DocView, registry: Registry): FreedomLevel {
   switch (op.op) {
     case 'props.set':
     case 'text.edit': {
-      const node = view.node(op.id);
-      const content = new Set(node ? (registry.component(node.type)?.contentProps ?? []) : []);
       const keys = op.op === 'props.set' ? Object.keys(op.props) : [op.prop ?? 'text'];
-      return keys.every((k) => content.has(k)) ? 'content' : 'design';
+      return contentOnly(registry, view.node(op.id)?.type, keys) ? 'content' : 'design';
     }
     case 'node.insert':
-      return containsCode(op.node, registry) ? 'code' : 'layout';
+      if (containsCode(op.node, registry)) return 'code';
+      return containsStyling(op.node) ? 'design' : 'layout';
+    case 'section.insert': {
+      const def = registry.section(op.section);
+      if (!def || !op.content) return 'layout';
+      const types = new Map(
+        templateParts(def, resolveVariant(def, op.variant).variant).map((p) => [
+          p.path,
+          p.input.type,
+        ]),
+      );
+      const designProps = Object.entries(op.content).some(
+        ([path, patch]) => !contentOnly(registry, types.get(path), Object.keys(patch)),
+      );
+      return designProps ? 'design' : 'layout';
+    }
     case 'style.set':
     case 'vars.set':
     case 'token.set':
@@ -66,32 +93,48 @@ export function requiredLevel(op: Op, view: DocView, registry: Registry): Freedo
   }
 }
 
-/** Node ids an op touches (for lock checks). */
-function touchedNodes(op: Op): string[] {
+/**
+ * Nodes an op touches, for lock checks: `nodes` are checked with their ancestors, `subtrees` with
+ * all their descendants too (an op that removes or moves a subtree changes everything in it).
+ */
+function touched(op: Op, view: DocView): { nodes: string[]; subtrees: string[] } {
   switch (op.op) {
     case 'node.insert':
-      return [op.parent];
-    case 'section.insert':
-      return op.parent ? [op.parent] : [];
+      return { nodes: [op.parent], subtrees: [] };
+    case 'section.insert': {
+      if (op.parent) return { nodes: [op.parent], subtrees: [] };
+      const pages = view.pages();
+      const page = op.page ? view.page(op.page) : pages.length === 1 ? pages[0] : undefined;
+      return { nodes: page ? [page.rootId] : [], subtrees: [] };
+    }
     case 'node.move':
-      return [op.id, ...(op.parent ? [op.parent] : [])];
+      return { nodes: [op.id, ...(op.parent ? [op.parent] : [])], subtrees: [op.id] };
     case 'node.remove':
-    case 'node.duplicate':
     case 'section.variant':
+      return { nodes: [op.id], subtrees: [op.id] };
+    case 'page.remove': {
+      const page = view.page(op.id);
+      return { nodes: [], subtrees: page ? [page.rootId] : [] };
+    }
+    case 'node.duplicate':
     case 'props.set':
     case 'text.edit':
     case 'style.set':
     case 'vars.set':
-      return [op.id];
+      return { nodes: [op.id], subtrees: [] };
     default:
-      return [];
+      return { nodes: [], subtrees: [] };
   }
 }
 
 export function createPolicy(options: PolicyOptions = {}): Policy {
   const locked = new Set(options.lockedNodes ?? []);
   const levelOf = (actor: Actor): FreedomLevel =>
-    options.actors?.[actor.id] ?? options.levels?.[actor.kind] ?? 'code';
+    (options.actors && Object.hasOwn(options.actors, actor.id)
+      ? options.actors[actor.id]
+      : undefined) ??
+    options.levels?.[actor.kind] ??
+    'code';
   return {
     check({ actor, op, view, registry }) {
       const needed = requiredLevel(op, view, registry);
@@ -106,13 +149,25 @@ export function createPolicy(options: PolicyOptions = {}): Policy {
               : 'Ask a person with more access to make this change.',
         };
       }
-      for (const id of touchedNodes(op)) {
+      if (!locked.size) return undefined;
+      const { nodes, subtrees } = touched(op, view);
+      for (const id of nodes) {
         const lockedBy = [view.node(id), ...ancestors(view, id)].find((n) => n && locked.has(n.id));
         if (lockedBy) {
           return {
             code: 'policy',
             nodeId: id,
             message: `"${id}" is locked${lockedBy.id !== id ? ` (inside locked "${lockedBy.id}")` : ''} and can't be changed.`,
+          };
+        }
+      }
+      for (const id of subtrees) {
+        const inside = descendants(view, id).find((n) => locked.has(n.id));
+        if (inside) {
+          return {
+            code: 'policy',
+            nodeId: id,
+            message: `"${id}" contains locked "${inside.id}", so it can't be ${op.op === 'node.move' ? 'moved' : 'removed or rebuilt'}.`,
           };
         }
       }

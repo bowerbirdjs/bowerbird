@@ -31,7 +31,8 @@ export function createMcpServer(options: McpServerOptions): Server {
     const client = server.getClientVersion();
     return {
       kind: 'agent',
-      id: slugify(client?.name ?? 'agent', 'agent'),
+      // Prefixed, so a client can't pick a name that matches a person's actor id.
+      id: `mcp-${slugify(client?.name ?? 'agent', 'agent')}`,
       ...(client?.name ? { name: client.name } : {}),
     };
   };

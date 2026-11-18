@@ -79,4 +79,37 @@ describe('htmlToNodes', () => {
     expect(store.doc.nodes['text-1']?.props.text).toBe('Hi');
     expect(store.doc.nodes['text-1']?.parent).toBe('box-1');
   });
+
+  it('keeps links in navigation lists', () => {
+    const { nodes, warnings } = htmlToNodes('<ul><li><a href="/about">About</a></li></ul>');
+    expect(warnings).toEqual([]);
+    expect(nodes[0]?.children?.[0]).toEqual({
+      type: 'box',
+      props: { tag: 'li' },
+      children: [{ type: 'link', props: { href: '/about', text: 'About' } }],
+    });
+  });
+
+  it('never imports script or style text, unsafe URLs, or invalid sizes', () => {
+    const { nodes, warnings } = htmlToNodes(
+      '<p>Hello <script>steal()</script><style>.x{}</style>world</p><a href="javascript:alert(1)">x</a><img src="t.gif" alt="" width="0">',
+    );
+    expect(nodes[0]?.props?.text).toBe('Hello world');
+    expect(nodes[1]?.props?.href).toBe('#');
+    expect(nodes[2]?.props).toEqual({ src: 't.gif', alt: '' });
+    expect(warnings).toEqual(expect.arrayContaining([expect.stringContaining('Unsafe href')]));
+  });
+
+  it('shortens very long text and says when it stops early', () => {
+    const long = htmlToNodes(`<p>${'a'.repeat(6000)}</p>`);
+    expect(String(long.nodes[0]?.props?.text).length).toBe(5000);
+    expect(long.warnings[0]).toContain('shortened');
+    const capped = htmlToNodes('<section><p>a</p><p>b</p><p>c</p></section>', { maxNodes: 2 });
+    expect(capped.warnings.join(' ')).toContain('Stopped after 2 nodes');
+  });
+
+  it('handles very deeply nested inline markup', () => {
+    const html = `<p>${'<span>'.repeat(5000)}deep${'</span>'.repeat(5000)}</p>`;
+    expect(htmlToNodes(html).nodes[0]?.props?.text).toBe('deep');
+  });
 });

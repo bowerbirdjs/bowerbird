@@ -1,7 +1,14 @@
-import { ancestors, type DocView, descendants, sectionRootOf } from './doc.js';
+import {
+  ancestors,
+  type DocView,
+  depthOf,
+  descendants,
+  sectionRootOf,
+  subtreeHeight,
+} from './doc.js';
 import { Draft } from './draft.js';
 import { didYouMean, type Issue, listPreview } from './errors.js';
-import { duplicateId, isValidId, nextId, PAGE_ID_PATTERN, slugify } from './ids.js';
+import { isValidId, PAGE_ID_PATTERN, slugify } from './ids.js';
 import type { Op } from './ops.js';
 import { keyBetween } from './order.js';
 import type { Policy } from './policy.js';
@@ -14,7 +21,10 @@ import {
 } from './registry.js';
 import {
   BUILTIN_VARS,
+  checkProperty,
   checkValue,
+  cssValueSyntaxError,
+  isStyleState,
   parseDeclarations,
   STATE_PSEUDO,
   type StyleCheckContext,
@@ -28,7 +38,7 @@ import {
   tokenVar,
 } from './tokens.js';
 import type { Actor, BNode, NodeId, NodeStyles, Props, SectionRef, TokenTree } from './types.js';
-import { clone, deepEqual, ensure, isPlainObject, pruneEmpty } from './util.js';
+import { clone, deepEqual, ensure, isPlainObject, isSafeKey, own, pruneEmpty } from './util.js';
 
 export interface OpContext {
   draft: Draft;
@@ -46,6 +56,35 @@ function fail(ctx: OpContext, issue: Omit<Issue, 'opIndex'>): undefined {
 }
 
 const truncate = (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
+
+/** Maximum nesting below a page root; keeps rendering and tree walks safe. */
+export const MAX_DEPTH = 40;
+
+/** A fresh `<prefix>-<n>` id that has never been used in this document. */
+function allocateId(ctx: OpContext, prefix: string): string {
+  let n = ctx.draft.counter(prefix);
+  let id: string;
+  do {
+    n++;
+    id = `${prefix}-${n}`;
+  } while (ctx.draft.has(id));
+  ctx.draft.useCounter(prefix, n);
+  return id;
+}
+
+/** Id for a copy of `id`: `item-3` → a new `item-<n>`, `heading` → `heading-<n>`. */
+function allocateCopyId(ctx: OpContext, id: string): string {
+  const match = /^(.*)-(\d+)$/.exec(id);
+  const prefix = match ? match[1]! : id;
+  ctx.draft.useCounter(prefix, match ? Number(match[2]) : 1);
+  return allocateId(ctx, prefix);
+}
+
+/** Marks a removed numbered id as used, so it is never handed out again. */
+function retireId(ctx: OpContext, id: string): void {
+  const match = /^(.*)-(\d+)$/.exec(id);
+  if (match) ctx.draft.useCounter(match[1]!, Number(match[2]));
+}
 
 // ---------------------------------------------------------------------------------------------
 // Lookups and validation helpers
@@ -167,7 +206,7 @@ function checkBpState(ctx: OpContext, nodeId: NodeId, bp: string, state: string)
     });
     return false;
   }
-  if (!(state in STATE_PSEUDO)) {
+  if (!isStyleState(state)) {
     fail(ctx, {
       code: 'unknown_state',
       nodeId,
@@ -226,9 +265,9 @@ function positionKey(
     return fail(ctx, { code: 'invalid_op', message: 'Give either "before" or "after", not both.' });
   const sibs = ctx.draft.children(parentId).filter((n) => n.id !== movingId);
   const anchor = before ?? after;
-  if (!anchor) return safeKey(sibs.at(-1)?.order, undefined);
-  const idx = sibs.findIndex((n) => n.id === anchor);
-  if (idx < 0) {
+  if (!anchor) return keyBetween(sibs.at(-1)?.order, undefined);
+  const target = sibs.find((n) => n.id === anchor);
+  if (!target) {
     return fail(ctx, {
       code: 'not_found',
       nodeId: anchor,
@@ -236,14 +275,28 @@ function positionKey(
       hint: `Children of ${parentId}: ${listPreview(sibs.map((s) => s.id)) || '(none)'}.`,
     });
   }
-  return before
-    ? safeKey(sibs[idx - 1]?.order, sibs[idx]!.order)
-    : safeKey(sibs[idx]!.order, sibs[idx + 1]?.order);
+  return orderNextTo(sibs, target.order, before ? 'before' : 'after');
 }
 
-function safeKey(a: string | undefined, b: string | undefined): string {
-  if (a !== undefined && b !== undefined && a >= b) return keyBetween(a, undefined);
-  return keyBetween(a, b);
+/** A key strictly before/after `order` among siblings, skipping siblings that share the key. */
+export function orderNextTo(
+  siblings: { order: string }[],
+  order: string,
+  side: 'before' | 'after',
+): string {
+  // Order keys compare as strings (code-unit order), which is exactly what the default sort does.
+  if (side === 'before') {
+    const lower = siblings
+      .filter((s) => s.order < order)
+      .map((s) => s.order)
+      .sort();
+    return keyBetween(lower.at(-1), order);
+  }
+  const upper = siblings
+    .filter((s) => s.order > order)
+    .map((s) => s.order)
+    .sort();
+  return keyBetween(order, upper[0]);
 }
 
 /** Id prefix for new nodes under `parentId`: the nearest section root or keyed item. */
@@ -325,6 +378,13 @@ function createTree(
   if (input.children?.length && def.children === false) {
     return fail(ctx, { code: 'invalid_parent', message: `A ${def.name} can't have children.` });
   }
+  if (depthOf(draft, parent.id) + 1 > MAX_DEPTH) {
+    return fail(ctx, {
+      code: 'invalid_parent',
+      nodeId: parent.id,
+      message: `Nodes can be nested at most ${MAX_DEPTH} levels deep.`,
+    });
+  }
 
   const exists = (id: string) => draft.has(id);
   const explicit = opts.id ?? input.id;
@@ -346,9 +406,9 @@ function createTree(
     id = explicit;
   } else if (input.part) {
     id = scope + slugify(input.key ? `${input.part}-${input.key}` : input.part);
-    if (exists(id)) id = duplicateId(id, exists);
+    if (exists(id)) id = allocateCopyId(ctx, id);
   } else {
-    id = nextId(scope + slugify(input.type), exists);
+    id = allocateId(ctx, scope + slugify(input.type));
   }
 
   const before = ctx.issues.length;
@@ -358,7 +418,26 @@ function createTree(
   let styles: NodeStyles | undefined = input.styles ? clone(input.styles) : undefined;
   for (const [bp, states] of Object.entries(input.styles ?? {})) {
     for (const [state, decls] of Object.entries(states)) {
-      if (checkBpState(ctx, id, bp, state)) checkDecls(ctx, id, Object.entries(decls), sctx);
+      if (!checkBpState(ctx, id, bp, state)) continue;
+      const entries = Object.entries(decls);
+      for (const [prop, value] of entries) {
+        const issue = checkProperty(prop);
+        if (issue) fail(ctx, { ...issue, nodeId: id });
+        if (typeof value !== 'string') {
+          fail(ctx, {
+            code: 'invalid_style',
+            nodeId: id,
+            path: prop,
+            message: `Value for "${prop}" must be a string.`,
+          });
+        }
+      }
+      checkDecls(
+        ctx,
+        id,
+        entries.filter(([p, v]) => !checkProperty(p) && typeof v === 'string'),
+        sctx,
+      );
     }
   }
   if (input.css) {
@@ -413,6 +492,14 @@ function setProps(ctx: OpContext, node: BNode, patch: Record<string, unknown>) {
     });
   const merged: Record<string, unknown> = { ...node.props };
   for (const [k, v] of Object.entries(patch)) {
+    if (!isSafeKey(k)) {
+      return fail(ctx, {
+        code: 'unknown_prop',
+        nodeId: node.id,
+        path: k,
+        message: `"${k}" is not a valid prop name.`,
+      });
+    }
     if (v === null) delete merged[k];
     else merged[k] = v;
   }
@@ -447,7 +534,14 @@ function sectionInsert(ctx: OpContext, op: OpOf<'section.insert'>) {
   const { variant, errors } = resolveVariant(def, op.variant);
   for (const message of errors) fail(ctx, { code: 'invalid_variant', message });
   if (errors.length) return;
-  const id = op.id ?? nextId(def.name, (x) => draft.has(x));
+  if (op.id && draft.has(op.id)) {
+    return fail(ctx, {
+      code: 'duplicate_id',
+      nodeId: op.id,
+      message: `A node "${op.id}" already exists.`,
+    });
+  }
+  const id = op.id ?? allocateId(ctx, def.name);
   const order = positionKey(ctx, parent.id, op.before, op.after);
   if (order === undefined) return;
   let template: NodeInput;
@@ -516,6 +610,13 @@ function nodeMove(ctx: OpContext, op: OpOf<'node.move'>) {
       message: `"${parent.id}" (${parent.type}) can't contain a ${node.type}.`,
     });
   }
+  if (depthOf(ctx.draft, parent.id) + 1 + subtreeHeight(ctx.draft, node.id) > MAX_DEPTH) {
+    return fail(ctx, {
+      code: 'invalid_parent',
+      nodeId: parent.id,
+      message: `Moving "${node.id}" there would nest nodes more than ${MAX_DEPTH} levels deep.`,
+    });
+  }
   const order = positionKey(ctx, parent.id, op.before, op.after, node.id);
   if (order === undefined) return;
   ctx.draft.setNode({ ...node, parent: parent.id, order });
@@ -532,7 +633,11 @@ function nodeRemove(ctx: OpContext, op: OpOf<'node.remove'>) {
       hint: 'Use page.remove.',
     });
   }
-  for (const d of descendants(ctx.draft, node.id)) ctx.draft.deleteNode(d.id);
+  for (const d of descendants(ctx.draft, node.id)) {
+    retireId(ctx, d.id);
+    ctx.draft.deleteNode(d.id);
+  }
+  retireId(ctx, node.id);
   ctx.draft.deleteNode(node.id);
 }
 
@@ -547,23 +652,41 @@ function nodeDuplicate(ctx: OpContext, op: OpOf<'node.duplicate'>) {
       message: "A page root can't be duplicated.",
     });
   const subtree = [node, ...descendants(draft, node.id)];
-  const created = new Set<string>();
-  const exists = (id: string) => draft.has(id) || created.has(id);
+  const inSubtree = new Set(subtree.map((n) => n.id));
   const idMap = new Map<string, string>();
-  const newRoot = duplicateId(node.id, exists);
-  idMap.set(node.id, newRoot);
-  created.add(newRoot);
-  for (const n of subtree.slice(1)) {
-    let nid = n.id.startsWith(`${node.id}/`)
-      ? newRoot + n.id.slice(node.id.length)
-      : duplicateId(n.id, exists);
-    if (exists(nid)) nid = duplicateId(nid, exists);
-    idMap.set(n.id, nid);
-    created.add(nid);
+  const claimed = new Set<string>();
+  const free = (id: string) => !draft.has(id) && !claimed.has(id);
+  const claim = (id: string) => {
+    claimed.add(id);
+    return id;
+  };
+  // Each copied id is rebuilt from its nearest copied scope owner (section root or keyed item),
+  // so nested sections and items get consistent new ids.
+  const ownerOf = (n: BNode): BNode | undefined => {
+    let cur = n.parent ? draft.node(n.parent) : undefined;
+    while (cur && !(cur.section || cur.key)) cur = cur.parent ? draft.node(cur.parent) : undefined;
+    return cur;
+  };
+  for (const n of subtree) {
+    let nid: string | undefined;
+    if (n.id === node.id) nid = undefined;
+    else if (n.section) nid = undefined;
+    else {
+      const owner = ownerOf(n);
+      const prefix = owner ? `${owner.id}/` : '';
+      const mapped = owner && inSubtree.has(owner.id) ? idMap.get(owner.id) : undefined;
+      if (mapped && n.id.startsWith(prefix)) nid = `${mapped}/${n.id.slice(prefix.length)}`;
+    }
+    if (!nid || !free(nid))
+      nid =
+        n.section && n.id !== node.id
+          ? allocateId(ctx, n.section.name)
+          : allocateCopyId(ctx, nid ?? n.id);
+    while (!free(nid)) nid = allocateCopyId(ctx, nid);
+    idMap.set(n.id, claim(nid));
   }
   const sibs = draft.children(node.parent);
-  const next = sibs[sibs.findIndex((s) => s.id === node.id) + 1];
-  const order = safeKey(node.order, next?.order);
+  const order = orderNextTo(sibs, node.order, 'after');
   for (const n of subtree) {
     const isRoot = n.id === node.id;
     const copy: BNode = {
@@ -572,7 +695,7 @@ function nodeDuplicate(ctx: OpContext, op: OpOf<'node.duplicate'>) {
       parent: isRoot ? n.parent : idMap.get(n.parent!)!,
       order: isRoot ? order : n.order,
     };
-    if (isRoot && n.part && n.key !== undefined) {
+    if (n.part && n.key !== undefined) {
       const last = copy.id.split('/').pop()!;
       if (last.startsWith(`${n.part}-`)) copy.key = last.slice(n.part.length + 1);
     }
@@ -666,14 +789,25 @@ function varsSet(ctx: OpContext, op: OpOf<'vars.set'>) {
   ctx.draft.setNode(next);
 }
 
-const PATH_RE = /^\/[A-Za-z0-9\-._~/]*$/;
+const PATH_SEGMENT = /^[A-Za-z0-9\-._~]+$/;
+
+/** "/" or "/a/b": URL-safe segments, no empty, "." or ".." segments (so no "//host" links). */
+export function isValidPagePath(path: string): boolean {
+  if (path === '/') return true;
+  if (!path.startsWith('/') || path.length > 200) return false;
+  const segments = path.slice(1).split('/');
+  if (segments.at(-1) === '') segments.pop();
+  return (
+    segments.length > 0 && segments.every((s) => PATH_SEGMENT.test(s) && s !== '.' && s !== '..')
+  );
+}
 
 function pageCreate(ctx: OpContext, op: OpOf<'page.create'>) {
   const { draft } = ctx;
-  if (!PATH_RE.test(op.path)) {
+  if (!isValidPagePath(op.path)) {
     return fail(ctx, {
       code: 'invalid_op',
-      message: `Page path "${op.path}" must start with "/" and use URL-safe characters.`,
+      message: `Page path "${op.path}" must start with "/" and use URL-safe segments (no "//", "." or "..").`,
     });
   }
   const pages = draft.pages();
@@ -692,10 +826,14 @@ function pageCreate(ctx: OpContext, op: OpOf<'page.create'>) {
   if (draft.page(id)) {
     if (op.id)
       return fail(ctx, { code: 'duplicate_id', message: `A page "${id}" already exists.` });
-    id = nextId(id, (x) => !!draft.page(x));
+    let n = 1;
+    while (draft.page(`${id}-${n}`)) n++;
+    id = `${id}-${n}`;
   }
+  // A page root id is reused only if it was never used before.
   let rootId = `root-${id}`;
-  if (draft.has(rootId)) rootId = nextId(rootId, (x) => draft.has(x));
+  if (draft.has(rootId) || draft.counter(rootId) > 0) rootId = allocateId(ctx, rootId);
+  else draft.useCounter(rootId, 1);
   draft.setNode({ id: rootId, type: 'root', parent: null, order: 'a0', props: {} });
   draft.setPage({ id, path: op.path, title: op.title, rootId });
 }
@@ -704,7 +842,7 @@ function pageUpdate(ctx: OpContext, op: OpOf<'page.update'>) {
   const page = ctx.draft.page(op.id);
   if (!page) return fail(ctx, { code: 'not_found', message: `No page "${op.id}".` });
   if (op.path !== undefined) {
-    if (!PATH_RE.test(op.path))
+    if (!isValidPagePath(op.path))
       return fail(ctx, { code: 'invalid_op', message: `Page path "${op.path}" is not valid.` });
     if (ctx.draft.pages().some((p) => p.path === op.path && p.id !== page.id)) {
       return fail(ctx, {
@@ -726,14 +864,39 @@ function pageRemove(ctx: OpContext, op: OpOf<'page.remove'>) {
   if (!page) return fail(ctx, { code: 'not_found', message: `No page "${op.id}".` });
   if (ctx.draft.pages().length <= 1)
     return fail(ctx, { code: 'invalid_op', message: "The last page can't be removed." });
-  for (const d of descendants(ctx.draft, page.rootId)) ctx.draft.deleteNode(d.id);
+  for (const d of descendants(ctx.draft, page.rootId)) {
+    retireId(ctx, d.id);
+    ctx.draft.deleteNode(d.id);
+  }
+  ctx.draft.useCounter(page.rootId, 1);
   ctx.draft.deleteNode(page.rootId);
   ctx.draft.deletePage(page.id);
 }
 
+/** A token alias chain that loops back to `start`, if any (e.g. a → b → a). */
+function aliasCycle(tokens: TokenTree, startVar: string): string[] | undefined {
+  const refs = new Map<string, string[]>();
+  for (const t of flattenTokens(tokens).tokens) {
+    refs.set(
+      t.cssVar,
+      [...t.value.matchAll(/var\(\s*(--[A-Za-z0-9_-]+)/g)].map((m) => m[1]!),
+    );
+  }
+  const path: string[] = [];
+  const visit = (name: string): boolean => {
+    if (path.includes(name)) return name === startVar;
+    path.push(name);
+    for (const next of refs.get(name) ?? []) if (visit(next)) return true;
+    path.pop();
+    return false;
+  };
+  return visit(startVar) ? [...path, startVar] : undefined;
+}
+
 function tokenSet(ctx: OpContext, op: OpOf<'token.set'>) {
   const { draft } = ctx;
-  if (!TOKEN_PATH.test(op.path)) {
+  const segs = op.path.split('.');
+  if (!TOKEN_PATH.test(op.path) || !segs.every(isSafeKey)) {
     return fail(ctx, {
       code: 'invalid_token',
       path: op.path,
@@ -742,26 +905,37 @@ function tokenSet(ctx: OpContext, op: OpOf<'token.set'>) {
   }
   const value = op.value;
   if (value !== null) {
-    if (value.length > 500 || /[;<>\\]|\/\*|@|javascript:/i.test(value)) {
+    const syntax =
+      value.length > 500 ? 'is too long' : cssValueSyntaxError(value.replace(/\{[^{}]+\}/g, 'x'));
+    if (syntax) {
       return fail(ctx, {
         code: 'invalid_token',
         path: op.path,
-        message: `Token value "${value}" contains characters that aren't allowed.`,
+        message: `Token value "${value}" ${syntax}.`,
       });
     }
-    const known = flattenTokens(draft.tokens()).tokens.map((t) => t.path);
+    const known = flattenTokens(draft.tokens()).tokens;
+    const paths = known.map((t) => t.path);
     for (const alias of aliasesIn(value)) {
-      if (alias === op.path || !known.includes(alias)) {
+      if (alias === op.path || !paths.includes(alias)) {
         return fail(ctx, {
           code: 'unknown_token',
           path: op.path,
-          message: `Alias {${alias}} doesn't refer to another existing token.${didYouMean(alias, known)}`,
+          message: `Alias {${alias}} doesn't refer to another existing token.${didYouMean(alias, paths)}`,
         });
       }
     }
+    const clash = known.find((t) => t.cssVar === tokenVar(op.path) && t.path !== op.path);
+    if (clash) {
+      return fail(ctx, {
+        code: 'invalid_token',
+        path: op.path,
+        message: `"${op.path}" would use the same CSS variable (${clash.cssVar}) as token "${clash.path}".`,
+      });
+    }
   }
   if (op.theme) {
-    if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(op.theme)) {
+    if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(op.theme) || !isSafeKey(op.theme)) {
       return fail(ctx, {
         code: 'invalid_token',
         message: `Theme name "${op.theme}" must be lowercase kebab-case.`,
@@ -783,10 +957,9 @@ function tokenSet(ctx: OpContext, op: OpOf<'token.set'>) {
     return;
   }
   const tokens = clone(draft.tokens());
-  const segs = op.path.split('.');
   let group: Record<string, unknown> = tokens;
   for (const seg of segs.slice(0, -1)) {
-    const next = group[seg];
+    const next = own(group, seg);
     if (next === undefined) {
       if (value === null)
         return fail(ctx, { code: 'not_found', path: op.path, message: `No token "${op.path}".` });
@@ -805,10 +978,18 @@ function tokenSet(ctx: OpContext, op: OpOf<'token.set'>) {
     group = next;
   }
   const last = segs.at(-1)!;
-  const existing = group[last];
+  const existing = own(group, last);
+  const isGroup = isPlainObject(existing) && !('$value' in existing);
   if (value === null) {
     if (existing === undefined)
       return fail(ctx, { code: 'not_found', path: op.path, message: `No token "${op.path}".` });
+    if (isGroup) {
+      return fail(ctx, {
+        code: 'invalid_token',
+        path: op.path,
+        message: `"${op.path}" is a group of tokens; remove its tokens one by one.`,
+      });
+    }
     const users = tokenUsers(ctx, op.path);
     if (users.length && !op.force) {
       return fail(ctx, {
@@ -822,14 +1003,14 @@ function tokenSet(ctx: OpContext, op: OpOf<'token.set'>) {
     const themes = clone(draft.themes());
     let themesChanged = false;
     for (const theme of Object.values(themes)) {
-      if (op.path in theme) {
+      if (Object.hasOwn(theme, op.path)) {
         delete theme[op.path];
         themesChanged = true;
       }
     }
     if (themesChanged) draft.setThemes(themes);
   } else {
-    if (isPlainObject(existing) && !('$value' in existing)) {
+    if (isGroup) {
       return fail(ctx, {
         code: 'invalid_token',
         path: op.path,
@@ -840,6 +1021,14 @@ function tokenSet(ctx: OpContext, op: OpOf<'token.set'>) {
     leaf.$value = value;
     if (op.type) leaf.$type = op.type;
     group[last] = leaf;
+    const cycle = aliasCycle(tokens, tokenVar(op.path));
+    if (cycle) {
+      return fail(ctx, {
+        code: 'invalid_token',
+        path: op.path,
+        message: `Token aliases would form a loop: ${cycle.join(' → ')}.`,
+      });
+    }
   }
   draft.setTokens(tokens);
 }
@@ -866,16 +1055,25 @@ function tokenUsers(ctx: OpContext, path: string): string[] {
   for (const t of flattenTokens(ctx.draft.tokens()).tokens) {
     if (t.path !== path && ref.test(t.value)) users.push(`token "${t.path}"`);
   }
+  for (const [theme, values] of Object.entries(ctx.draft.themes())) {
+    for (const [p, v] of Object.entries(values)) {
+      if (p !== path && (aliasesIn(v).includes(path) || ref.test(v)))
+        users.push(`theme "${theme}" (${p})`);
+    }
+  }
   return users;
 }
 
-/** Ids a section template creates under `rootId`, found by expanding it in a scratch document. */
-function templateIds(
+/**
+ * Expands a section template in a scratch document (fresh id counters, so unnamed template nodes
+ * get the ids they got when the section was inserted). Returns the nodes in document order.
+ */
+function expandTemplate(
   ctx: OpContext,
   def: SectionDef,
   variant: Record<string, string>,
   rootId: string,
-): Set<string> | undefined {
+): BNode[] | undefined {
   const scratchRoot: BNode = {
     id: 'scratch-root',
     type: 'root',
@@ -883,25 +1081,43 @@ function templateIds(
     order: 'a0',
     props: {},
   };
+  const { counters: _counters, ...base } = ctx.draft.base;
   const scratch = new Draft({
-    ...ctx.draft.base,
+    ...base,
     nodes: { [scratchRoot.id]: scratchRoot },
     pages: {},
     tokens: ctx.draft.tokens(),
   });
   const sctx: OpContext = { ...ctx, draft: scratch, issues: [], warnings: [] };
   const section = { name: def.name, version: def.version, variant };
-  const root = createTree(sctx, def.template({ variant }), scratchRoot, 'a0', '', {
-    id: rootId,
-    section,
-  });
+  let template: NodeInput;
+  try {
+    template = def.template({ variant });
+  } catch (error) {
+    fail(ctx, {
+      code: 'invalid_op',
+      message: `Section "${def.name}" failed to build: ${String(error)}`,
+    });
+    return undefined;
+  }
+  const root = createTree(sctx, template, scratchRoot, 'a0', '', { id: rootId, section });
   if (!root) {
     for (const issue of sctx.issues) fail(ctx, issue);
     return undefined;
   }
-  return new Set(descendants(scratch, rootId).map((n) => n.id));
+  return descendants(scratch, rootId);
 }
 
+/**
+ * Switches a section's variant by merging, not rebuilding:
+ * - every existing node stays where it is (people's moves and additions are kept);
+ * - parts the new variant doesn't have are removed, and anything people added inside them moves up;
+ * - parts new in this variant are created (with fresh ids if an id is taken);
+ * - props merge three ways: values someone changed are kept, untouched template defaults follow the
+ *   new variant;
+ * - parts that are still where the template put them move to the new template's structure, and
+ *   siblings are re-ordered to follow the new template.
+ */
 function sectionVariant(ctx: OpContext, op: OpOf<'section.variant'>) {
   const { draft, registry } = ctx;
   const root = requireNode(ctx, op.id);
@@ -926,58 +1142,107 @@ function sectionVariant(ctx: OpContext, op: OpOf<'section.variant'>) {
   const { variant, errors } = resolveVariant(def, { ...root.section.variant, ...op.variant });
   for (const message of errors) fail(ctx, { code: 'invalid_variant', nodeId: root.id, message });
   if (errors.length || deepEqual(variant, root.section.variant)) return;
-  const oldIds = templateIds(ctx, def, root.section.variant, root.id);
-  const newIds = templateIds(ctx, def, variant, root.id);
-  if (!oldIds || !newIds) return;
+  const oldTemplate = expandTemplate(ctx, def, root.section.variant, root.id);
+  const newTemplate = expandTemplate(ctx, def, variant, root.id);
+  if (!oldTemplate || !newTemplate) return;
+  const oldById = new Map(oldTemplate.map((n) => [n.id, n]));
+  const newIds = new Set(newTemplate.map((n) => n.id));
+  const inSection = new Set(descendants(draft, root.id).map((n) => n.id));
 
-  const old = descendants(draft, root.id);
-  const oldById = new Map(old.map((n) => [n.id, n]));
-  for (const n of old) draft.deleteNode(n.id);
-  let prev: string | undefined;
-  for (const child of def.template({ variant }).children ?? []) {
-    const order = keyBetween(prev, undefined);
-    prev = order;
-    if (!createTree(ctx, child, root, order, `${root.id}/`)) return;
-  }
-  // Parts present in both variants keep their content, styles and variables.
-  for (const id of newIds) {
-    const before = oldById.get(id);
-    const now = draft.node(id);
-    if (!before || !now || before.type !== now.type) continue;
-    const next: BNode = { ...now, props: before.props };
-    if (before.styles) next.styles = before.styles;
-    if (before.vars) next.vars = before.vars;
-    if (before.name) next.name = before.name;
-    draft.setNode(next);
-  }
-  // Parts someone deleted stay deleted.
-  for (const id of newIds) {
-    if (oldIds.has(id) && !oldById.has(id) && draft.has(id)) {
-      for (const d of descendants(draft, id)) draft.deleteNode(d.id);
-      draft.deleteNode(id);
+  // 1. Remove dropped parts; whatever is inside them that isn't dropped moves up.
+  const dropped = [...inSection].filter((id) => oldById.has(id) && !newIds.has(id));
+  const droppedSet = new Set(dropped);
+  const survivingParent = (id: string): string => {
+    let p = draft.node(id)?.parent ?? root.id;
+    while (droppedSet.has(p)) p = draft.node(p)?.parent ?? root.id;
+    return p;
+  };
+  for (const id of dropped) {
+    for (const child of draft.children(id)) {
+      if (!droppedSet.has(child.id)) draft.setNode({ ...child, parent: survivingParent(id) });
     }
   }
-  // Nodes added by people or agents come back under the same parent, or the nearest one left.
-  const dropped: string[] = [];
-  for (const n of old) {
-    if (oldIds.has(n.id)) {
-      if (!newIds.has(n.id) && !dropped.some((d) => n.id.startsWith(`${d}/`))) dropped.push(n.id);
+  for (const id of dropped) draft.deleteNode(id);
+
+  // 2. Create parts that are new in this variant; map template ids to real ids.
+  const idMap = new Map<string, string>([[root.id, root.id]]);
+  for (const tmpl of newTemplate) {
+    const parent = tmpl.parent ? idMap.get(tmpl.parent) : undefined;
+    if (oldById.has(tmpl.id)) {
+      // A part both variants share: keep it if it's still in the section; if someone deleted it or
+      // moved it out, respect that.
+      if (inSection.has(tmpl.id) && draft.has(tmpl.id)) idMap.set(tmpl.id, tmpl.id);
       continue;
     }
-    let parentId = n.parent!;
-    while (!draft.has(parentId) && oldById.has(parentId)) parentId = oldById.get(parentId)!.parent!;
-    if (!draft.has(parentId)) parentId = root.id;
-    const restored: BNode = { ...n, parent: parentId };
-    if (parentId !== n.parent)
-      restored.order = keyBetween(draft.children(parentId).at(-1)?.order, undefined);
-    draft.setNode(restored);
+    if (!parent) continue;
+    const id = draft.has(tmpl.id) ? allocateCopyId(ctx, tmpl.id) : tmpl.id;
+    idMap.set(tmpl.id, id);
+    draft.setNode({ ...clone(tmpl), id, parent, order: 'a0' });
   }
+
+  // 3. Shared parts: three-way prop merge; follow the new structure unless someone moved them.
+  for (const tmpl of newTemplate) {
+    const before = oldById.get(tmpl.id);
+    const now = idMap.get(tmpl.id) === tmpl.id ? draft.node(tmpl.id) : undefined;
+    if (!before || !now || !inSection.has(tmpl.id)) continue;
+    const next: BNode = { ...now };
+    if (before.type === tmpl.type && now.type === tmpl.type) {
+      const props: Record<string, unknown> = { ...now.props };
+      for (const key of new Set([...Object.keys(before.props), ...Object.keys(tmpl.props)])) {
+        if (!deepEqual(now.props[key], before.props[key])) continue;
+        if (tmpl.props[key] === undefined) delete props[key];
+        else props[key] = tmpl.props[key];
+      }
+      next.props = props as BNode['props'];
+    }
+    const oldParent = before.parent ? (idMap.get(before.parent) ?? before.parent) : undefined;
+    const newParent = tmpl.parent ? idMap.get(tmpl.parent) : undefined;
+    const untouched = now.parent === before.parent || now.parent === oldParent;
+    const wouldCycle =
+      newParent !== undefined &&
+      (newParent === now.id || ancestors(draft, newParent).some((a) => a.id === now.id));
+    if (untouched && newParent && newParent !== now.parent && !wouldCycle) next.parent = newParent;
+    draft.setNode(next);
+  }
+
+  // 4. Re-order children of every template parent: template children in template order, other
+  //    children stay after the template sibling they followed.
+  const templateChildren = new Map<string, string[]>();
+  for (const tmpl of newTemplate) {
+    const parent = tmpl.parent ? idMap.get(tmpl.parent) : undefined;
+    const id = idMap.get(tmpl.id);
+    if (parent && id) templateChildren.set(parent, [...(templateChildren.get(parent) ?? []), id]);
+  }
+  for (const [parentId, ordered] of templateChildren) {
+    const current = draft.children(parentId);
+    const templateSet = new Set(ordered.filter((id) => current.some((c) => c.id === id)));
+    const anchored = new Map<string, string[]>();
+    let anchor = '';
+    for (const child of current) {
+      if (templateSet.has(child.id)) anchor = child.id;
+      else anchored.set(anchor, [...(anchored.get(anchor) ?? []), child.id]);
+    }
+    const sequence = [...(anchored.get('') ?? [])];
+    for (const id of ordered) {
+      if (!templateSet.has(id)) continue;
+      sequence.push(id, ...(anchored.get(id) ?? []));
+    }
+    let prev: string | undefined;
+    for (const id of sequence) {
+      const order = keyBetween(prev, undefined);
+      prev = order;
+      const n = draft.node(id)!;
+      if (n.order !== order) draft.setNode({ ...n, order });
+    }
+  }
+
   if (dropped.length) {
+    const top = dropped.filter((id) => !dropped.some((d) => d !== id && id.startsWith(`${d}/`)));
     ctx.warnings.push({
       code: 'parts_removed',
       opIndex: ctx.opIndex,
       nodeId: root.id,
-      message: `The new variant has no ${listPreview(dropped)}; their content was removed (undo restores it).`,
+      message: `The new variant has no ${listPreview(top)}; they were removed (undo restores them).`,
     });
   }
   draft.setNode({ ...draft.node(root.id)!, section: { ...root.section, variant } });
