@@ -1,6 +1,6 @@
 import type { Actor, Store } from '@bowerbirdjs/core';
 import '@bowerbirdjs/editor/define';
-import type { BowerbirdEditor as EditorElement } from '@bowerbirdjs/editor';
+import type { AssetAdapter, BowerbirdEditor as EditorElement } from '@bowerbirdjs/editor';
 import { defineComponent, h, onBeforeUnmount, onMounted, type PropType, ref } from 'vue';
 
 export { createDefaultStore } from '@bowerbirdjs/editor';
@@ -24,6 +24,7 @@ export const BowerbirdEditor = defineComponent({
     store: { type: Object as PropType<Store>, default: undefined },
     actor: { type: Object as PropType<Actor>, default: undefined },
     page: { type: String, default: undefined },
+    assets: { type: Object as PropType<AssetAdapter>, default: undefined },
   },
   emits: ['change', 'transaction', 'selection', 'page-change', 'error'],
   setup(props, { emit, expose }) {
@@ -45,6 +46,7 @@ export const BowerbirdEditor = defineComponent({
         ...(props.store ? { store: props.store } : {}),
         ...(props.actor ? { actor: props.actor } : {}),
         ...(props.page ? { page: props.page } : {}),
+        ...(props.assets ? { assets: props.assets } : {}),
       });
   },
 });

@@ -1,12 +1,15 @@
+import { randomBytes } from 'node:crypto';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import type { Store } from '@bowerbirdjs/core';
-import { escapeHtml, renderDocument } from '@bowerbirdjs/html';
+import { type Actor, describeOp, formatIssue, type Store } from '@bowerbirdjs/core';
+import { escapeAttr, escapeHtml, renderDocument } from '@bowerbirdjs/html';
 
 export interface PreviewOptions {
   store: Store;
   port?: number;
   host?: string;
+  /** Who accepts or rejects proposals from the preview page. */
+  reviewer?: Actor;
 }
 
 export interface PreviewServer {
@@ -15,6 +18,49 @@ export interface PreviewServer {
 }
 
 const EVENTS_PATH = '/__bowerbird/events';
+const CHANGESETS_PATH = '/__bowerbird/changesets/';
+
+/** A panel listing open proposals, with per-op checkboxes and accept/reject buttons. */
+function reviewPanel(store: Store, token: string, current: string, shown?: string): string {
+  const open = store.changesets.filter((c) => c.status.includes('open'));
+  if (!open.length) return '';
+  const items = open
+    .map((c) => {
+      const ops = c.ops
+        .map((op, i) =>
+          c.status[i] === 'open'
+            ? `<li><label><input type="checkbox" name="ops" value="${i}" checked> <code>${escapeHtml(describeOp(op))}</code></label>${
+                c.needs[i]?.length ? ` <small>needs ${c.needs[i]!.join(', ')}</small>` : ''
+              }</li>`
+            : '',
+        )
+        .join('');
+      const notes = c.warnings.map((w) => `<li>${escapeHtml(w.message)}</li>`).join('');
+      const action = `${CHANGESETS_PATH}${encodeURIComponent(c.id)}`;
+      const back = escapeAttr(current);
+      return `<details${shown === c.id ? ' open' : ''}><summary><strong>${escapeHtml(c.id)}</strong> by ${escapeHtml(c.actor.name ?? c.actor.id)}: ${escapeHtml(c.label ?? `${c.ops.length} changes`)}</summary>
+<form method="post" action="${action}/accept">
+<input type="hidden" name="token" value="${token}"><input type="hidden" name="back" value="${back}">
+<ul>${ops}</ul>${notes ? `<p>Notes:</p><ul>${notes}</ul>` : ''}
+<a href="?changeset=${encodeURIComponent(c.id)}&amp;badge=0">Preview</a> · <a href="?badge=0">Current page</a>
+<button>Accept selected</button>
+<button formaction="${action}/reject">Reject selected</button>
+</form></details>`;
+    })
+    .join('');
+  return `<aside style="position:fixed;left:12px;bottom:12px;z-index:2147483647;max-width:min(560px,calc(100vw - 24px));max-height:60vh;overflow:auto;padding:12px 14px;border-radius:12px;background:#fff;color:#0f172a;box-shadow:0 10px 30px #0f172a40;font:13px/1.45 system-ui,sans-serif;text-align:left">
+<strong>Proposed changes (${open.length})</strong>${shown ? ` · previewing ${escapeHtml(shown)}` : ''}
+${items}</aside>`;
+}
+
+async function readForm(req: IncomingMessage): Promise<URLSearchParams> {
+  let body = '';
+  for await (const chunk of req) {
+    body += chunk;
+    if (body.length > 100_000) throw new Error('Form too large.');
+  }
+  return new URLSearchParams(body);
+}
 
 function liveScript(label: string, showBadge: boolean): string {
   const badge = showBadge
@@ -30,6 +76,9 @@ function liveScript(label: string, showBadge: boolean): string {
 export async function startPreview(options: PreviewOptions): Promise<PreviewServer> {
   const { store } = options;
   const host = options.host ?? '127.0.0.1';
+  const reviewer: Actor = options.reviewer ?? { kind: 'user', id: 'reviewer', name: 'Reviewer' };
+  // Accept/reject forms carry this token, so other sites can't submit them (CSRF).
+  const token = randomBytes(16).toString('hex');
   const clients = new Set<ServerResponse>();
   const allowedHosts = new Set(['localhost', '127.0.0.1', '::1', host]);
   let lastChange = 'No changes yet';
@@ -37,6 +86,9 @@ export async function startPreview(options: PreviewOptions): Promise<PreviewServ
   const unsubscribe = store.subscribe(({ entry }) => {
     lastChange = `rev ${entry.revision} · ${entry.actor.name ?? entry.actor.id}: ${entry.label ?? `${entry.changes.length} changes`}`;
     for (const client of clients) client.write(`data: ${entry.revision}\n\n`);
+  });
+  const offChangesets = store.onChangesets(() => {
+    for (const client of clients) client.write('data: changesets\n\n');
   });
 
   const server = createServer((req, res) => {
@@ -48,13 +100,50 @@ export async function startPreview(options: PreviewOptions): Promise<PreviewServ
       res.end('Forbidden host');
       return;
     }
-    try {
-      handle(req, res);
-    } catch (error) {
+    const fail = (error: unknown) => {
       if (!res.headersSent) res.writeHead(500, { 'content-type': 'text/plain; charset=utf-8' });
       res.end(`Preview failed: ${error instanceof Error ? error.message : String(error)}`);
+    };
+    try {
+      if (req.method === 'POST') review(req, res).catch(fail);
+      else handle(req, res);
+    } catch (error) {
+      fail(error);
     }
   });
+
+  /** POST /__bowerbird/changesets/<id>/(accept|reject) from the review panel. */
+  async function review(req: IncomingMessage, res: ServerResponse) {
+    const url = new URL(req.url ?? '/', 'http://localhost');
+    const match = /^\/__bowerbird\/changesets\/([^/]+)\/(accept|reject)$/.exec(url.pathname);
+    const origin = req.headers.origin;
+    const sameOrigin =
+      !origin || allowedHosts.has(new URL(origin).hostname.replace(/^\[|\]$/g, ''));
+    const form = await readForm(req);
+    if (!match || !sameOrigin || form.get('token') !== token) {
+      res.writeHead(403, { 'content-type': 'text/plain' });
+      res.end('Forbidden');
+      return;
+    }
+    const id = decodeURIComponent(match[1]!);
+    const ops = form.getAll('ops').map(Number).filter(Number.isInteger);
+    const message =
+      match[2] === 'accept'
+        ? (() => {
+            const result = store.acceptChangeset(id, { by: reviewer, ops });
+            return result.ok ? '' : result.errors.map(formatIssue).join('\n');
+          })()
+        : (store.rejectChangeset(id, { by: reviewer, ops }).errors.map(formatIssue).join('\n') ??
+          '');
+    if (message) {
+      res.writeHead(409, { 'content-type': 'text/plain; charset=utf-8' });
+      res.end(`Not applied:\n${message}`);
+      return;
+    }
+    const back = form.get('back') ?? '/';
+    res.writeHead(303, { location: back.startsWith('/') && !back.startsWith('//') ? back : '/' });
+    res.end();
+  }
 
   function handle(req: IncomingMessage, res: ServerResponse) {
     const url = new URL(req.url ?? '/', 'http://localhost');
@@ -95,9 +184,15 @@ export async function startPreview(options: PreviewOptions): Promise<PreviewServ
       return;
     }
     const theme = url.searchParams.get('theme');
-    const html = renderDocument(doc, store.registry, page.id, {
+    // ?changeset=cs-1 shows the page as it would be with that proposal accepted.
+    const shown = url.searchParams.get('changeset') ?? undefined;
+    const preview = shown ? store.previewChangeset(shown).doc : undefined;
+    const source = preview?.pages[page.id] ? preview : doc;
+    const html = renderDocument(source, store.registry, page.id, {
       ...(theme && /^[a-z0-9-]+$/.test(theme) ? { theme } : {}),
-      bodyEnd: liveScript(lastChange, badge),
+      bodyEnd:
+        reviewPanel(store, token, url.pathname, preview ? shown : undefined) +
+        liveScript(preview ? `Preview of ${shown}` : lastChange, badge),
     });
     res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
     res.end(html);
@@ -113,6 +208,7 @@ export async function startPreview(options: PreviewOptions): Promise<PreviewServ
     close: () =>
       new Promise<void>((resolve) => {
         unsubscribe();
+        offChangesets();
         for (const client of clients) client.end();
         server.close(() => resolve());
       }),

@@ -1,12 +1,14 @@
 import { applyOp, type OpContext, orderNextTo } from './apply.js';
 import { createEmptyDoc, DocIndex, descendants } from './doc.js';
 import { type Change, Draft } from './draft.js';
-import type { Issue } from './errors.js';
-import { parseOps } from './ops.js';
+import { type Issue, listPreview } from './errors.js';
+import { type Op, parseOps } from './ops.js';
 import { createPolicy, type Policy } from './policy.js';
+import { humanEditConflicts, stampChanges } from './provenance.js';
 import type { Registry } from './registry.js';
+import { syncInstances } from './symbols.js';
 import type { Actor, BNode, NodeId, PageId, SiteDoc, TokenTree } from './types.js';
-import { deepEqual, ensure, isPlainObject, pruneEmpty } from './util.js';
+import { clone, deepEqual, ensure, isPlainObject, pruneEmpty } from './util.js';
 
 export const LOCAL_USER: Actor = { kind: 'user', id: 'local' };
 
@@ -19,6 +21,11 @@ export interface TransactionInput {
   baseRevision?: number;
   /** Validate and compute the result without committing. */
   dryRun?: boolean;
+  /**
+   * Allow an agent to change fields a person edited last, when the policy asks for confirmation
+   * (`protectHumanEdits: 'confirm'`). Set it only when the person asked for that change.
+   */
+  overwrite?: boolean;
 }
 
 export interface ChangeSummary {
@@ -26,6 +33,7 @@ export interface ChangeSummary {
   updated: NodeId[];
   removed: NodeId[];
   pages: PageId[];
+  symbols: string[];
   tokens: boolean;
 }
 
@@ -55,6 +63,9 @@ export interface HistoryEntry {
   kind: 'edit' | 'undo' | 'redo';
   /** For undo/redo entries: the entry they revert. */
   target?: string;
+  /** For accepted changesets: who accepted them (`actor` is who proposed them). */
+  approvedBy?: Actor;
+  changeset?: string;
   changes: Change[];
   time: number;
   undone?: boolean;
@@ -67,25 +78,99 @@ export interface CommitEvent {
   summary: ChangeSummary;
 }
 
+/**
+ * Proposed changes waiting for review. Ops are kept as proposed (with the ids they created pinned,
+ * so later ops that refer to them still work) and can be accepted or rejected one by one.
+ */
+export interface Changeset {
+  id: string;
+  actor: Actor;
+  label?: string;
+  ops: Op[];
+  /** Per op. */
+  status: ('open' | 'accepted' | 'rejected')[];
+  /** Per op: earlier ops it depends on (they create nodes, pages or symbols it refers to). */
+  needs: number[][];
+  baseRevision: number;
+  created: number;
+  /** What the whole changeset changes, computed when it was proposed. */
+  summary: ChangeSummary;
+  warnings: Issue[];
+}
+
+export type ProposeResult =
+  | { ok: true; changeset: Changeset; warnings: Issue[] }
+  | { ok: false; revision: number; errors: Issue[]; failedOp?: number };
+
 export interface StoreOptions {
   registry: Registry;
   doc?: SiteDoc;
   policy?: Policy;
   /** Maximum number of history entries kept (default 500). */
   historyLimit?: number;
+  /** Changesets to restore (e.g. saved alongside the document). */
+  changesets?: Changeset[];
 }
 
 export function summarize(changes: Change[]): ChangeSummary {
-  const s: ChangeSummary = { created: [], updated: [], removed: [], pages: [], tokens: false };
+  const s: ChangeSummary = {
+    created: [],
+    updated: [],
+    removed: [],
+    pages: [],
+    symbols: [],
+    tokens: false,
+  };
   for (const c of changes) {
     if (c.kind === 'node') {
       if (!c.before) s.created.push(c.id);
       else if (!c.after) s.removed.push(c.id);
       else s.updated.push(c.id);
     } else if (c.kind === 'page') s.pages.push(c.id);
+    else if (c.kind === 'symbol') s.symbols.push(c.id);
     else s.tokens = true;
   }
   return s;
+}
+
+/** Every string value inside an op (ids it refers to). */
+function stringsIn(value: unknown, out = new Set<string>()): Set<string> {
+  if (typeof value === 'string') out.add(value);
+  else if (Array.isArray(value)) for (const v of value) stringsIn(v, out);
+  else if (isPlainObject(value)) for (const v of Object.values(value)) stringsIn(v, out);
+  return out;
+}
+
+/** Writes the ids an op created into the op, so it creates the same ids when applied later. */
+function pinIds(op: Op, created: { nodes: string[]; pages: string[]; symbols: string[] }): Op {
+  const pinned = clone(op);
+  switch (pinned.op) {
+    case 'section.insert':
+    case 'symbol.insert':
+      if (!pinned.id && created.nodes[0]) pinned.id = created.nodes[0];
+      break;
+    case 'node.insert': {
+      const inputs: { id?: string; children?: unknown[] }[] = [];
+      const walk = (n: { id?: string; children?: unknown[] }) => {
+        inputs.push(n);
+        for (const c of n.children ?? []) walk(c as typeof n);
+      };
+      walk(pinned.node);
+      if (inputs.length === created.nodes.length) {
+        inputs.forEach((n, i) => {
+          n.id ??= created.nodes[i];
+        });
+      }
+      break;
+    }
+    case 'page.create':
+      if (!pinned.id && created.pages[0]) pinned.id = created.pages[0];
+      break;
+    case 'symbol.create':
+      if (!pinned.symbol && created.symbols[0]) pinned.symbol = created.symbols[0];
+      break;
+  }
+  return pinned;
 }
 
 /** Three-way merge of one value: revert `after` → `before` unless `current` changed since. */
@@ -151,13 +236,17 @@ function revertNode(current: BNode, before: BNode, after: BNode, conflicts: stri
   );
   if (pos.conflict) conflicts.push('position');
   Object.assign(next, pos.value);
-  for (const field of ['type', 'section', 'part', 'key', 'name'] as const) {
+  for (const field of ['type', 'section', 'part', 'key', 'name', 'symbol', 'link'] as const) {
     const r = revertValue(current[field], before[field], after[field]);
     if (r.conflict) conflicts.push(field);
     if (r.value === undefined) delete next[field];
     else next[field] = r.value;
   }
   next.props = revertMap(current.props, before.props, after.props, 'props', conflicts);
+  // Provenance goes back with the values it describes; stamp conflicts aren't worth reporting.
+  const edited = revertMap(current.edited, before.edited, after.edited, 'edited', []);
+  if (Object.keys(edited).length) next.edited = edited as BNode['edited'];
+  else delete next.edited;
   const vars = revertMap(current.vars, before.vars, after.vars, 'vars', conflicts);
   if (Object.keys(vars).length) next.vars = vars;
   else delete next.vars;
@@ -234,6 +323,91 @@ function rebuildThemes(entries: Record<string, unknown>): SiteDoc['themes'] {
   return out;
 }
 
+type RunOptions = {
+  /** Set when a person accepts a changeset: review is satisfied and both are policy-checked. */
+  approvedBy?: Actor;
+  /** Proposing: review isn't required, human-edit conflicts become warnings, ids are recorded. */
+  propose?: boolean;
+  /**
+   * Replaying a changeset: when an id it pinned has been taken since, a fresh one is used and
+   * later ops are rewritten to refer to it.
+   */
+  rebase?: boolean;
+};
+
+type RunOutcome =
+  | {
+      ok: true;
+      draft: Draft;
+      ctx: OpContext;
+      ops: Op[];
+      /** With `propose`: what each op created. */
+      createdBy: { nodes: string[]; pages: string[]; symbols: string[] }[];
+    }
+  | { ok: false; result: Extract<ApplyResult, { ok: false }> };
+
+type Pinned = {
+  op: Op;
+  /** Ids the op meant to create, in creation order (undefined where it let the store choose). */
+  nodes: (string | undefined)[];
+  page?: string;
+  symbol?: string;
+};
+
+/** Records the ids an op pinned and drops those that are already taken. */
+function unpinTaken(op: Op, draft: Draft): Pinned {
+  const out = clone(op);
+  switch (out.op) {
+    case 'section.insert':
+    case 'symbol.insert': {
+      const id = out.id;
+      if (id && draft.has(id)) delete out.id;
+      return { op: out, nodes: [id] };
+    }
+    case 'node.insert': {
+      const nodes: (string | undefined)[] = [];
+      const walk = (n: { id?: string; children?: unknown[] }) => {
+        nodes.push(n.id);
+        if (n.id && draft.has(n.id)) delete n.id;
+        for (const c of n.children ?? []) walk(c as typeof n);
+      };
+      walk(out.node);
+      return { op: out, nodes };
+    }
+    case 'page.create': {
+      const id = out.id;
+      if (id && draft.page(id)) delete out.id;
+      return { op: out, nodes: [], ...(id ? { page: id } : {}) };
+    }
+    case 'symbol.create': {
+      const id = out.symbol;
+      if (id && draft.symbol(id)) delete out.symbol;
+      return { op: out, nodes: [], ...(id ? { symbol: id } : {}) };
+    }
+    default:
+      return { op: out, nodes: [] };
+  }
+}
+
+/** Rewrites id strings (and ids nested under them) using `map`. */
+function substitute(value: unknown, map: Map<string, string>): unknown {
+  if (typeof value === 'string') {
+    const direct = map.get(value);
+    if (direct) return direct;
+    const slash = value.indexOf('/');
+    if (slash > 0) {
+      for (const [from, to] of map)
+        if (value.startsWith(`${from}/`)) return to + value.slice(from.length);
+    }
+    return value;
+  }
+  if (Array.isArray(value)) return value.map((v) => substitute(v, map));
+  if (isPlainObject(value)) {
+    return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, substitute(v, map)]));
+  }
+  return value;
+}
+
 export class Store {
   readonly registry: Registry;
   private currentPolicy: Policy;
@@ -242,6 +416,9 @@ export class Store {
   private readonly entries: HistoryEntry[] = [];
   private readonly listeners = new Set<(event: CommitEvent) => void>();
   private readonly loadListeners = new Set<(doc: SiteDoc) => void>();
+  private readonly changesetListeners = new Set<(changesets: readonly Changeset[]) => void>();
+  private readonly sets: Changeset[];
+  private changesetCounter: number;
   private readonly historyLimit: number;
 
   constructor(options: StoreOptions) {
@@ -249,6 +426,11 @@ export class Store {
     this.currentPolicy = options.policy ?? createPolicy();
     this.current = options.doc ?? createEmptyDoc();
     this.historyLimit = options.historyLimit ?? 500;
+    this.sets = [...(options.changesets ?? [])];
+    this.changesetCounter = Math.max(
+      0,
+      ...this.sets.map((c) => Number(/^cs-(\d+)$/.exec(c.id)?.[1] ?? 0)),
+    );
   }
 
   get policy(): Policy {
@@ -274,11 +456,16 @@ export class Store {
     return this.entries;
   }
 
-  /** Replaces the document and clears history. Listeners registered with `onLoad` are told. */
+  /**
+   * Replaces the document and clears history and changesets. Listeners registered with `onLoad`
+   * are told.
+   */
   load(doc: SiteDoc): void {
     this.current = doc;
     this.index = undefined;
     this.entries.length = 0;
+    this.sets.length = 0;
+    this.emitChangesets();
     for (const listener of this.loadListeners) {
       try {
         listener(doc);
@@ -303,49 +490,375 @@ export class Store {
 
   /** Applies a transaction atomically: all ops succeed, or nothing changes. */
   apply(input: TransactionInput): ApplyResult {
+    const run = this.run(input);
+    if (!run.ok) return run.result;
+    const actor = input.actor ?? LOCAL_USER;
+    if (!input.dryRun) stampChanges(run.draft, actor, this.current.revision + 1);
+    return this.commit(run.draft, actor, {
+      kind: 'edit',
+      warnings: run.ctx.warnings,
+      ...(input.label ? { label: input.label } : {}),
+      ...(input.dryRun ? { dryRun: true } : {}),
+    });
+  }
+
+  /**
+   * Runs a transaction without committing and returns the document it would produce. Used for
+   * previews (e.g. showing an agent's changes while it is still writing them).
+   */
+  simulate(
+    input: TransactionInput,
+    options: { rebase?: boolean } = {},
+  ): { result: ApplyResult; doc?: SiteDoc } {
+    const run = this.run(input, { propose: true, ...options });
+    if (!run.ok) return { result: run.result };
+    const changes = run.draft.changes();
+    return {
+      result: {
+        ok: true,
+        txId: null,
+        revision: this.current.revision,
+        summary: summarize(changes),
+        dryRun: true,
+        warnings: run.ctx.warnings,
+      },
+      doc: changes.length ? run.draft.finish(this.current.revision) : this.current,
+    };
+  }
+
+  private run(input: TransactionInput, options: RunOptions = {}): RunOutcome {
     const actor = input.actor ?? LOCAL_USER;
     const revision = this.current.revision;
+    const failed = (errors: Issue[], failedOp?: number): RunOutcome => ({
+      ok: false,
+      result: { ok: false, revision, errors, ...(failedOp !== undefined ? { failedOp } : {}) },
+    });
     if (input.baseRevision !== undefined && input.baseRevision !== revision) {
-      return {
-        ok: false,
-        revision,
-        errors: [
-          {
-            code: 'stale_revision',
-            message: `The document is at revision ${revision}, but these changes were based on revision ${input.baseRevision}.`,
-            hint: 'Re-read the outline (or the affected nodes) and apply again.',
-          },
-        ],
-      };
+      return failed([
+        {
+          code: 'stale_revision',
+          message: `The document is at revision ${revision}, but these changes were based on revision ${input.baseRevision}.`,
+          hint: 'Re-read the outline (or the affected nodes) and apply again.',
+        },
+      ]);
     }
     const { ops, issues } = parseOps(input.ops);
-    if (issues.length) return { ok: false, revision, errors: issues };
-    if (!ops.length)
-      return { ok: false, revision, errors: [{ code: 'invalid_op', message: 'No ops given.' }] };
+    if (issues.length) return failed(issues);
+    if (!ops.length) return failed([{ code: 'invalid_op', message: 'No ops given.' }]);
+    const policy = this.policy;
+    if (!options.approvedBy && !options.propose && policy.requiresReview?.(actor)) {
+      return failed([
+        {
+          code: 'review_required',
+          message: `Changes by ${actor.kind} "${actor.id}" need review before they apply.`,
+          hint: 'Propose them instead (store.propose, or the apply tool with propose: true); a person accepts or rejects each change.',
+        },
+      ]);
+    }
 
     const draft = new Draft(this.current);
     const ctx: OpContext = {
       draft,
       registry: this.registry,
       actor,
-      policy: this.policy,
+      policy,
       opIndex: 0,
       issues: [],
       warnings: [],
     };
-    for (const [i, op] of ops.entries()) {
+    const createdBy: { nodes: string[]; pages: string[]; symbols: string[] }[] = [];
+    const renamed = new Map<string, string>();
+    for (let [i, op] of ops.entries()) {
       ctx.opIndex = i;
-      const denied = this.policy.check({ actor, op, view: draft, registry: this.registry });
-      if (denied) ctx.issues.push({ ...denied, opIndex: i });
-      else applyOp(ctx, op);
-      if (ctx.issues.length) return { ok: false, revision, errors: ctx.issues, failedOp: i };
+      let pinned: Pinned | undefined;
+      if (options.rebase) {
+        if (renamed.size) op = substitute(op, renamed) as Op;
+        pinned = unpinTaken(op, draft);
+        op = pinned.op;
+        ops[i] = op;
+      }
+      const denied =
+        policy.check({ actor, op, view: draft, registry: this.registry }) ??
+        (options.approvedBy
+          ? policy.check({ actor: options.approvedBy, op, view: draft, registry: this.registry })
+          : undefined);
+      if (denied) {
+        ctx.issues.push({ ...denied, opIndex: i });
+        return failed(ctx.issues, i);
+      }
+      const before =
+        options.propose || pinned
+          ? {
+              nodes: draft.created.length,
+              pages: new Set(draft.pages().map((p) => p.id)),
+              symbols: new Set(draft.symbols().map((x) => x.id)),
+            }
+          : undefined;
+      applyOp(ctx, op);
+      if (ctx.issues.length) return failed(ctx.issues, i);
+      if (before) {
+        const made = {
+          nodes: draft.created.slice(before.nodes).filter((id) => draft.has(id)),
+          pages: draft
+            .pages()
+            .map((p) => p.id)
+            .filter((id) => !before.pages.has(id)),
+          symbols: draft
+            .symbols()
+            .map((x) => x.id)
+            .filter((id) => !before.symbols.has(id)),
+        };
+        createdBy.push(made);
+        if (pinned) {
+          const pairs: [string | undefined, string | undefined][] = [
+            ...pinned.nodes.map(
+              (id, k) => [id, made.nodes[k]] as [string | undefined, string | undefined],
+            ),
+            [pinned.page, made.pages[0]],
+            [pinned.symbol, made.symbols[0]],
+          ];
+          if (pinned.symbol && made.symbols[0]) {
+            pairs.push([`symbol-${pinned.symbol}`, draft.symbol(made.symbols[0])?.rootId]);
+          }
+          for (const [from, to] of pairs) if (from && to && from !== to) renamed.set(from, to);
+        }
+      }
     }
-    return this.commit(draft, actor, {
-      kind: 'edit',
-      warnings: ctx.warnings,
-      ...(input.label ? { label: input.label } : {}),
-      ...(input.dryRun ? { dryRun: true } : {}),
+
+    const protection =
+      policy.protectHumanEdits?.(actor) ?? (actor.kind === 'agent' ? 'warn' : 'off');
+    if (protection !== 'off') {
+      const conflicts = humanEditConflicts(draft);
+      if (conflicts.length) {
+        const shown = conflicts.slice(0, 5);
+        const more = conflicts.length - shown.length;
+        const asIssues: Issue[] = shown.map((c) => ({ ...c, code: 'human_edit' }));
+        if (more) {
+          asIssues.push({
+            code: 'human_edit',
+            message: `…and ${more} more people-edited node(s): ${listPreview(conflicts.slice(5).map((c) => c.nodeId ?? ''))}.`,
+          });
+        }
+        const block =
+          protection === 'confirm' && !input.overwrite && !options.approvedBy && !options.propose;
+        if (block) {
+          const last = asIssues.at(-1)!;
+          last.hint =
+            'People edited these last. Only change them if the person asked: pass overwrite: true, or propose the change for review.';
+          return failed(asIssues);
+        }
+        ctx.warnings.push(...asIssues);
+      }
+    }
+
+    ctx.opIndex = ops.length - 1;
+    syncInstances(ctx);
+    if (ctx.issues.length) return failed(ctx.issues);
+    return { ok: true, draft, ctx, ops, createdBy };
+  }
+
+  // -------------------------------------------------------------------------------------------
+  // Changesets
+
+  /** Proposed changes, oldest first (including resolved ones). */
+  get changesets(): readonly Changeset[] {
+    return this.sets;
+  }
+
+  changeset(id: string): Changeset | undefined {
+    return this.sets.find((c) => c.id === id);
+  }
+
+  onChangesets(listener: (changesets: readonly Changeset[]) => void): () => void {
+    this.changesetListeners.add(listener);
+    return () => this.changesetListeners.delete(listener);
+  }
+
+  private emitChangesets(): void {
+    for (const l of this.changesetListeners) {
+      try {
+        l(this.sets);
+      } catch (error) {
+        queueMicrotask(() => {
+          throw error;
+        });
+      }
+    }
+  }
+
+  /**
+   * Validates a transaction and stores it as a changeset for review instead of applying it.
+   * Nothing in the document changes until someone accepts it.
+   */
+  propose(input: TransactionInput): ProposeResult {
+    const actor = input.actor ?? LOCAL_USER;
+    const run = this.run(input, { propose: true });
+    if (!run.ok) return run.result;
+    const changes = run.draft.changes();
+    if (!changes.length) {
+      return {
+        ok: false,
+        revision: this.current.revision,
+        errors: [
+          {
+            code: 'no_change',
+            message: 'These ops change nothing, so there is nothing to propose.',
+          },
+        ],
+      };
+    }
+    const ops = run.ops.map((op, i) => pinIds(op, run.createdBy[i]!));
+    const createdSets = run.createdBy.map((c) => new Set([...c.nodes, ...c.pages, ...c.symbols]));
+    const needs = ops.map((op, j) => {
+      const refs = stringsIn(op);
+      const out: number[] = [];
+      for (let i = 0; i < j; i++) {
+        if ([...createdSets[i]!].some((id) => refs.has(id))) out.push(i);
+      }
+      return out;
     });
+    const changeset: Changeset = {
+      id: `cs-${++this.changesetCounter}`,
+      actor,
+      ...(input.label ? { label: input.label } : {}),
+      ops,
+      status: ops.map(() => 'open'),
+      needs,
+      baseRevision: this.current.revision,
+      created: Date.now(),
+      summary: summarize(changes),
+      warnings: run.ctx.warnings,
+    };
+    this.sets.push(changeset);
+    this.emitChangesets();
+    return { ok: true, changeset, warnings: run.ctx.warnings };
+  }
+
+  private requireChangeset(id: string): Changeset | Issue {
+    const cs = this.changeset(id);
+    if (cs) return cs;
+    const open = this.sets.filter((c) => c.status.includes('open')).map((c) => c.id);
+    return {
+      code: 'unknown_changeset',
+      message: `No changeset "${id}".`,
+      hint: open.length ? `Open changesets: ${open.join(', ')}.` : 'There are no open changesets.',
+    };
+  }
+
+  /** Preview of a changeset (or some of its ops) applied to the current document. */
+  previewChangeset(id: string, ops?: number[]): { result: ApplyResult; doc?: SiteDoc } {
+    const cs = this.requireChangeset(id);
+    if (!('ops' in cs))
+      return { result: { ok: false, revision: this.current.revision, errors: [cs] } };
+    const selected = ops ?? cs.status.flatMap((st, i) => (st === 'open' ? [i] : []));
+    if (!selected.length)
+      return {
+        result: {
+          ok: true,
+          txId: null,
+          revision: this.current.revision,
+          summary: summarize([]),
+          dryRun: true,
+          warnings: [],
+        },
+        doc: this.current,
+      };
+    return this.simulate(
+      { ops: selected.map((i) => cs.ops[i]), actor: cs.actor },
+      { rebase: true },
+    );
+  }
+
+  /**
+   * Applies open ops of a changeset (all, or the given indexes) as one transaction attributed to
+   * the proposer and approved by `by`. Ops that depend on unaccepted ops must be included.
+   */
+  acceptChangeset(id: string, options: { by: Actor; ops?: number[] }): ApplyResult {
+    const revision = this.current.revision;
+    const cs = this.requireChangeset(id);
+    if (!('ops' in cs)) return { ok: false, revision, errors: [cs] };
+    const selected = [
+      ...new Set(options.ops ?? cs.status.flatMap((st, i) => (st === 'open' ? [i] : []))),
+    ].sort((a, b) => a - b);
+    const errors: Issue[] = [];
+    for (const i of selected) {
+      if (cs.status[i] === undefined)
+        errors.push({ code: 'invalid_op', message: `Changeset ${id} has no op ${i}.` });
+      else if (cs.status[i] !== 'open')
+        errors.push({
+          code: 'invalid_op',
+          opIndex: i,
+          message: `Op ${i} of ${id} was already ${cs.status[i]}.`,
+        });
+      for (const need of cs.needs[i] ?? []) {
+        if (cs.status[need] === 'accepted' || selected.includes(need)) continue;
+        errors.push({
+          code: 'invalid_op',
+          opIndex: i,
+          message: `Op ${i} of ${id} needs op ${need} (${cs.ops[need]?.op}), which is ${cs.status[need] === 'rejected' ? 'rejected' : 'not selected'}.`,
+          hint:
+            cs.status[need] === 'rejected'
+              ? 'Reject this op too.'
+              : `Accept op ${need} together with it.`,
+        });
+      }
+    }
+    if (!selected.length)
+      errors.push({ code: 'invalid_op', message: `Changeset ${id} has no open ops.` });
+    if (errors.length) return { ok: false, revision, errors };
+    const input: TransactionInput = {
+      ops: selected.map((i) => cs.ops[i]),
+      actor: cs.actor,
+      label: cs.label ?? `Changeset ${id}`,
+      overwrite: true,
+    };
+    const run = this.run(input, { approvedBy: options.by, rebase: true });
+    if (!run.ok) {
+      // Errors refer to positions in the selection; map them back to the changeset's op indexes.
+      return {
+        ...run.result,
+        errors: run.result.errors.map((e) =>
+          e.opIndex !== undefined ? { ...e, opIndex: selected[e.opIndex] ?? e.opIndex } : e,
+        ),
+        ...(run.result.failedOp !== undefined
+          ? { failedOp: selected[run.result.failedOp] ?? run.result.failedOp }
+          : {}),
+      };
+    }
+    stampChanges(run.draft, cs.actor, revision + 1);
+    const result = this.commit(run.draft, cs.actor, {
+      kind: 'edit',
+      warnings: run.ctx.warnings,
+      label: input.label!,
+      approvedBy: options.by,
+      changeset: cs.id,
+    });
+    if (result.ok) {
+      for (const i of selected) cs.status[i] = 'accepted';
+      this.emitChangesets();
+    }
+    return result;
+  }
+
+  /** Rejects open ops (all, or the given indexes), and ops that depend on them. */
+  rejectChangeset(
+    id: string,
+    options: { by: Actor; ops?: number[] },
+  ): { ok: boolean; errors: Issue[]; rejected: number[] } {
+    const cs = this.requireChangeset(id);
+    if (!('ops' in cs)) return { ok: false, errors: [cs], rejected: [] };
+    const rejected: number[] = [];
+    const reject = (i: number) => {
+      if (cs.status[i] !== 'open') return;
+      cs.status[i] = 'rejected';
+      rejected.push(i);
+      cs.needs.forEach((needs, j) => {
+        if (needs.includes(i)) reject(j);
+      });
+    };
+    for (const i of options.ops ?? cs.status.map((_, i) => i)) reject(i);
+    if (rejected.length) this.emitChangesets();
+    return { ok: true, errors: [], rejected: rejected.sort((a, b) => a - b) };
   }
 
   /** Undoes the most recent edit (by `actorId`, if given) that hasn't been undone. */
@@ -353,7 +866,7 @@ export class Store {
     const who = options.actorId;
     for (let i = this.entries.length - 1; i >= 0; i--) {
       const e = this.entries[i]!;
-      if (who && e.actor.id !== who) continue;
+      if (who && e.actor.id !== who && e.approvedBy?.id !== who) continue;
       if (e.kind === 'undo' || e.undone) continue;
       return this.revertEntry(e, options.actor ?? e.actor, 'undo');
     }
@@ -464,7 +977,17 @@ export class Store {
     }
     for (const change of [...entry.changes].reverse()) {
       if (change.kind === 'node') continue;
-      if (change.kind === 'page') {
+      if (change.kind === 'symbol') {
+        const cur = draft.symbol(change.id);
+        const r = revertValue(cur, change.before, change.after);
+        if (r.conflict)
+          warnings.push({
+            code: 'conflict',
+            message: `Symbol "${change.id}" was changed later; kept the later version.`,
+          });
+        else if (r.value) draft.setSymbol(r.value as NonNullable<typeof change.before>);
+        else draft.deleteSymbol(change.id);
+      } else if (change.kind === 'page') {
         const cur = draft.page(change.id);
         const r = revertValue(cur, change.before, change.after);
         if (r.conflict)
@@ -575,6 +1098,8 @@ export class Store {
       target?: string;
       dryRun?: boolean;
       warnings: Issue[];
+      approvedBy?: Actor;
+      changeset?: string;
     },
   ): ApplyResult {
     const revision = this.current.revision;
@@ -596,6 +1121,8 @@ export class Store {
       time: Date.now(),
       ...(meta.label ? { label: meta.label } : {}),
       ...(meta.target ? { target: meta.target } : {}),
+      ...(meta.approvedBy ? { approvedBy: meta.approvedBy } : {}),
+      ...(meta.changeset ? { changeset: meta.changeset } : {}),
     };
     this.current = doc;
     this.index = undefined;
@@ -636,7 +1163,8 @@ export function isSiteDoc(value: unknown): value is SiteDoc {
     isPlainObject(value.nodes) &&
     isPlainObject(value.tokens) &&
     isPlainObject(value.themes) &&
-    Array.isArray(value.breakpoints)
+    Array.isArray(value.breakpoints) &&
+    (value.symbols === undefined || isPlainObject(value.symbols))
   );
 }
 

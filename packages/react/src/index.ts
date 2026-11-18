@@ -1,6 +1,6 @@
 import type { Actor, ChangeSummary, HistoryEntry, Issue, SiteDoc, Store } from '@bowerbirdjs/core';
 import '@bowerbirdjs/editor/define';
-import type { BowerbirdEditor as EditorElement } from '@bowerbirdjs/editor';
+import type { AssetAdapter, BowerbirdEditor as EditorElement } from '@bowerbirdjs/editor';
 import {
   type CSSProperties,
   createElement,
@@ -21,6 +21,8 @@ export interface BowerbirdEditorProps {
   actor?: Actor;
   /** Page id to show. Only applied when it changes, so the person can switch pages in between. */
   page?: string;
+  /** Where uploaded images go (enables "Upload image" on image fields). */
+  assets?: AssetAdapter;
   className?: string;
   style?: CSSProperties;
   onChange?: (detail: { doc: SiteDoc }) => void;
@@ -69,6 +71,9 @@ export const BowerbirdEditor = forwardRef<EditorElement | null, BowerbirdEditorP
     useIsomorphicLayoutEffect(() => {
       if (element.current && props.page) element.current.page = props.page;
     }, [mounted, props.page]);
+    useIsomorphicLayoutEffect(() => {
+      if (element.current) element.current.assets = props.assets;
+    }, [mounted, props.assets]);
 
     useIsomorphicLayoutEffect(() => {
       const el = element.current;

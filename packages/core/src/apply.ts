@@ -1,8 +1,12 @@
 import {
   ancestors,
   type DocView,
+  definitionOf,
   depthOf,
   descendants,
+  instanceRootOf,
+  isInstanceRoot,
+  isScopeOwner,
   sectionRootOf,
   subtreeHeight,
 } from './doc.js';
@@ -30,6 +34,14 @@ import {
   type StyleCheckContext,
 } from './styles.js';
 import {
+  symbolCreate,
+  symbolDetach,
+  symbolInsert,
+  symbolRemove,
+  symbolReset,
+  symbolUpdate,
+} from './symbols.js';
+import {
   aliasesIn,
   flattenTokens,
   getTokenLeaf,
@@ -48,9 +60,14 @@ export interface OpContext {
   opIndex: number;
   issues: Issue[];
   warnings: Issue[];
+  /**
+   * Instance node id → the definition node as it was when the instance was linked in this
+   * transaction. Instance sync merges definition changes from that point on.
+   */
+  linkBase?: Map<NodeId, BNode>;
 }
 
-function fail(ctx: OpContext, issue: Omit<Issue, 'opIndex'>): undefined {
+export function fail(ctx: OpContext, issue: Omit<Issue, 'opIndex'>): undefined {
   ctx.issues.push({ ...issue, opIndex: ctx.opIndex });
   return undefined;
 }
@@ -61,7 +78,7 @@ const truncate = (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 1)}
 export const MAX_DEPTH = 40;
 
 /** A fresh `<prefix>-<n>` id that has never been used in this document. */
-function allocateId(ctx: OpContext, prefix: string): string {
+export function allocateId(ctx: OpContext, prefix: string): string {
   let n = ctx.draft.counter(prefix);
   let id: string;
   do {
@@ -73,7 +90,7 @@ function allocateId(ctx: OpContext, prefix: string): string {
 }
 
 /** Id for a copy of `id`: `item-3` → a new `item-<n>`, `heading` → `heading-<n>`. */
-function allocateCopyId(ctx: OpContext, id: string): string {
+export function allocateCopyId(ctx: OpContext, id: string): string {
   const match = /^(.*)-(\d+)$/.exec(id);
   const prefix = match ? match[1]! : id;
   ctx.draft.useCounter(prefix, match ? Number(match[2]) : 1);
@@ -81,7 +98,7 @@ function allocateCopyId(ctx: OpContext, id: string): string {
 }
 
 /** Marks a removed numbered id as used, so it is never handed out again. */
-function retireId(ctx: OpContext, id: string): void {
+export function retireId(ctx: OpContext, id: string): void {
   const match = /^(.*)-(\d+)$/.exec(id);
   if (match) ctx.draft.useCounter(match[1]!, Number(match[2]));
 }
@@ -145,7 +162,7 @@ function styleContext(
   };
 }
 
-function requireNode(ctx: OpContext, id: NodeId): BNode | undefined {
+export function requireNode(ctx: OpContext, id: NodeId): BNode | undefined {
   const node = ctx.draft.node(id);
   if (node) return node;
   return fail(ctx, {
@@ -254,7 +271,7 @@ function checkVars(
 }
 
 /** Order key for a new child of `parentId`, honouring before/after. */
-function positionKey(
+export function positionKey(
   ctx: OpContext,
   parentId: NodeId,
   before?: NodeId,
@@ -300,14 +317,115 @@ export function orderNextTo(
 }
 
 /** Id prefix for new nodes under `parentId`: the nearest section root or keyed item. */
-function scopeFor(view: DocView, parentId: NodeId): string {
+export function scopeFor(view: DocView, parentId: NodeId): string {
   for (const n of [view.node(parentId), ...ancestors(view, parentId)]) {
-    if (n && (n.section || n.key)) return `${n.id}/`;
+    if (n && isScopeOwner(view, n)) return `${n.id}/`;
   }
   return '';
 }
 
-function resolveParent(ctx: OpContext, pageId?: string, parentId?: NodeId): BNode | undefined {
+/**
+ * Fails if `node` is inside a symbol instance (but not its root): an instance mirrors its
+ * definition, so its structure can only change through the definition.
+ */
+export function guardInstance(ctx: OpContext, node: BNode, action: string): boolean {
+  if (!node.link || isInstanceRoot(ctx.draft, node)) return true;
+  const root = instanceRootOf(ctx.draft, node.id);
+  const symbol = ctx.draft.symbol(node.link.symbol);
+  fail(ctx, {
+    code: 'instance',
+    nodeId: node.id,
+    message: `"${node.id}" is inside an instance of symbol "${node.link.symbol}"${root ? ` ("${root.id}")` : ''}, so you can't ${action} here.`,
+    hint: `Change the definition (${symbol ? `nodes under "${symbol.rootId}"` : 'the symbol'}) to update every instance, or run symbol.detach on "${root?.id ?? node.id}" first. Text, props and styles can be overridden per instance.`,
+  });
+  return false;
+}
+
+/** Fails if `parent` is inside an instance (structure is locked) when adding children to it. */
+function guardParent(ctx: OpContext, parent: BNode): boolean {
+  if (!parent.link) return true;
+  const root = instanceRootOf(ctx.draft, parent.id);
+  fail(ctx, {
+    code: 'instance',
+    nodeId: parent.id,
+    message: `"${parent.id}" is part of an instance of symbol "${parent.link.symbol}"; nodes can't be added inside instances.`,
+    hint: `Add it to the definition (node "${parent.link.node}") to add it to every instance, or run symbol.detach on "${root?.id ?? parent.id}" first.`,
+  });
+  return false;
+}
+
+/**
+ * Copies `root` and its subtree to a new place, giving every copy a fresh id. Ids are rebuilt
+ * under their nearest copied scope owner (section root, keyed item, symbol root), so
+ * `hero-1/heading` copied under `hero-2` becomes `hero-2/heading`. Returns old id → new id.
+ */
+export function copySubtree(
+  ctx: OpContext,
+  root: BNode,
+  opts: {
+    parent: NodeId | null;
+    order: string;
+    rootId: string;
+    /** Treat the copied root as an id scope even if the source root isn't one. */
+    scopeRoot?: boolean;
+    transform?: (copy: BNode, source: BNode) => BNode;
+  },
+): Map<NodeId, NodeId> {
+  const { draft } = ctx;
+  const subtree = [root, ...descendants(draft, root.id)];
+  const inSubtree = new Set(subtree.map((n) => n.id));
+  const idMap = new Map<NodeId, NodeId>([[root.id, opts.rootId]]);
+  const claimed = new Set<string>([opts.rootId]);
+  const free = (id: string) => !draft.has(id) && !claimed.has(id);
+  const isOwner = (n: BNode) => (n.id === root.id && !!opts.scopeRoot) || isScopeOwner(draft, n);
+  for (const n of subtree.slice(1)) {
+    let owner: BNode | undefined;
+    for (let cur = n.parent ? draft.node(n.parent) : undefined; cur; ) {
+      if (isOwner(cur)) {
+        owner = cur;
+        break;
+      }
+      cur = cur.parent ? draft.node(cur.parent) : undefined;
+    }
+    let nid: string | undefined;
+    if (!n.section && owner && inSubtree.has(owner.id)) {
+      const prefix = `${owner.id}/`;
+      const rel = n.id.startsWith(prefix)
+        ? n.id.slice(prefix.length)
+        : owner.id === root.id && opts.scopeRoot
+          ? n.id.split('/').at(-1)
+          : undefined;
+      if (rel) nid = `${idMap.get(owner.id)}/${rel}`;
+    }
+    if (!nid || !free(nid))
+      nid = n.section ? allocateId(ctx, n.section.name) : allocateCopyId(ctx, nid ?? n.id);
+    while (!free(nid)) nid = allocateCopyId(ctx, nid);
+    claimed.add(nid);
+    idMap.set(n.id, nid);
+  }
+  for (const n of subtree) {
+    const isRoot = n.id === root.id;
+    let copy: BNode = {
+      ...clone(n),
+      id: idMap.get(n.id)!,
+      parent: isRoot ? opts.parent : idMap.get(n.parent!)!,
+      order: isRoot ? opts.order : n.order,
+    };
+    if (n.part && n.key !== undefined) {
+      const last = copy.id.split('/').pop()!;
+      if (last.startsWith(`${n.part}-`)) copy.key = last.slice(n.part.length + 1);
+    }
+    if (opts.transform) copy = opts.transform(copy, n);
+    draft.setNode(copy);
+  }
+  return idMap;
+}
+
+export function resolveParent(
+  ctx: OpContext,
+  pageId?: string,
+  parentId?: NodeId,
+): BNode | undefined {
   if (parentId) return requireNode(ctx, parentId);
   const pages = ctx.draft.pages();
   const page = pageId ? ctx.draft.page(pageId) : pages.length === 1 ? pages[0] : undefined;
@@ -482,7 +600,7 @@ function createTree(
   return node;
 }
 
-function setProps(ctx: OpContext, node: BNode, patch: Record<string, unknown>) {
+export function setProps(ctx: OpContext, node: BNode, patch: Record<string, unknown>) {
   const def = ctx.registry.component(node.type);
   if (!def)
     return fail(ctx, {
@@ -511,7 +629,7 @@ function setProps(ctx: OpContext, node: BNode, patch: Record<string, unknown>) {
 // ---------------------------------------------------------------------------------------------
 // Op handlers
 
-type OpOf<K extends Op['op']> = Extract<Op, { op: K }>;
+export type OpOf<K extends Op['op']> = Extract<Op, { op: K }>;
 
 function sectionInsert(ctx: OpContext, op: OpOf<'section.insert'>) {
   const { draft, registry } = ctx;
@@ -530,7 +648,7 @@ function sectionInsert(ctx: OpContext, op: OpOf<'section.insert'>) {
     });
   }
   const parent = resolveParent(ctx, op.page, op.parent);
-  if (!parent) return;
+  if (!parent || !guardParent(ctx, parent)) return;
   const { variant, errors } = resolveVariant(def, op.variant);
   for (const message of errors) fail(ctx, { code: 'invalid_variant', message });
   if (errors.length) return;
@@ -579,7 +697,7 @@ function sectionInsert(ctx: OpContext, op: OpOf<'section.insert'>) {
 
 function nodeInsert(ctx: OpContext, op: OpOf<'node.insert'>) {
   const parent = requireNode(ctx, op.parent);
-  if (!parent) return;
+  if (!parent || !guardParent(ctx, parent)) return;
   const order = positionKey(ctx, parent.id, op.before, op.after);
   if (order === undefined) return;
   createTree(ctx, op.node, parent, order, scopeFor(ctx.draft, parent.id));
@@ -592,10 +710,20 @@ function nodeMove(ctx: OpContext, op: OpOf<'node.move'>) {
     return fail(ctx, {
       code: 'root_node',
       nodeId: node.id,
-      message: "A page root can't be moved.",
+      message: `"${node.id}" is a page or symbol root and can't be moved.`,
     });
+  if (!guardInstance(ctx, node, 'move it')) return;
   const parent = op.parent ? requireNode(ctx, op.parent) : ctx.draft.node(node.parent);
   if (!parent) return;
+  if (parent.id !== node.parent && !guardParent(ctx, parent)) return;
+  if (definitionOf(ctx.draft, parent.id)?.id !== definitionOf(ctx.draft, node.id)?.id) {
+    return fail(ctx, {
+      code: 'invalid_parent',
+      nodeId: node.id,
+      message: `Can't move "${node.id}" into or out of a symbol definition.`,
+      hint: 'Use symbol.create to make a definition from a node, or node.duplicate to copy nodes.',
+    });
+  }
   if (parent.id === node.id || ancestors(ctx.draft, parent.id).some((a) => a.id === node.id)) {
     return fail(ctx, {
       code: 'cycle',
@@ -629,10 +757,11 @@ function nodeRemove(ctx: OpContext, op: OpOf<'node.remove'>) {
     return fail(ctx, {
       code: 'root_node',
       nodeId: node.id,
-      message: "A page root can't be removed.",
-      hint: 'Use page.remove.',
+      message: `"${node.id}" is a page or symbol root and can't be removed this way.`,
+      hint: 'Use page.remove or symbol.remove.',
     });
   }
+  if (!guardInstance(ctx, node, 'remove it')) return;
   for (const d of descendants(ctx.draft, node.id)) {
     retireId(ctx, d.id);
     ctx.draft.deleteNode(d.id);
@@ -649,58 +778,12 @@ function nodeDuplicate(ctx: OpContext, op: OpOf<'node.duplicate'>) {
     return fail(ctx, {
       code: 'root_node',
       nodeId: node.id,
-      message: "A page root can't be duplicated.",
+      message: `"${node.id}" is a page or symbol root and can't be duplicated.`,
     });
-  const subtree = [node, ...descendants(draft, node.id)];
-  const inSubtree = new Set(subtree.map((n) => n.id));
-  const idMap = new Map<string, string>();
-  const claimed = new Set<string>();
-  const free = (id: string) => !draft.has(id) && !claimed.has(id);
-  const claim = (id: string) => {
-    claimed.add(id);
-    return id;
-  };
-  // Each copied id is rebuilt from its nearest copied scope owner (section root or keyed item),
-  // so nested sections and items get consistent new ids.
-  const ownerOf = (n: BNode): BNode | undefined => {
-    let cur = n.parent ? draft.node(n.parent) : undefined;
-    while (cur && !(cur.section || cur.key)) cur = cur.parent ? draft.node(cur.parent) : undefined;
-    return cur;
-  };
-  for (const n of subtree) {
-    let nid: string | undefined;
-    if (n.id === node.id) nid = undefined;
-    else if (n.section) nid = undefined;
-    else {
-      const owner = ownerOf(n);
-      const prefix = owner ? `${owner.id}/` : '';
-      const mapped = owner && inSubtree.has(owner.id) ? idMap.get(owner.id) : undefined;
-      if (mapped && n.id.startsWith(prefix)) nid = `${mapped}/${n.id.slice(prefix.length)}`;
-    }
-    if (!nid || !free(nid))
-      nid =
-        n.section && n.id !== node.id
-          ? allocateId(ctx, n.section.name)
-          : allocateCopyId(ctx, nid ?? n.id);
-    while (!free(nid)) nid = allocateCopyId(ctx, nid);
-    idMap.set(n.id, claim(nid));
-  }
-  const sibs = draft.children(node.parent);
-  const order = orderNextTo(sibs, node.order, 'after');
-  for (const n of subtree) {
-    const isRoot = n.id === node.id;
-    const copy: BNode = {
-      ...clone(n),
-      id: idMap.get(n.id)!,
-      parent: isRoot ? n.parent : idMap.get(n.parent!)!,
-      order: isRoot ? order : n.order,
-    };
-    if (n.part && n.key !== undefined) {
-      const last = copy.id.split('/').pop()!;
-      if (last.startsWith(`${n.part}-`)) copy.key = last.slice(n.part.length + 1);
-    }
-    draft.setNode(copy);
-  }
+  if (!guardInstance(ctx, node, 'duplicate it')) return;
+  const order = orderNextTo(draft.children(node.parent), node.order, 'after');
+  // Instance copies keep their links (a copy of an instance is another instance).
+  copySubtree(ctx, node, { parent: node.parent, order, rootId: allocateCopyId(ctx, node.id) });
 }
 
 function textEdit(ctx: OpContext, op: OpOf<'text.edit'>) {
@@ -1122,6 +1205,14 @@ function sectionVariant(ctx: OpContext, op: OpOf<'section.variant'>) {
   const { draft, registry } = ctx;
   const root = requireNode(ctx, op.id);
   if (!root) return;
+  if (root.link) {
+    return fail(ctx, {
+      code: 'instance',
+      nodeId: root.id,
+      message: `"${root.id}" is ${isInstanceRoot(draft, root) ? 'an instance' : 'inside an instance'} of symbol "${root.link.symbol}", so its variant follows the definition.`,
+      hint: `Change the variant on the definition ("${root.link.node}"), or run symbol.detach first.`,
+    });
+  }
   if (!root.section) {
     const owner = sectionRootOf(draft, root.id);
     return fail(ctx, {
@@ -1268,6 +1359,12 @@ const HANDLERS: { [K in Op['op']]: (ctx: OpContext, op: OpOf<K>) => unknown } = 
   'page.update': pageUpdate,
   'page.remove': pageRemove,
   'token.set': tokenSet,
+  'symbol.create': symbolCreate,
+  'symbol.insert': symbolInsert,
+  'symbol.detach': symbolDetach,
+  'symbol.reset': symbolReset,
+  'symbol.update': symbolUpdate,
+  'symbol.remove': symbolRemove,
 };
 
 /** Applies one op to the draft; problems are pushed to `ctx.issues`. */

@@ -1,12 +1,13 @@
 import { buildChildIndex, type DocView } from './doc.js';
 import { compareOrder } from './order.js';
-import type { BNode, NodeId, Page, PageId, SiteDoc, TokenTree } from './types.js';
+import type { BNode, NodeId, Page, PageId, SiteDoc, SymbolDef, TokenTree } from './types.js';
 import { deepEqual, ensureIn, own } from './util.js';
 
 /** A record-level change: `before` absent = created, `after` absent = removed. */
 export type Change =
   | { kind: 'node'; id: NodeId; before?: BNode; after?: BNode }
   | { kind: 'page'; id: PageId; before?: Page; after?: Page }
+  | { kind: 'symbol'; id: string; before?: SymbolDef; after?: SymbolDef }
   | { kind: 'tokens'; id: 'tokens'; before: TokenTree; after: TokenTree }
   | { kind: 'themes'; id: 'themes'; before: SiteDoc['themes']; after: SiteDoc['themes'] };
 
@@ -17,6 +18,9 @@ export type Change =
 export class Draft implements DocView {
   private readonly nodeOverlay = new Map<NodeId, BNode | null>();
   private readonly pageOverlay = new Map<PageId, Page | null>();
+  private readonly symbolOverlay = new Map<string, SymbolDef | null>();
+  /** Ids of nodes created in this draft, in creation order (used to pin ids in proposals). */
+  readonly created: NodeId[] = [];
   private readonly counterOverlay = new Map<string, number>();
   private readonly childIndex: Map<NodeId, Set<NodeId>>;
   private tokenTree: TokenTree;
@@ -48,6 +52,24 @@ export class Draft implements DocView {
   page(id: PageId): Page | undefined {
     if (this.pageOverlay.has(id)) return this.pageOverlay.get(id) ?? undefined;
     return own(this.base.pages, id);
+  }
+
+  symbol(id: string): SymbolDef | undefined {
+    if (this.symbolOverlay.has(id)) return this.symbolOverlay.get(id) ?? undefined;
+    return own(this.base.symbols ?? {}, id);
+  }
+
+  symbols(): SymbolDef[] {
+    const ids = new Set([...Object.keys(this.base.symbols ?? {}), ...this.symbolOverlay.keys()]);
+    return [...ids].map((id) => this.symbol(id)).filter((s): s is SymbolDef => !!s);
+  }
+
+  setSymbol(symbol: SymbolDef): void {
+    this.symbolOverlay.set(symbol.id, symbol);
+  }
+
+  deleteSymbol(id: string): void {
+    this.symbolOverlay.set(id, null);
   }
 
   /** Highest number used so far for an id prefix. */
@@ -84,6 +106,7 @@ export class Draft implements DocView {
 
   setNode(node: BNode): void {
     const prev = this.node(node.id);
+    if (!prev) this.created.push(node.id);
     if (prev && prev.parent !== node.parent && prev.parent !== null) {
       this.childIndex.get(prev.parent)?.delete(node.id);
     }
@@ -132,6 +155,11 @@ export class Draft implements DocView {
       if (deepEqual(before, after ?? undefined)) continue;
       out.push({ kind: 'page', id, ...(before ? { before } : {}), ...(after ? { after } : {}) });
     }
+    for (const [id, after] of this.symbolOverlay) {
+      const before = own(this.base.symbols ?? {}, id);
+      if (deepEqual(before, after ?? undefined)) continue;
+      out.push({ kind: 'symbol', id, ...(before ? { before } : {}), ...(after ? { after } : {}) });
+    }
     if (!deepEqual(this.base.tokens, this.tokenTree)) {
       out.push({ kind: 'tokens', id: 'tokens', before: this.base.tokens, after: this.tokenTree });
     }
@@ -161,6 +189,15 @@ export class Draft implements DocView {
       tokens: this.tokenTree,
       themes: this.themeMap,
     };
+    if (this.symbolOverlay.size) {
+      const symbols = { ...(this.base.symbols ?? {}) };
+      for (const [id, sym] of this.symbolOverlay) {
+        if (sym) symbols[id] = sym;
+        else delete symbols[id];
+      }
+      if (Object.keys(symbols).length) next.symbols = symbols;
+      else delete next.symbols;
+    }
     if (this.counterOverlay.size) {
       next.counters = { ...(this.base.counters ?? {}), ...Object.fromEntries(this.counterOverlay) };
     }

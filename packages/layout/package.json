@@ -1,0 +1,31 @@
+{
+  "name": "@bowerbirdjs/layout",
+  "version": "0.0.0",
+  "description": "Rendered-layout snapshots and layout lint for Bowerbird pages (what agents can't see in the document).",
+  "license": "MIT",
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist",
+    "src",
+    "!dist/.tsbuildinfo"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/bowerbirdjs/bowerbird.git",
+    "directory": "packages/layout"
+  },
+  "dependencies": {
+    "@bowerbirdjs/core": "workspace:*",
+    "@bowerbirdjs/css": "workspace:*",
+    "@bowerbirdjs/html": "workspace:*"
+  }
+}

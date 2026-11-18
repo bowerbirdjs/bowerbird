@@ -86,6 +86,8 @@ export function dropTarget(
   const id = nodeEl?.getAttribute('data-bb-node') ?? null;
   const elementOf = (nid: string) => content.querySelector(`[data-bb-node="${CSS.escape(nid)}"]`);
 
+  // A symbol definition has no page to add sections to.
+  if (payload.kind === 'section' && controller.symbolView) return null;
   if (payload.kind === 'section') {
     let top = id ? view.node(id) : undefined;
     while (top?.parent && top.parent !== page.rootId) top = view.node(top.parent);

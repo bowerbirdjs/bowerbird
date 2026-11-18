@@ -26,11 +26,12 @@ The working log for building Bowerbird phase by phase. Each phase ends with a re
 
 ## Phase 2: sections and safety
 
-- [ ] Linked components (definitions, instances, overrides, detach)
-- [ ] Draft changesets (propose, accept or reject per op)
-- [ ] Provenance (last editor per node) and protection of human edits
-- [ ] Rendered layout lint, layout snapshot and screenshot tools
-- [ ] Streaming op preview in the editor
+- [x] Linked components (symbols): `symbol.create/insert/detach/reset/update/remove`; definitions are node subtrees outside pages; definition edits sync to instances inside the same transaction, field by field, keeping overrides; instance structure is locked
+- [x] Draft changesets: `store.propose`, preview, accept or reject per op with dependencies; created ids pinned and rebased if taken; accepted changes attributed to the agent and approved by the person
+- [x] Provenance (`BNode.edited` stamps per field) and protection of people's edits (`protectHumanEdits: warn | confirm`); undo restores stamps
+- [x] Rendered layout: `@bowerbirdjs/layout` (measure, lint, compact format), `get_layout` and `screenshot` agent tools; Playwright provider in the MCP server, DOM provider in browsers
+- [x] Streaming op preview in the editor (`controller.showPreview`), review tab with per-op accept, linked-component UI (insert, make linked, edit definition, overrides, detach), "last changed by" in the inspector, image upload through an asset adapter
+- [x] MCP: `--review` and `--protect`, review panel in the live preview
 - [ ] Review pass and fixes
 
 ## Phase 3: collaboration and reach
@@ -50,5 +51,6 @@ The working log for building Bowerbird phase by phase. Each phase ends with a re
 - Phase 1 review fixes: tags validated at render time (stored documents could inject `<style>`/`<script>`); undo/redo/revert checked against the policy; editors release their store when removed and set up on first update (framework props apply first); React wrapper renders the element client-side only (hydration) and sets props only when they change; drag payloads tied to their editor and cleared on every dragend; keyboard shortcuts limited to canvas and layers and off in preview; ARIA tree keyboard navigation; focus kept in the editor after deletes; inline edits keep line breaks and don't overwrite concurrent changes; page/selection events kept in sync; preview widths clamped to breakpoint ranges; JSON fields for array/object props. Canvas: the page root starts from initial values (no inherited editor or host fonts), node rules outrank section rules as in published CSS, rem is converted to px, pseudo-elements and media are reset, chrome is scoped under `.bbx-host`; an e2e test compares editor and published computed styles. Showcase: API proxy limited to `POST /v1/messages` from loopback, Claude loop drops dangling tool calls and rolls back stopped requests, runs stop when leaving an event.
 - Host CSS isolation: editor-mode CSS starts with `all: revert` on content (except SVG, media and `[data-bb-code]` subtrees), at a specificity that host element and single-class rules can't beat; base, section and node rules come after it at the same specificity. Host `!important` and very specific host selectors can still leak.
 
+- Phase 2 notes: symbols can't contain other symbols yet (create and insert refuse nesting). Ops that create nodes without an explicit id (`node.duplicate`) may refer to different ids after a changeset is rebased. Only fields a person changed are protected, not everything they created (inserting a template section doesn't make its placeholder copy theirs). Deferred to Phase 3: host code components rendered by the wrappers, an extension API for custom fields and panels, section thumbnails, and a Svelte example.
 - No GitHub remote yet: `bowerbirdjs/bowerbird` must be created before pushing.
 - No model API key in this environment: the benchmark runner is tested with a scripted agent.

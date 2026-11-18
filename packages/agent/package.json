@@ -25,7 +25,8 @@
   },
   "dependencies": {
     "@bowerbirdjs/core": "workspace:*",
-    "zod": "^4.6.7",
-    "@bowerbirdjs/import": "workspace:*"
+    "@bowerbirdjs/import": "workspace:*",
+    "@bowerbirdjs/layout": "workspace:*",
+    "zod": "^4.6.7"
   }
 }

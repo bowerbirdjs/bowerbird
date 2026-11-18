@@ -30,7 +30,8 @@
     "@bowerbirdjs/blocks": "workspace:*",
     "@bowerbirdjs/agent": "workspace:*",
     "@modelcontextprotocol/sdk": "^1.32.2",
-    "zod": "^4.6.7"
+    "zod": "^4.6.7",
+    "@bowerbirdjs/layout": "workspace:*"
   },
   "bin": {
     "bowerbird-mcp": "./dist/cli.js"

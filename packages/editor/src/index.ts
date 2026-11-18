@@ -1,5 +1,10 @@
 export { CANVAS_CSS, CanvasView } from './canvas.js';
-export { EditorController, type EditorEvent, type Position } from './controller.js';
+export {
+  EditorController,
+  type EditorEvent,
+  type GhostPreview,
+  type Position,
+} from './controller.js';
 export {
   currentDrag,
   type DragPayload,
@@ -9,6 +14,11 @@ export {
   performDrop,
   startDrag,
 } from './dnd.js';
-export { BowerbirdEditor, createDefaultStore, type EditorChangeDetail } from './element.js';
+export {
+  type AssetAdapter,
+  BowerbirdEditor,
+  createDefaultStore,
+  type EditorChangeDetail,
+} from './element.js';
 export { type Field, type FieldKind, fieldsFor, fieldValue } from './schema-form.js';
 export { editorStyles } from './styles.js';

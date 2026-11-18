@@ -10,6 +10,11 @@ export const AGENT_GUIDE = `## How to edit this site
 - Sections: <name>-<n> (hero-1). Parts: hero-1/heading. Repeated items are keyed: features-1/item-2/title, pricing-1/tier-pro/price.
 - Ids are stable; moving a node keeps its id. Never guess ids: read them from the outline.
 
+## Symbols (linked components) and people's edits
+- An instance mirrors its symbol's definition (a subtree outside the pages, e.g. symbol-site-footer). Edit definition nodes to change every instance; props/styles set on an instance node are local overrides. Instance structure is fixed: change the definition, or symbol.detach first.
+- symbol.create turns a section into a symbol (it becomes the first instance); symbol.insert adds instances.
+- Outline marks "[edited by <name>]" where a person changed something. Don't overwrite their words or styling unless they asked; propose: true lets them review the change.
+
 ## Styling
 - Use design tokens, not raw values: var(--space-lg), var(--color-accent), var(--text-2xl). Call list_tokens to see them.
 - To rebrand, change the whole palette scale (e.g. color.brand.50…700): themes such as dark reference other steps of it.
@@ -30,4 +35,6 @@ export const AGENT_GUIDE = `## How to edit this site
 {"op":"node.remove","id":"features-1/item-6"}
 {"op":"node.insert","parent":"hero-1/actions","node":{"type":"link","props":{"text":"Docs","href":"/docs"}}}
 {"op":"token.set","path":"color.brand.600","value":"#0d9488"}
-{"op":"page.create","path":"/about","title":"About us"}`;
+{"op":"page.create","path":"/about","title":"About us"}
+{"op":"symbol.create","id":"footer-1","name":"Site footer"}
+{"op":"symbol.insert","symbol":"site-footer","page":"about"}`;

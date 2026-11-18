@@ -139,6 +139,59 @@ export const OpSchema = z.discriminatedUnion('op', [
   z.object({ op: z.literal('page.remove'), id: z.string() }).describe('Remove a page.'),
   z
     .object({
+      op: z.literal('symbol.create'),
+      id: Id.describe('Node to turn into a linked component; it becomes the first instance.'),
+      name: z.string().min(1).max(80),
+      symbol: z.string().optional().describe('Symbol id (default: from the name).'),
+      description: z.string().max(300).optional(),
+    })
+    .describe(
+      'Make a linked component (symbol) from a node and its subtree. Editing the definition updates every instance.',
+    ),
+  z
+    .object({
+      op: z.literal('symbol.insert'),
+      symbol: z.string().describe('Symbol id from get_context.'),
+      page: z.string().optional(),
+      parent: Id.optional(),
+      ...position,
+      content: z
+        .record(z.string(), Json)
+        .optional()
+        .describe('Props per part path, as local overrides, e.g. {"heading": {"text": "Hi"}}.'),
+      id: Id.optional(),
+    })
+    .describe('Insert an instance of a symbol.'),
+  z
+    .object({ op: z.literal('symbol.detach'), id: Id.describe('Instance root id.') })
+    .describe('Unlink an instance: its nodes stay but stop following the definition.'),
+  z
+    .object({ op: z.literal('symbol.reset'), id: Id })
+    .describe(
+      'Drop local overrides on an instance node and everything inside it, so it matches the definition again.',
+    ),
+  z
+    .object({
+      op: z.literal('symbol.update'),
+      symbol: z.string(),
+      name: z.string().min(1).max(80).optional(),
+      description: z.string().max(300).optional(),
+    })
+    .describe('Rename or describe a symbol.'),
+  z
+    .object({
+      op: z.literal('symbol.remove'),
+      symbol: z.string(),
+      instances: z
+        .enum(['detach', 'remove'])
+        .optional()
+        .describe(
+          'What happens to existing instances: keep them as ordinary nodes, or remove them.',
+        ),
+    })
+    .describe('Delete a symbol definition.'),
+  z
+    .object({
       op: z.literal('token.set'),
       path: z.string().describe('Token path, e.g. "color.brand.600".'),
       value: z.string().nullable().describe('CSS value or {alias}; null removes the token.'),
@@ -195,4 +248,60 @@ export function parseOps(input: unknown): { ops: Op[]; issues: Issue[] } {
     }
   });
   return { ops, issues };
+}
+
+/** One short line describing an op, for review lists: `props.set hero-1/heading text="Hi"`. */
+export function describeOp(op: Op): string {
+  const short = (v: unknown, n = 60) => {
+    const s = typeof v === 'string' ? JSON.stringify(v) : JSON.stringify(v ?? null);
+    return s.length > n ? `${s.slice(0, n - 1)}…` : s;
+  };
+  switch (op.op) {
+    case 'section.insert':
+      return `add ${op.section} section${op.parent ? ` in ${op.parent}` : ''}${op.after ? ` after ${op.after}` : op.before ? ` before ${op.before}` : ''}`;
+    case 'section.variant':
+      return `${op.id}: variant ${Object.entries(op.variant)
+        .map(([k, v]) => `${k}=${v}`)
+        .join(', ')}`;
+    case 'node.insert':
+      return `add ${op.node.type}${op.node.props?.text ? ` ${short(op.node.props.text)}` : ''} in ${op.parent}`;
+    case 'node.move':
+      return `move ${op.id}${op.parent ? ` into ${op.parent}` : ''}${op.after ? ` after ${op.after}` : op.before ? ` before ${op.before}` : ''}`;
+    case 'node.remove':
+      return `remove ${op.id}`;
+    case 'node.duplicate':
+      return `duplicate ${op.id}`;
+    case 'props.set':
+      return `${op.id}: ${Object.entries(op.props)
+        .map(([k, v]) => `${k}=${short(v)}`)
+        .join(', ')}`;
+    case 'text.edit':
+      return `${op.id}: replace ${short(op.find, 30)} with ${short(op.replace, 30)}`;
+    case 'style.set':
+      return `${op.id}: style ${op.css ?? ''}${op.remove?.length ? ` remove ${op.remove.join(', ')}` : ''}${op.bp ? ` (${op.bp})` : ''}`;
+    case 'vars.set':
+      return `${op.id}: ${Object.entries(op.vars)
+        .map(([k, v]) => `${k}=${v ?? 'default'}`)
+        .join(', ')}`;
+    case 'token.set':
+      return `token ${op.path}${op.theme ? ` (${op.theme})` : ''} = ${op.value ?? 'removed'}`;
+    case 'page.create':
+      return `new page ${op.path} ${short(op.title)}`;
+    case 'page.update':
+      return `page ${op.id}: ${[op.title && `title ${short(op.title)}`, op.path && `path ${op.path}`, op.description !== undefined && 'description'].filter(Boolean).join(', ')}`;
+    case 'page.remove':
+      return `remove page ${op.id}`;
+    case 'symbol.create':
+      return `make ${op.id} a linked component ${short(op.name)}`;
+    case 'symbol.insert':
+      return `add ${op.symbol} instance`;
+    case 'symbol.detach':
+      return `detach ${op.id}`;
+    case 'symbol.reset':
+      return `reset overrides on ${op.id}`;
+    case 'symbol.update':
+      return `rename ${op.symbol}${op.name ? ` to ${short(op.name)}` : ''}`;
+    case 'symbol.remove':
+      return `delete linked component ${op.symbol}`;
+  }
 }

@@ -1,4 +1,4 @@
-import { renderPage } from '@bowerbirdjs/html';
+import { renderPage, renderSubtree } from '@bowerbirdjs/html';
 import type { EditorController, EditorEvent } from './controller.js';
 import {
   currentDrag,
@@ -43,6 +43,14 @@ export const CANVAS_CSS = `
 .bbx-host .bbx-empty { padding: 64px 24px; text-align: center; font: 15px/1.5 system-ui, sans-serif; color: #64748b; }
 .bbx-host .bbx-content [contenteditable] { outline: 2px solid var(--bb-editor-accent, #4f46e5); outline-offset: 2px; cursor: text; }
 .bbx-host .bbx-content :is(a, button) { cursor: default; }
+.bbx-host .bbx-banner { position: sticky; top: 0; z-index: 2; display: flex; gap: 8px; align-items: center; justify-content: center;
+  margin: 0 auto; padding: 6px 12px; font: 600 12px/1.4 system-ui, sans-serif; color: #fff; background: #111827; }
+.bbx-host .bbx-banner[hidden] { display: none; }
+.bbx-host .bbx-banner.bbx-ghost-banner { background: #b45309; }
+.bbx-host .bbx-banner.bbx-symbol-banner { background: #7c3aed; }
+.bbx-host .bbx-mark { position: absolute; box-sizing: border-box; border-radius: 3px; pointer-events: none; }
+.bbx-host .bbx-mark.bbx-created { outline: 2px solid #16a34a; background: rgb(22 163 74 / .08); }
+.bbx-host .bbx-mark.bbx-updated { outline: 2px dashed #d97706; background: rgb(217 119 6 / .06); }
 `;
 
 const TOOLBAR: [action: string, label: string, glyph: string][] = [
@@ -75,6 +83,8 @@ export class CanvasView {
   private readonly selectLabel: HTMLElement;
   private readonly toolbar: HTMLElement;
   private readonly drop: HTMLElement;
+  private readonly banner: HTMLElement;
+  private readonly marks: HTMLElement;
   private readonly off: () => void;
   private readonly resize: ResizeObserver;
   private frameRequest = 0;
@@ -105,10 +115,14 @@ export class CanvasView {
     this.frame.setAttribute('aria-label', 'Page canvas');
     this.pageStyle = doc.createElement('style');
     this.frame.append(this.pageStyle);
+    this.banner = el('div', 'bbx-banner', this.frame);
+    this.banner.setAttribute('role', 'status');
+    this.banner.hidden = true;
     this.stage = el('div', 'bbx-stage', this.frame);
     this.viewport = el('div', 'bbx-viewport', this.stage);
     this.content = el('div', 'bbx-content', this.viewport);
     this.overlay = el('div', 'bbx-overlay', this.stage);
+    this.marks = el('div', 'bbx-marks', this.overlay);
     this.hoverBox = el('div', 'bbx-box bbx-hover', this.overlay);
     this.selectBox = el('div', 'bbx-box bbx-select', this.overlay);
     this.selectLabel = el('div', 'bbx-label', this.selectBox);
@@ -176,23 +190,60 @@ export class CanvasView {
   render(): void {
     this.needsRender = false;
     const c = this.controller;
+    const doc = c.viewDoc;
     const page = c.currentPage;
-    if (!page) {
+    const symbol = c.currentSymbol;
+    const canvasSelector = `[data-bb-canvas="${this.id}"]`;
+    let html: string;
+    let css: string;
+    let empty: boolean;
+    if (symbol && doc.nodes[symbol.rootId]) {
+      ({ html, css } = renderSubtree(doc, c.store.registry, symbol.rootId, {
+        mode: 'editor',
+        canvasSelector,
+      }));
+      empty = false;
+    } else if (page && doc.pages[page.id]) {
+      ({ html, css } = renderPage(doc, c.store.registry, page.id, {
+        mode: 'editor',
+        canvasSelector,
+      }));
+      empty = !Object.values(doc.nodes).some((n) => n.parent === page.rootId);
+    } else {
       this.content.innerHTML = '<div class="bbx-empty">This site has no pages yet.</div>';
+      this.updateBanner();
       return;
     }
-    const { html, css } = renderPage(c.doc, c.store.registry, page.id, {
-      mode: 'editor',
-      canvasSelector: `[data-bb-canvas="${this.id}"]`,
-    });
     this.pageStyle.textContent = css;
-    const empty = !c.store.view.children(page.rootId).length;
     this.content.innerHTML = empty
       ? `${html}<div class="bbx-empty">This page is empty. Add a section from the Insert panel, or drag one here.</div>`
       : html;
     if (c.theme) this.frame.setAttribute('data-theme', c.theme);
     else this.frame.removeAttribute('data-theme');
     this.frame.toggleAttribute('data-preview', c.preview);
+    this.updateBanner();
+  }
+
+  private updateBanner(): void {
+    const c = this.controller;
+    const ghost = c.ghost;
+    const symbol = c.currentSymbol;
+    this.banner.classList.toggle('bbx-ghost-banner', !!ghost);
+    this.banner.classList.toggle('bbx-symbol-banner', !ghost && !!symbol);
+    if (ghost) {
+      const parts = [
+        ghost.created.length && `${ghost.created.length} new`,
+        ghost.updated.length && `${ghost.updated.length} changed`,
+        ghost.removed.length && `${ghost.removed.length} removed`,
+      ].filter(Boolean);
+      this.banner.textContent = `${ghost.label}${parts.length ? ` · ${parts.join(', ')}` : ''} · not applied yet`;
+    } else if (symbol) {
+      const count = Object.values(c.doc.nodes).filter(
+        (n) => n.link?.symbol === symbol.id && n.link.node === symbol.rootId,
+      ).length;
+      this.banner.textContent = `Editing linked component “${symbol.name}”: changes apply to ${count} instance${count === 1 ? '' : 's'}`;
+    }
+    this.banner.hidden = !ghost && !symbol;
   }
 
   private layout(): void {
@@ -230,9 +281,41 @@ export class CanvasView {
     box.style.height = `${rect.height}px`;
   }
 
+  /** Outlines for the nodes a ghost preview creates (green) or changes (amber). */
+  private updateMarks(): void {
+    const ghost = this.controller.ghost;
+    const top = (ids: string[]) =>
+      ids.filter((id) => !ids.some((o) => o !== id && id.startsWith(`${o}/`)));
+    const wanted = ghost
+      ? [
+          ...top(ghost.created).map((id) => [id, 'bbx-created'] as const),
+          ...ghost.updated
+            .filter((id) => !ghost.created.includes(id))
+            .map((id) => [id, 'bbx-updated'] as const),
+        ].slice(0, 60)
+      : [];
+    const s = this.stage.getBoundingClientRect();
+    const doc = this.host.ownerDocument;
+    while (this.marks.children.length > wanted.length) this.marks.lastElementChild!.remove();
+    wanted.forEach(([id, kind], i) => {
+      const mark =
+        (this.marks.children[i] as HTMLElement | undefined) ??
+        this.marks.appendChild(doc.createElement('div'));
+      mark.className = `bbx-mark ${kind}`;
+      const rect = this.element(id)?.getBoundingClientRect();
+      mark.hidden = !rect;
+      if (!rect) return;
+      mark.style.left = `${rect.left - s.left - 2}px`;
+      mark.style.top = `${rect.top - s.top - 2}px`;
+      mark.style.width = `${rect.width + 4}px`;
+      mark.style.height = `${rect.height + 4}px`;
+    });
+  }
+
   updateOverlays(): void {
     const c = this.controller;
-    const showChrome = !c.preview;
+    this.updateMarks();
+    const showChrome = !c.readOnly;
     const hoverEl = showChrome && c.hovered !== c.selected ? this.element(c.hovered) : null;
     this.place(this.hoverBox, hoverEl?.getBoundingClientRect() ?? null);
     const selEl = showChrome ? this.element(c.selected) : null;
@@ -271,7 +354,7 @@ export class CanvasView {
     const c = this.controller;
     const content = this.content;
     content.addEventListener('pointermove', (e) => {
-      if (!c.preview && !this.editing) c.hover(this.idAt(e.target));
+      if (!c.readOnly && !this.editing) c.hover(this.idAt(e.target));
     });
     content.addEventListener('pointerleave', () => c.hover(null));
     content.addEventListener(
@@ -279,7 +362,7 @@ export class CanvasView {
       (e) => {
         if (this.editing && (e.target as Element).closest('[contenteditable]')) return;
         e.preventDefault();
-        if (c.preview) return;
+        if (c.readOnly) return;
         c.select(this.idAt(e.target));
         this.frame.focus({ preventScroll: true });
       },
@@ -288,7 +371,7 @@ export class CanvasView {
     content.addEventListener('submit', (e) => e.preventDefault(), true);
     content.addEventListener('dblclick', (e) => {
       const id = this.idAt(e.target);
-      if (id && !c.preview) this.startEditing(id);
+      if (id && !c.readOnly) this.startEditing(id);
     });
     this.frame.addEventListener('scroll', () => this.updateOverlays(), { passive: true });
 
@@ -311,7 +394,7 @@ export class CanvasView {
 
     this.frame.addEventListener('dragover', (e) => {
       const payload = currentDrag(e, c);
-      if (!payload || c.preview) return;
+      if (!payload || c.readOnly) return;
       const target = dropTarget(c, payload, e.target as Element, e.clientX, e.clientY, content);
       this.dropTargetState = target;
       if (target) {
@@ -344,7 +427,13 @@ export class CanvasView {
     const c = this.controller;
     const node = c.node(id);
     const el = this.element(id);
-    if (c.preview || !node || !el || !TEXT_TYPES.has(node.type) || c.store.view.children(id).length)
+    if (
+      c.readOnly ||
+      !node ||
+      !el ||
+      !TEXT_TYPES.has(node.type) ||
+      c.store.view.children(id).length
+    )
       return false;
     if (this.editing) this.finishEditing(true);
     const original = typeof node.props.text === 'string' ? node.props.text : '';

@@ -264,6 +264,8 @@ editor.registry.component({
   - HTML export.
 - **`examples/`:** minimal embeds in plain HTML, Vue and Svelte, which prove decision 1, plus one deliberately "hostile CSS" host page to test isolation.
 
+> **Phase 2 as built:** see [`progress.md`](progress.md). Linked components are stored as linked copies (every instance node points at its definition node) rather than as references expanded at render time, so ids, selection, CSS and every existing op keep working on instances.
+
 Phases 2–3 are unchanged from the landscape document: linked components, draft changesets, provenance protection, screenshots and layout snapshots for agents, Yjs collaboration with agent presence, Tiptap rich text, i18n, data binding, importers (Puck, HTML, Tailwind) and interop (json-render/A2UI catalog export, MCP Apps view, AG-UI).
 
 ---

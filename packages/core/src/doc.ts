@@ -1,10 +1,20 @@
 import { compareOrder } from './order.js';
-import type { BNode, Breakpoint, NodeId, Page, PageId, SiteDoc, TokenTree } from './types.js';
+import type {
+  BNode,
+  Breakpoint,
+  NodeId,
+  Page,
+  PageId,
+  SiteDoc,
+  SymbolDef,
+  TokenTree,
+} from './types.js';
 import { ensureIn, own } from './util.js';
 
 /** Read access to a document, implemented by committed docs (`DocIndex`) and drafts. */
 export interface DocView {
   node(id: NodeId): BNode | undefined;
+  nodeIds(): NodeId[];
   /** Children of a node, in order. */
   children(id: NodeId): BNode[];
   page(id: PageId): Page | undefined;
@@ -12,6 +22,8 @@ export interface DocView {
   breakpoints(): Breakpoint[];
   tokens(): TokenTree;
   themes(): Record<string, Record<string, string>>;
+  symbol(id: string): SymbolDef | undefined;
+  symbols(): SymbolDef[];
 }
 
 export const DEFAULT_BREAKPOINTS: Breakpoint[] = [
@@ -59,6 +71,10 @@ export class DocIndex implements DocView {
     return own(this.doc.nodes, id);
   }
 
+  nodeIds(): NodeId[] {
+    return Object.keys(this.doc.nodes);
+  }
+
   children(id: NodeId): BNode[] {
     const ids = this.childIndex.get(id);
     if (!ids) return [];
@@ -83,6 +99,14 @@ export class DocIndex implements DocView {
 
   themes() {
     return this.doc.themes;
+  }
+
+  symbol(id: string) {
+    return own(this.doc.symbols ?? {}, id);
+  }
+
+  symbols() {
+    return Object.values(this.doc.symbols ?? {});
   }
 }
 
@@ -153,4 +177,35 @@ export function pageNodes(view: DocView, pageId: PageId): BNode[] {
   const page = view.page(pageId);
   const root = page && view.node(page.rootId);
   return root ? [root, ...descendants(view, root.id)] : [];
+}
+
+/** The parentless node at the top of `id`'s tree (a page root or a symbol definition root). */
+export function rootOf(view: DocView, id: NodeId): BNode | undefined {
+  const self = view.node(id);
+  if (!self || self.parent === null) return self;
+  return ancestors(view, id).at(-1);
+}
+
+/** The symbol whose definition contains `id`, if any. */
+export function definitionOf(view: DocView, id: NodeId): SymbolDef | undefined {
+  const root = rootOf(view, id);
+  return root?.symbol ? view.symbol(root.symbol) : undefined;
+}
+
+/** True for the root node of a symbol instance. */
+export function isInstanceRoot(view: DocView, node: BNode | undefined): boolean {
+  return !!node?.link && view.symbol(node.link.symbol)?.rootId === node.link.node;
+}
+
+/** The root of the symbol instance that contains `id` (or is `id`). */
+export function instanceRootOf(view: DocView, id: NodeId): BNode | undefined {
+  const self = view.node(id);
+  if (!self?.link) return undefined;
+  if (isInstanceRoot(view, self)) return self;
+  return ancestors(view, id).find((a) => isInstanceRoot(view, a));
+}
+
+/** Nodes that start a new id scope: section roots, keyed items, and symbol roots. */
+export function isScopeOwner(view: DocView, node: BNode): boolean {
+  return !!(node.section || node.key || node.symbol || isInstanceRoot(view, node));
 }

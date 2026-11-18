@@ -11,6 +11,7 @@ import {
   type SiteDoc,
 } from '@bowerbirdjs/core';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import { createPlaywrightLayoutProvider, hasPlaywright } from './browser.js';
 import { type PreviewServer, startPreview } from './preview.js';
 import { createMcpServer } from './server.js';
 
@@ -23,6 +24,9 @@ Options:
       --no-preview        Don't start the preview server
       --allow-raw         Allow raw CSS values (px, hex colours) instead of tokens only
       --agent-level <l>   Limit agents to content | layout | design | code (default code)
+      --review            Agents propose changes; accept or reject them in the preview
+      --protect <mode>    People's edits vs agents: warn (default) | confirm | off
+      --no-browser        Don't offer get_layout/screenshot (they need Playwright)
   -h, --help              Show this help
 
 Example (Claude Code):
@@ -39,6 +43,9 @@ async function main() {
       'no-preview': { type: 'boolean', default: false },
       'allow-raw': { type: 'boolean', default: false },
       'agent-level': { type: 'string' },
+      review: { type: 'boolean', default: false },
+      protect: { type: 'string' },
+      'no-browser': { type: 'boolean', default: false },
       help: { type: 'boolean', short: 'h', default: false },
     },
   });
@@ -49,6 +56,11 @@ async function main() {
   const level = values['agent-level'] as FreedomLevel | undefined;
   if (level && !['content', 'layout', 'design', 'code'].includes(level)) {
     throw new Error(`--agent-level must be content, layout, design or code (got "${level}").`);
+  }
+
+  const protect = values.protect as 'warn' | 'confirm' | 'off' | undefined;
+  if (protect && !['warn', 'confirm', 'off'].includes(protect)) {
+    throw new Error(`--protect must be warn, confirm or off (got "${protect}").`);
   }
 
   let doc: SiteDoc;
@@ -68,6 +80,8 @@ async function main() {
     policy: createPolicy({
       allowRawValues: values['allow-raw'],
       ...(level ? { levels: { agent: level } } : {}),
+      ...(values.review ? { review: { agent: true } } : {}),
+      ...(protect ? { protectHumanEdits: protect } : {}),
     }),
   });
   if (!Object.keys(store.doc.pages).length) {
@@ -112,7 +126,16 @@ async function main() {
     log(`live preview at ${preview.url}`);
   }
 
-  const server = createMcpServer({ store, previewUrl: () => preview?.url });
+  const layout =
+    !values['no-browser'] && hasPlaywright() ? createPlaywrightLayoutProvider(store) : undefined;
+  if (!layout && !values['no-browser'])
+    log('Playwright not found: get_layout and screenshot are off (npm i -D playwright to enable)');
+
+  const server = createMcpServer({
+    store,
+    previewUrl: () => preview?.url,
+    ...(layout ? { layout } : {}),
+  });
   await server.connect(new StdioServerTransport());
   log('MCP server ready on stdio');
 
@@ -120,6 +143,7 @@ async function main() {
     clearTimeout(timer);
     await save().catch(() => undefined);
     await preview?.close();
+    await layout?.close().catch(() => undefined);
     process.exit(0);
   };
   process.on('SIGINT', shutdown);

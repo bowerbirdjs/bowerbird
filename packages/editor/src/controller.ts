@@ -2,13 +2,17 @@ import {
   type Actor,
   type ApplyResult,
   type BNode,
+  type Changeset,
   type CommitEvent,
+  definitionOf,
   type Issue,
   LOCAL_USER,
   type NodeInput,
   type Page,
   pageOf,
+  type SiteDoc,
   type Store,
+  type SymbolDef,
   sectionRootOf,
 } from '@bowerbirdjs/core';
 
@@ -18,7 +22,22 @@ export type EditorEvent =
   | { type: 'view' }
   | { type: 'commit'; event: CommitEvent }
   | { type: 'store' }
+  | { type: 'changesets'; changesets: readonly Changeset[] }
   | { type: 'error'; errors: Issue[]; label?: string };
+
+/**
+ * Changes shown on the canvas without being applied: an agent's ops while they stream in, or a
+ * proposed changeset under review. The canvas renders `doc` read-only and highlights changes.
+ */
+export interface GhostPreview {
+  doc: SiteDoc;
+  created: string[];
+  updated: string[];
+  removed: string[];
+  label: string;
+  /** Re-runs the preview against the current document (after other people's edits). */
+  refresh(): GhostPreview | null;
+}
 
 export interface Position {
   parent?: string;
@@ -46,6 +65,10 @@ export class EditorController {
   theme: string | null = null;
   /** Hides overlays and disables editing gestures. */
   preview = false;
+  /** When set, the canvas shows this symbol's definition instead of a page. */
+  symbolView: string | null = null;
+  /** Unapplied changes shown on the canvas (read-only while shown). */
+  ghost: GhostPreview | null = null;
   private readonly listeners = new Set<(event: EditorEvent) => void>();
   private unsubscribe: () => void;
 
@@ -60,9 +83,13 @@ export class EditorController {
   private listen(store: Store): () => void {
     const offCommit = store.subscribe((event) => this.onCommit(event));
     const offLoad = store.onLoad(() => this.reset());
+    const offChangesets = store.onChangesets((changesets) =>
+      this.emit({ type: 'changesets', changesets }),
+    );
     return () => {
       offCommit();
       offLoad();
+      offChangesets();
     };
   }
 
@@ -88,6 +115,8 @@ export class EditorController {
   private onCommit(event: CommitEvent): void {
     const pageGone = !this.store.doc.pages[this.page];
     if (pageGone) this.page = this.firstPage();
+    if (this.symbolView && !this.store.doc.symbols?.[this.symbolView]) this.symbolView = null;
+    if (this.ghost) this.ghost = this.ghost.refresh();
     const lostSelection = !!this.selected && !this.store.doc.nodes[this.selected];
     if (lostSelection) this.selected = null;
     if (this.hovered && !this.store.doc.nodes[this.hovered]) this.hovered = null;
@@ -107,6 +136,8 @@ export class EditorController {
   private reset(): void {
     const store = this.store;
     this.page = store.doc.pages[this.page] ? this.page : this.firstPage();
+    this.symbolView = null;
+    this.ghost = null;
     const hadSelection = this.selected !== null;
     this.selected = null;
     this.hovered = null;
@@ -133,6 +164,25 @@ export class EditorController {
     return this.store.doc.pages[this.page];
   }
 
+  /** The document the canvas shows: the ghost preview if one is active. */
+  get viewDoc(): SiteDoc {
+    return this.ghost?.doc ?? this.store.doc;
+  }
+
+  get currentSymbol(): SymbolDef | undefined {
+    return this.symbolView ? this.store.doc.symbols?.[this.symbolView] : undefined;
+  }
+
+  /** Root of what the canvas shows: the page root, or a symbol definition's root. */
+  get currentRootId(): string | undefined {
+    return this.currentSymbol?.rootId ?? this.currentPage?.rootId;
+  }
+
+  /** Editing gestures are off in preview mode and while a ghost preview is shown. */
+  get readOnly(): boolean {
+    return this.preview || !!this.ghost;
+  }
+
   node(id: string | null | undefined): BNode | undefined {
     return id ? this.store.doc.nodes[id] : undefined;
   }
@@ -141,8 +191,10 @@ export class EditorController {
     return this.node(this.selected);
   }
 
+  /** Page roots (not selectable). Symbol definition roots are selectable in the definition view. */
   isRoot(id: string): boolean {
-    return this.store.doc.nodes[id]?.parent === null;
+    const n = this.store.doc.nodes[id];
+    return n?.parent === null && !n.symbol;
   }
 
   sectionOf(id: string): BNode | undefined {
@@ -173,9 +225,14 @@ export class EditorController {
   select(id: string | null): void {
     const next = id && this.store.doc.nodes[id] && !this.isRoot(id) ? id : null;
     if (next) {
-      const page = pageOf(this.store.view, next);
-      if (!page) return;
-      if (page.id !== this.page) this.setPage(page.id);
+      const symbol = definitionOf(this.store.view, next);
+      if (symbol) {
+        if (symbol.id !== this.symbolView) this.editSymbol(symbol.id);
+      } else {
+        const page = pageOf(this.store.view, next);
+        if (!page) return;
+        if (page.id !== this.page || this.symbolView) this.setPage(page.id);
+      }
     }
     if (next === this.selected) return;
     this.selected = next;
@@ -190,11 +247,81 @@ export class EditorController {
   }
 
   setPage(id: string): void {
-    if (!this.store.doc.pages[id] || id === this.page) return;
+    if (!this.store.doc.pages[id] || (id === this.page && !this.symbolView)) return;
     this.page = id;
+    this.symbolView = null;
     this.selected = null;
     this.emit({ type: 'view' });
     this.emit({ type: 'selection', id: null });
+  }
+
+  /** Shows a symbol's definition on the canvas; edits there update every instance. */
+  editSymbol(id: string): void {
+    if (!this.store.doc.symbols?.[id] || id === this.symbolView) return;
+    this.symbolView = id;
+    this.selected = null;
+    this.emit({ type: 'view' });
+    this.emit({ type: 'selection', id: null });
+  }
+
+  /**
+   * Shows ops on the canvas without applying them (e.g. an agent's change while it streams in).
+   * Invalid ops keep the last valid preview; `null` clears it. Returns the simulation result.
+   */
+  showPreview(
+    ops: unknown[] | null,
+    options: { actor?: Actor; label?: string } = {},
+  ): ApplyResult | undefined {
+    if (!ops?.length) {
+      this.clearPreview();
+      return undefined;
+    }
+    const actor = options.actor ?? this.actor;
+    const label = options.label ?? `${actor.name ?? actor.id} is editing…`;
+    let last: ApplyResult | undefined;
+    const make = (): GhostPreview | null => {
+      const { result, doc } = this.store.simulate({ ops, actor });
+      last = result;
+      if (!result.ok || !doc) return null;
+      return { doc, ...result.summary, label, refresh: make };
+    };
+    const ghost = make();
+    if (ghost) {
+      this.ghost = ghost;
+      this.emit({ type: 'view' });
+    }
+    return last;
+  }
+
+  /** Shows a changeset (or some of its ops) applied, without accepting it. */
+  previewChangeset(id: string, ops?: number[]): ApplyResult {
+    let last: ApplyResult | undefined;
+    const make = (): GhostPreview | null => {
+      const cs = this.store.changeset(id);
+      const { result, doc } = this.store.previewChangeset(id, ops);
+      last = result;
+      if (!result.ok || !doc || !cs) return null;
+      return {
+        doc,
+        ...result.summary,
+        label: `Preview of ${cs.label ?? cs.id} by ${cs.actor.name ?? cs.actor.id}`,
+        refresh: () => (this.store.changeset(id)?.status.includes('open') ? make() : null),
+      };
+    };
+    const ghost = make();
+    const result = last!;
+    if (!result.ok) this.emit({ type: 'error', errors: result.errors, label: 'Preview' });
+    if (ghost) {
+      this.ghost = ghost;
+      this.emit({ type: 'view' });
+    }
+    return result;
+  }
+
+  clearPreview(): void {
+    if (!this.ghost) return;
+    this.ghost = null;
+    this.emit({ type: 'view' });
   }
 
   setBreakpoint(id: string): void {
@@ -228,6 +355,19 @@ export class EditorController {
     if (!result.ok)
       this.emit({ type: 'error', errors: result.errors, ...(label ? { label } : {}) });
     return result;
+  }
+
+  acceptChangeset(id: string, ops?: number[]): ApplyResult {
+    this.clearPreview();
+    const result = this.store.acceptChangeset(id, { by: this.actor, ...(ops ? { ops } : {}) });
+    if (!result.ok) this.emit({ type: 'error', errors: result.errors, label: 'Accept changes' });
+    return result;
+  }
+
+  rejectChangeset(id: string, ops?: number[]): void {
+    this.clearPreview();
+    const result = this.store.rejectChangeset(id, { by: this.actor, ...(ops ? { ops } : {}) });
+    if (!result.ok) this.emit({ type: 'error', errors: result.errors, label: 'Reject changes' });
   }
 
   /** Undoes the latest change by another actor (e.g. an agent), as this editor's actor. */
@@ -264,7 +404,7 @@ export class EditorController {
     variant?: Record<string, string>,
   ) {
     const page = this.currentPage;
-    if (!page) return undefined;
+    if (!page || (this.symbolView && !position.parent)) return undefined;
     const result = this.apply(
       [
         {
@@ -385,6 +525,43 @@ export class EditorController {
 
   setVars(id: string, vars: Record<string, string | null>) {
     return this.apply([{ op: 'vars.set', id, vars }], 'Style');
+  }
+
+  /** Inserts an instance of a symbol where a section would go. */
+  insertSymbol(symbol: string, position: Position = this.defaultSectionPosition()) {
+    const page = this.currentPage;
+    if (!page || this.symbolView) return undefined;
+    const result = this.apply(
+      [
+        {
+          op: 'symbol.insert',
+          symbol,
+          ...(position.parent ? { parent: position.parent } : { page: page.id }),
+          ...(position.before ? { before: position.before } : {}),
+          ...(position.after ? { after: position.after } : {}),
+        },
+      ],
+      `Add ${this.store.doc.symbols?.[symbol]?.name ?? symbol}`,
+    );
+    if (result.ok) {
+      const root = result.summary.created.find(
+        (id) => this.node(id)?.parent === (position.parent ?? page.rootId),
+      );
+      if (root) this.select(root);
+    }
+    return result;
+  }
+
+  createSymbol(id: string, name: string) {
+    return this.apply([{ op: 'symbol.create', id, name }], `Make "${name}" a linked component`);
+  }
+
+  detachInstance(id: string) {
+    return this.apply([{ op: 'symbol.detach', id }], 'Detach instance');
+  }
+
+  resetOverrides(id: string) {
+    return this.apply([{ op: 'symbol.reset', id }], 'Reset overrides');
   }
 
   setVariant(id: string, variant: Record<string, string>) {

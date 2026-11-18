@@ -88,7 +88,23 @@ export const editorStyles = css`
     width: 100%; border: 1px solid var(--border); border-radius: 6px; padding: 5px 7px; background: var(--bg);
   }
   .field textarea { resize: vertical; min-height: 64px; }
-  .row-inline { display: flex; gap: 6px; align-items: center; }
+  .row-inline { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+  .icon-btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .icon-btn.primary:disabled { opacity: .5; }
+  .count { display: inline-grid; place-items: center; min-width: 16px; height: 16px; padding: 0 4px; border-radius: 999px;
+    background: #b45309; color: #fff; font-size: 10px; font-weight: 700; }
+  .card.linked { border-color: color-mix(in srgb, #7c3aed 35%, var(--border)); }
+  .linked-panel h3 { color: #7c3aed; }
+  .override { color: #7c3aed; font-size: 10px; }
+  .provenance { margin: 6px 0 0; font-size: 12px; }
+  .upload { display: inline-block; margin-top: 6px; font-size: 12px; color: var(--accent); cursor: pointer; }
+  .upload input { position: absolute; width: 1px; height: 1px; opacity: 0; }
+  .upload:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+  .changeset .ops { list-style: none; margin: 8px 0; padding: 0; display: grid; gap: 4px; }
+  .changeset .ops label { display: flex; gap: 6px; align-items: flex-start; font-size: 12px; }
+  .changeset .ops span { overflow-wrap: anywhere; }
+  .changeset .notes { margin: 0 0 8px; padding-left: 16px; color: #b45309; font-size: 12px; }
+  .badge.actor.agent { background: #fef3c7; color: #92400e; }
   .row-inline > * { min-width: 0; }
   .decl { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr) auto; gap: 4px; align-items: center; margin-bottom: 4px; }
   .decl code { font-size: 12px; overflow: hidden; text-overflow: ellipsis; }

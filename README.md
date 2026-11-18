@@ -4,7 +4,7 @@
 
 Bowerbird is a page engine you embed in your own product. Pages are built from large, prebuilt sections (hero, pricing, footer …) that stay fully editable inside. People edit on a visual canvas; AI agents edit through a typed API and MCP. Both go through the same validated, attributed and undoable operations. Styles use CSS custom properties and design tokens, so the output is plain HTML and CSS and stays on-brand.
 
-> **Status: early (Phase 1).** The headless engine, starter sections, HTML/CSS renderer, agent tools, MCP server and the visual editor (`<bowerbird-editor>`, with React and Vue wrappers) work. Linked components, draft changesets and visual tools for agents come next. See [`docs/plan.md`](docs/plan.md) and [`docs/progress.md`](docs/progress.md).
+> **Status: early (Phase 2).** The headless engine, starter sections, HTML/CSS renderer, agent tools, MCP server and the visual editor (`<bowerbird-editor>`, with React and Vue wrappers) work, plus linked components, reviewable agent proposals, protection of people's edits and rendered-layout checks for agents. Real-time collaboration, rich text and code export come next. See [`docs/plan.md`](docs/plan.md) and [`docs/progress.md`](docs/progress.md).
 
 ## See it
 
@@ -30,6 +30,10 @@ claude mcp add bowerbird -- node "$PWD/packages/mcp/dist/cli.js" --file my-site.
 ```
 
 The server prints a live preview URL (default http://localhost:4321) that reloads as the agent works. Add `?theme=dark` to preview the dark theme.
+
+- `--review`: the agent's changes become proposals; accept or reject them op by op in the preview (`?changeset=cs-1` previews one).
+- `--protect confirm`: the agent must ask before changing text or styles a person edited (default `warn`).
+- With [Playwright](https://playwright.dev) installed (`npm i -D playwright && npx playwright install chromium`), agents also get `get_layout` (box positions plus overflow, overlap, contrast and tap-target checks) and `screenshot`.
 
 To run the scripted end-to-end check (a real MCP client building a page over stdio), optionally with screenshots:
 
@@ -98,20 +102,21 @@ const html = renderDocument(store.doc, store.registry, 'home');
 
 ## Packages
 
-| Package                                  | What it does                                                                                                                    |
-| ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| [`@bowerbirdjs/core`](packages/core)     | Document model, operations, validation, transactions, per-actor undo/redo, policy (freedom levels, locks), outline              |
-| [`@bowerbirdjs/css`](packages/css)       | Tokens → CSS variables; section and node styles → CSS with container-query breakpoints (published or editor mode)               |
-| [`@bowerbirdjs/html`](packages/html)     | Pages → semantic HTML (escaped, URL-sanitised)                                                                                  |
-| [`@bowerbirdjs/blocks`](packages/blocks) | Default design tokens, dark theme and starter sections                                                                          |
-| [`@bowerbirdjs/import`](packages/import) | HTML → nodes (sanitised; keeps token-based inline styles)                                                                       |
-| [`@bowerbirdjs/agent`](packages/agent)   | Agent tools (`get_context`, `get_outline`, `get_nodes`, `list_sections`, `list_tokens`, `apply`, `import_html`, `lint`, `undo`) |
-| [`@bowerbirdjs/mcp`](packages/mcp)       | MCP server (stdio), live preview server, CLI with file persistence                                                              |
-| [`@bowerbirdjs/editor`](packages/editor) | `<bowerbird-editor>` (Lit): same-document canvas, overlays, inline editing, drag and drop, layers, insert, inspector, history   |
-| [`@bowerbirdjs/react`](packages/react)   | React wrapper                                                                                                                   |
-| [`@bowerbirdjs/vue`](packages/vue)       | Vue wrapper                                                                                                                     |
-| [`bench`](bench)                         | PageBench: page-editing tasks for agents, with a Claude runner and a scripted offline mode                                      |
-| [`apps/showcase`](apps/showcase)         | Demo product embedding the editor with an assistant panel                                                                       |
+| Package                                  | What it does                                                                                                                                                |
+| ---------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [`@bowerbirdjs/core`](packages/core)     | Document model, operations, validation, transactions, per-actor undo/redo, policy (freedom levels, locks), outline                                          |
+| [`@bowerbirdjs/css`](packages/css)       | Tokens → CSS variables; section and node styles → CSS with container-query breakpoints (published or editor mode)                                           |
+| [`@bowerbirdjs/html`](packages/html)     | Pages → semantic HTML (escaped, URL-sanitised)                                                                                                              |
+| [`@bowerbirdjs/blocks`](packages/blocks) | Default design tokens, dark theme and starter sections                                                                                                      |
+| [`@bowerbirdjs/import`](packages/import) | HTML → nodes (sanitised; keeps token-based inline styles)                                                                                                   |
+| [`@bowerbirdjs/agent`](packages/agent)   | Agent tools (`get_context`, `get_outline`, `get_nodes`, `list_sections`, `list_tokens`, `apply`, `import_html`, `lint`, `undo`, `get_layout`, `screenshot`) |
+| [`@bowerbirdjs/layout`](packages/layout) | Rendered-layout snapshots and layout lint (overflow, clipping, overlap, contrast, tap targets), in the browser or headless                                  |
+| [`@bowerbirdjs/mcp`](packages/mcp)       | MCP server (stdio), live preview server, CLI with file persistence                                                                                          |
+| [`@bowerbirdjs/editor`](packages/editor) | `<bowerbird-editor>` (Lit): same-document canvas, overlays, inline editing, drag and drop, layers, insert, inspector, history                               |
+| [`@bowerbirdjs/react`](packages/react)   | React wrapper                                                                                                                                               |
+| [`@bowerbirdjs/vue`](packages/vue)       | Vue wrapper                                                                                                                                                 |
+| [`bench`](bench)                         | PageBench: page-editing tasks for agents, with a Claude runner and a scripted offline mode                                                                  |
+| [`apps/showcase`](apps/showcase)         | Demo product embedding the editor with an assistant panel                                                                                                   |
 
 ## Core ideas
 
@@ -119,7 +124,10 @@ const html = renderDocument(store.doc, store.registry, 'home');
 - **Big blocks you can open.** Inserting a section expands it into ordinary nodes with stable, readable ids (`hero-1/heading`, `pricing-1/tier-pro/price`). Agents fill a whole section in one op, then edit any part precisely.
 - **Errors agents can act on.** Every error names the node, the field and the fix: `No node "hero-1/headline". Did you mean "hero-1/heading"?`
 - **On-brand by default.** Styles are CSS declarations that must use design-token variables (`var(--space-lg)`) unless the host allows raw values. Sections expose their own CSS variables (`--hero-bg`) as style knobs.
-- **Human edits are protected.** Undo is per actor and three-way: undoing an agent's change keeps later edits by people.
+- **Human edits are protected.** Every field records who changed it last. Agents are warned (or stopped, if the host prefers) before overwriting what a person wrote, and undo is per actor and three-way: undoing an agent's change keeps later edits by people.
+- **Agents can propose instead of apply.** A changeset is validated and previewed on the canvas; a person accepts or rejects it op by op, and accepted changes stay attributed to the agent.
+- **Linked components.** Turn a section into a symbol; edit its definition once and every instance follows, except fields an instance overrides.
+- **Agents can see the result.** `get_layout` lays the page out at any width and reports problems the document can't show (overflow, clipped text, low contrast); `screenshot` returns an image.
 - **Framework-free output.** Plain HTML and one CSS file with cascade layers; breakpoints are container queries, so sections respond correctly in any container.
 
 ## Development

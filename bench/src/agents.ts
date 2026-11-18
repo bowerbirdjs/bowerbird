@@ -1,5 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk';
-import { type AgentTool, runTool, toolDefinitions } from '@bowerbirdjs/agent';
+import { type AgentTool, runTool, toolDefinitions, toolResultContent } from '@bowerbirdjs/agent';
 import type { Store } from '@bowerbirdjs/core';
 import type { AgentRun, BenchTask, Usage } from './types.js';
 
@@ -113,12 +113,12 @@ export function claudeAgent(options: ClaudeAgentOptions = {}): BenchAgent {
         for (const block of response.content) {
           if (block.type !== 'tool_use') continue;
           toolCalls++;
-          const result = runTool(env.tools, block.name, block.input);
+          const result = await runTool(env.tools, block.name, block.input);
           if (result.isError) toolErrors++;
           results.push({
             type: 'tool_result',
             tool_use_id: block.id,
-            content: result.text,
+            content: toolResultContent(result),
             ...(result.isError ? { is_error: true } : {}),
           });
         }
@@ -156,7 +156,7 @@ export function scriptedAgent(scripts: Record<string, ScriptedCall[]>): BenchAge
       let toolErrors = 0;
       const calls = scripts[task.id] ?? [];
       for (const call of calls) {
-        if (runTool(env.tools, call.tool, call.input ?? {}).isError) toolErrors++;
+        if ((await runTool(env.tools, call.tool, call.input ?? {})).isError) toolErrors++;
       }
       return {
         turns: calls.length,

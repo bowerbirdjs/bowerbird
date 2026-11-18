@@ -47,6 +47,9 @@ importers:
       '@bowerbirdjs/html':
         specifier: workspace:*
         version: link:../../packages/html
+      '@bowerbirdjs/layout':
+        specifier: workspace:*
+        version: link:../../packages/layout
       '@bowerbirdjs/react':
         specifier: workspace:*
         version: link:../../packages/react
@@ -129,6 +132,9 @@ importers:
       '@bowerbirdjs/import':
         specifier: workspace:*
         version: link:../import
+      '@bowerbirdjs/layout':
+        specifier: workspace:*
+        version: link:../layout
       zod:
         specifier: ^4.6.7
         version: 4.6.7
@@ -200,6 +206,18 @@ importers:
         specifier: ^12.0.0
         version: 12.0.0
 
+  packages/layout:
+    dependencies:
+      '@bowerbirdjs/core':
+        specifier: workspace:*
+        version: link:../core
+      '@bowerbirdjs/css':
+        specifier: workspace:*
+        version: link:../css
+      '@bowerbirdjs/html':
+        specifier: workspace:*
+        version: link:../html
+
   packages/mcp:
     dependencies:
       '@bowerbirdjs/agent':
@@ -217,6 +235,9 @@ importers:
       '@bowerbirdjs/html':
         specifier: workspace:*
         version: link:../html
+      '@bowerbirdjs/layout':
+        specifier: workspace:*
+        version: link:../layout
       '@modelcontextprotocol/sdk':
         specifier: ^1.32.2
         version: 1.32.2(zod@4.6.7)

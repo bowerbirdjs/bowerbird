@@ -170,6 +170,35 @@ export function renderPage(
   return { page, html, css };
 }
 
+/**
+ * Renders one node's subtree (e.g. a symbol definition, which is on no page) inside a page root
+ * element, so section CSS, base styles and container queries apply as they do on a page.
+ */
+export function renderSubtree(
+  doc: SiteDoc,
+  registry: Registry,
+  rootId: string,
+  options: RenderOptions = {},
+): { html: string; css: string } {
+  const view = new DocIndex(doc);
+  const root = view.node(rootId);
+  if (!root) throw new Error(`No node "${rootId}".`);
+  const mode = options.mode ?? 'published';
+  const ctx: Ctx = {
+    view,
+    registry,
+    mode,
+    nodeIds: options.nodeIds ?? (mode === 'editor' ? 'all' : 'styled'),
+  };
+  const html = `<div class="bb-page">\n${renderNode(ctx, root, undefined)}\n</div>`;
+  const css = compileCss(doc, registry, {
+    mode,
+    root: rootId,
+    ...(options.canvasSelector ? { canvasSelector: options.canvasSelector } : {}),
+  });
+  return { html, css };
+}
+
 export interface DocumentOptions extends RenderOptions {
   lang?: string;
   /** Sets `data-theme` on `<html>`. */

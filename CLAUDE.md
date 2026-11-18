@@ -17,7 +17,9 @@ An embeddable, agent-first visual page editor. Read `docs/plan.md` for decisions
 - **Every document change goes through `Store.apply` ops.** Don't mutate `SiteDoc` directly; add a new op (Zod schema in `core/src/ops.ts`, handler in `core/src/apply.ts`, policy level in `core/src/policy.ts`) if needed.
 - Transactions are all-or-nothing. Handlers report problems with `fail(ctx, issue)` and never throw for user or agent errors.
 - **Error messages are part of the API.** Say what's wrong, where (node id and path), and how to fix it (`hint`, `didYouMean`). Agents read them.
-- Ids are readable and stable (`hero-1/heading`). Only section roots and keyed items (`item-2`, `tier-pro`) add an id scope.
+- Ids are readable and stable (`hero-1/heading`). Only section roots, keyed items (`item-2`, `tier-pro`) and symbol roots add an id scope.
+- Transactions run in this order (`Store.run`): ops → human-edit protection (agents) → symbol instance sync (`core/src/symbols.ts`) → provenance stamps (`core/src/provenance.ts`) on commit. Undo/redo replay record changes and are checked with `Policy.checkChanges`.
+- Symbol instances are linked copies (`BNode.link`); their structure only changes through the definition (ops refuse with code `instance`).
 - Styles are CSS declarations validated against design tokens; raw values need policy permission. Never store Tailwind classes.
 - Published HTML is light DOM, escaped and URL-sanitised; no scripts in output.
 - Editor: the canvas is light DOM in the host document (no iframe; nothing editable inside a shadow root). Only the panels use the element's shadow root. Canvas chrome classes start with `bbx-` and are scoped under `.bbx-host`.

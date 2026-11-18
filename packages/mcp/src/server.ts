@@ -1,5 +1,6 @@
 import { createAgentTools } from '@bowerbirdjs/agent';
 import { type Actor, type Store, slugify } from '@bowerbirdjs/core';
+import type { LayoutProvider } from '@bowerbirdjs/layout';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import { z } from 'zod';
@@ -10,6 +11,8 @@ export interface McpServerOptions {
   version?: string;
   /** Live preview URL, mentioned in get_context so the agent can tell the user where to look. */
   previewUrl?: () => string | undefined;
+  /** Enables get_layout (and screenshot) for agents, e.g. `createPlaywrightLayoutProvider`. */
+  layout?: LayoutProvider;
 }
 
 export const SERVER_INSTRUCTIONS =
@@ -39,6 +42,7 @@ export function createMcpServer(options: McpServerOptions): Server {
   const tools = createAgentTools({
     store,
     actor,
+    ...(options.layout ? { layout: options.layout } : {}),
     contextNotes: () => {
       const url = options.previewUrl?.();
       return url ? [`Live preview (tell the user): ${url}`] : [];
@@ -69,9 +73,16 @@ export function createMcpServer(options: McpServerOptions): Server {
         ],
       };
     }
-    const result = found.run(request.params.arguments ?? {});
+    const result = await found.run(request.params.arguments ?? {});
     return {
-      content: [{ type: 'text', text: result.text }],
+      content: [
+        { type: 'text', text: result.text },
+        ...(result.images ?? []).map((img) => ({
+          type: 'image' as const,
+          data: img.data,
+          mimeType: img.mimeType,
+        })),
+      ],
       ...(result.isError ? { isError: true } : {}),
     };
   });

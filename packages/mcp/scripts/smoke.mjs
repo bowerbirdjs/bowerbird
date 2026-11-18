@@ -19,6 +19,9 @@ const cli = fileURLToPath(new URL('../dist/cli.js', import.meta.url));
 const transport = new StdioClientTransport({
   command: process.execPath,
   args: [cli, '--file', siteFile, '--port', '0'],
+  // The SDK passes only a minimal environment by default; keep NODE_PATH etc. so the server can
+  // find an optional Playwright install.
+  env: { ...process.env },
   stderr: 'inherit',
 });
 const client = new Client({ name: 'Smoke Test', version: '1.0.0' });
@@ -145,6 +148,37 @@ await call(
 
 const outline = await call('get_outline', { depth: 2 });
 if (!outline.includes('pricing-1  section:pricing')) failures++;
+
+// Linked components: the footer becomes a symbol; a definition edit reaches the instance.
+await call('apply', {
+  label: 'Shared footer',
+  ops: [
+    { op: 'page.create', path: '/about', title: 'About' },
+    { op: 'symbol.create', id: 'footer-1', name: 'Site footer' },
+    { op: 'symbol.insert', symbol: 'site-footer', page: 'about' },
+    { op: 'props.set', id: 'symbol-site-footer/brand', props: { text: 'Clockwise Inc.' } },
+  ],
+});
+const shared = await call('get_nodes', { ids: ['footer-1/brand', 'footer-2/brand'] });
+if ((shared.match(/Clockwise Inc\./g) ?? []).length !== 2) failures++;
+
+// Rendered layout checks (only when the server found Playwright).
+const tools = (await client.listTools()).tools.map((t) => t.name);
+if (tools.includes('get_layout')) {
+  const layout = await call('get_layout', { page: 'home', bp: 'base', depth: 1 });
+  if (!/layout home at 390px wide/.test(layout)) failures++;
+  const shot = await client.callTool({
+    name: 'screenshot',
+    arguments: { page: 'home', node: 'hero-1' },
+  });
+  const image = shot.content.find((c) => c.type === 'image');
+  console.log(
+    `\n── screenshot ${image ? `✓ ${image.mimeType}, ${Math.round((image.data.length * 0.75) / 1024)} KB` : '✗ no image'}`,
+  );
+  if (!image) failures++;
+} else {
+  console.log('\n── get_layout skipped (Playwright not installed)');
+}
 
 if (shotsDir && previewUrl) {
   const require = createRequire(import.meta.url);

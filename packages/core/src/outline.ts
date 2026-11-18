@@ -1,4 +1,5 @@
-import { type DocView, descendants } from './doc.js';
+import { type DocView, descendants, isInstanceRoot } from './doc.js';
+import { instancesOf, overridesOf } from './symbols.js';
 import type { BNode, NodeId, PageId } from './types.js';
 
 export interface OutlineOptions {
@@ -9,6 +10,24 @@ export interface OutlineOptions {
   depth?: number;
   /** Maximum characters of text shown per node. Default 60. */
   maxText?: number;
+}
+
+/** Symbol and provenance notes for one node: instance roots, overrides, people's edits. */
+export function nodeNotes(view: DocView, n: BNode): string[] {
+  const notes: string[] = [];
+  if (n.symbol) notes.push(`definition of symbol:${n.symbol}`);
+  if (n.link) {
+    if (isInstanceRoot(view, n)) notes.push(`instance of symbol:${n.link.symbol}`);
+    const overrides = overridesOf(view, n);
+    if (overrides.length)
+      notes.push(`overrides(${overrides.map((o) => o.replace(/^props\./, '')).join(', ')})`);
+  }
+  const human = Object.entries(n.edited ?? {})
+    .filter(([field, s]) => field !== 'node' && s.kind === 'user')
+    .map(([, s]) => s)
+    .sort((a, b) => b.rev - a.rev)[0];
+  if (human) notes.push(`edited by ${human.by}`);
+  return notes;
 }
 
 const quote = (value: unknown, max: number) => {
@@ -48,7 +67,10 @@ export function outline(view: DocView, options: OutlineOptions = {}): string {
   const maxText = options.maxText ?? 60;
   const lines: string[] = [];
   const walk = (node: BNode, level: number) => {
-    lines.push(`${'  '.repeat(level)}${describeNode(node, maxText)}`);
+    const notes = nodeNotes(view, node);
+    lines.push(
+      `${'  '.repeat(level)}${describeNode(node, maxText)}${notes.length ? `  [${notes.join('; ')}]` : ''}`,
+    );
     const children = view.children(node.id);
     if (!children.length) return;
     if (level >= depth) {
@@ -76,6 +98,14 @@ export function outline(view: DocView, options: OutlineOptions = {}): string {
     const children = view.children(page.rootId);
     if (!children.length) lines.push('  (empty)');
     for (const child of children) walk(child, 1);
+  }
+  if (!options.page) {
+    for (const symbol of view.symbols()) {
+      const count = instancesOf(view, symbol.id).length;
+      lines.push(
+        `symbol ${symbol.id}  ${JSON.stringify(symbol.name)}  definition=${symbol.rootId}  ${count} instance${count === 1 ? '' : 's'}`,
+      );
+    }
   }
   return lines.join('\n');
 }

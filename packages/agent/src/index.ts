@@ -6,16 +6,20 @@ import {
   describeNode,
   flattenTokens,
   formatIssue,
+  instancesOf,
   type LintIssue,
   lintPage,
   OpSchema,
   outline,
+  overridesOf,
+  type ProposeResult,
   type SectionDef,
   STATE_PSEUDO,
   type Store,
   templateParts,
 } from '@bowerbirdjs/core';
 import { htmlToNodes } from '@bowerbirdjs/import';
+import { formatLayout, type LayoutProvider, lintLayout } from '@bowerbirdjs/layout';
 import { z } from 'zod';
 import { AGENT_GUIDE } from './guide.js';
 
@@ -24,6 +28,8 @@ export { AGENT_GUIDE } from './guide.js';
 export interface ToolResult {
   text: string;
   isError?: boolean;
+  /** Images (e.g. screenshots), base64-encoded. */
+  images?: { data: string; mimeType: 'image/png' | 'image/jpeg' | 'image/webp' | 'image/gif' }[];
 }
 
 export interface ToolAnnotations {
@@ -40,7 +46,7 @@ export interface AgentTool {
   input: z.ZodObject;
   annotations: ToolAnnotations;
   /** Runs the tool. Input is validated here, so raw model output can be passed in. */
-  run(input: unknown): ToolResult;
+  run(input: unknown): Promise<ToolResult>;
 }
 
 export interface AgentToolsOptions {
@@ -49,6 +55,11 @@ export interface AgentToolsOptions {
   actor?: Actor | (() => Actor);
   /** Extra lines appended to get_context, e.g. a preview URL. */
   contextNotes?: () => string[];
+  /**
+   * Lays pages out so agents can check the rendered result (`get_layout`, and `screenshot` if the
+   * provider can take them). E.g. `createDomLayoutProvider` in a browser, Playwright on a server.
+   */
+  layout?: LayoutProvider;
 }
 
 const DEFAULT_ACTOR: Actor = { kind: 'agent', id: 'agent' };
@@ -128,6 +139,8 @@ function describeComponent(def: ComponentDef): string {
 }
 
 function compactNode(store: Store, n: BNode) {
+  const overrides = n.link ? overridesOf(store.view, n) : [];
+  const edited = Object.entries(n.edited ?? {}).filter(([field]) => field !== 'node');
   return {
     id: n.id,
     type: n.type,
@@ -137,9 +150,43 @@ function compactNode(store: Store, n: BNode) {
     props: n.props,
     ...(n.styles ? { styles: n.styles } : {}),
     ...(n.vars ? { vars: n.vars } : {}),
+    ...(n.symbol ? { definitionOf: n.symbol } : {}),
+    ...(n.link ? { linkedTo: n.link.node, symbol: n.link.symbol } : {}),
+    ...(overrides.length ? { overrides } : {}),
+    ...(edited.length
+      ? {
+          lastEditedBy: Object.fromEntries(
+            edited.map(([field, s]) => [field, `${s.by} (${s.kind}) r${s.rev}`]),
+          ),
+        }
+      : {}),
     parent: n.parent,
     children: store.view.children(n.id).map((c) => c.id),
   };
+}
+
+/** Formats a proposal (changes stored for review) for an agent. */
+export function formatProposeResult(
+  store: Store,
+  result: ProposeResult,
+  opCount: number,
+): ToolResult {
+  if (!result.ok) return formatApplyResult(store, result, opCount);
+  const cs = result.changeset;
+  const s = cs.summary;
+  const lines = [
+    `Proposed ${cs.id} (${cs.ops.length} op${cs.ops.length === 1 ? '' : 's'}) for review; nothing changes until a person accepts it.`,
+    ...(s.created.length
+      ? [
+          `Would create: ${s.created.filter((id) => !s.created.some((o) => o !== id && id.startsWith(`${o}/`))).join(', ')}`,
+        ]
+      : []),
+    ...(s.updated.length ? [`Would update: ${s.updated.slice(0, 20).join(', ')}`] : []),
+    ...(s.removed.length ? [`Would remove: ${s.removed.slice(0, 20).join(', ')}`] : []),
+    ...result.warnings.map((w) => `Note for the reviewer: ${formatIssue(w)}`),
+    'Later changes can build on the ids above only after it is accepted.',
+  ];
+  return { text: lines.join('\n') };
 }
 
 export function formatApplyResult(
@@ -174,6 +221,7 @@ export function formatApplyResult(
   if (s.updated.length) lines.push(`Updated: ${brief(s.updated)}`);
   if (s.removed.length) lines.push(`Removed: ${brief(s.removed)}`);
   if (s.pages.length) lines.push(`Pages changed: ${s.pages.join(', ')}`);
+  if (s.symbols.length) lines.push(`Symbols changed: ${s.symbols.join(', ')}`);
   if (s.tokens) lines.push('Tokens or themes changed.');
   for (const w of result.warnings) lines.push(`Warning: ${formatIssue(w)}`);
   if (!result.dryRun && s.created.length) {
@@ -200,6 +248,16 @@ const ApplyInput = z.object({
     .optional()
     .describe('Revision you read; the call fails if someone changed the document since.'),
   dryRun: z.boolean().optional().describe('Validate and report without committing.'),
+  propose: z
+    .boolean()
+    .optional()
+    .describe('Store the changes for a person to review instead of applying them.'),
+  overwrite: z
+    .boolean()
+    .optional()
+    .describe(
+      'Change fields a person edited last. Only when they asked for it; otherwise propose.',
+    ),
 });
 
 /** Loose runtime parsing for apply: ops are validated by the store, which gives better errors. */
@@ -208,6 +266,8 @@ const ApplyRuntime = z.object({
   label: z.string().optional(),
   baseRevision: z.number().int().optional(),
   dryRun: z.boolean().optional(),
+  propose: z.boolean().optional(),
+  overwrite: z.boolean().optional(),
 });
 
 function parseInput<T extends z.ZodType>(
@@ -225,16 +285,19 @@ function parseInput<T extends z.ZodType>(
 }
 
 function tool<S extends z.ZodObject>(
-  def: Omit<AgentTool, 'run' | 'input'> & { input: S; run: (input: z.infer<S>) => ToolResult },
+  def: Omit<AgentTool, 'run' | 'input'> & {
+    input: S;
+    run: (input: z.infer<S>) => ToolResult | Promise<ToolResult>;
+  },
   runtime: z.ZodType = def.input,
 ): AgentTool {
   return {
     ...def,
-    run(input) {
+    async run(input) {
       const parsed = parseInput(runtime, input);
       if ('error' in parsed) return parsed.error;
       try {
-        return def.run(parsed.data as z.infer<S>);
+        return await def.run(parsed.data as z.infer<S>);
       } catch (error) {
         return {
           isError: true,
@@ -251,6 +314,107 @@ export function createAgentTools(options: AgentToolsOptions): AgentTool[] {
   const actor = () =>
     typeof options.actor === 'function' ? options.actor() : (options.actor ?? DEFAULT_ACTOR);
 
+  const layout = options.layout;
+  const pageFor = (page?: string): string | ToolResult => {
+    const pages = Object.values(store.doc.pages);
+    const found = page
+      ? store.doc.pages[page]
+      : pages.length === 1
+        ? pages[0]
+        : pages.find((p) => p.path === '/');
+    if (found) return found.id;
+    return {
+      isError: true,
+      text: page
+        ? `No page "${page}". Pages: ${pages.map((p) => p.id).join(', ') || '(none)'}.`
+        : 'The site has no pages yet.',
+    };
+  };
+  const widthFor = (bp?: string, width?: number): number => {
+    if (width) return width;
+    const widths: Record<string, number> = { base: 390, md: 820, lg: 1280 };
+    const list = store.doc.breakpoints;
+    const found = list.find((b) => b.id === bp) ?? list.at(-1);
+    return (found && widths[found.id]) ?? Math.max(found?.minWidth ?? 0, 390);
+  };
+  const layoutTools: AgentTool[] = layout
+    ? [
+        tool({
+          name: 'get_layout',
+          title: 'Check rendered layout',
+          description:
+            'Lays the page out at a screen width and reports box positions and sizes (x,y w×h in px) plus layout problems the document alone can\'t show: overflow past the screen edge, clipped or overlapping content, tiny text or tap targets, low contrast, broken images. Check mobile (bp "base") and desktop after layout changes.',
+          input: z.object({
+            page: z.string().optional(),
+            bp: z
+              .string()
+              .optional()
+              .describe('Breakpoint to preview: base (mobile), md, lg (default).'),
+            width: z
+              .number()
+              .int()
+              .min(240)
+              .max(3840)
+              .optional()
+              .describe('Exact width in px instead of bp.'),
+            root: z.string().optional().describe('Only list this node and its subtree.'),
+            depth: z.number().int().min(1).max(12).optional(),
+            theme: z.string().optional(),
+          }),
+          annotations: { readOnlyHint: true },
+          run: async (input) => {
+            const page = pageFor(input.page);
+            if (typeof page !== 'string') return page;
+            const snapshot = await layout.snapshot({
+              page,
+              width: widthFor(input.bp, input.width),
+              ...(input.theme ? { theme: input.theme } : {}),
+            });
+            return {
+              text: formatLayout(snapshot, {
+                issues: lintLayout(snapshot),
+                ...(input.root ? { root: input.root } : {}),
+                ...(input.depth ? { depth: input.depth } : {}),
+              }),
+            };
+          },
+        }),
+        ...(layout.screenshot
+          ? [
+              tool({
+                name: 'screenshot',
+                title: 'Screenshot',
+                description:
+                  'A PNG of the page (or one node) at a screen width. Use it to judge visual design; use get_layout for exact sizes and problems.',
+                input: z.object({
+                  page: z.string().optional(),
+                  bp: z.string().optional().describe('base (mobile), md, lg (default).'),
+                  width: z.number().int().min(240).max(3840).optional(),
+                  node: z.string().optional().describe('Only this node.'),
+                  theme: z.string().optional(),
+                }),
+                annotations: { readOnlyHint: true },
+                run: async (input) => {
+                  const page = pageFor(input.page);
+                  if (typeof page !== 'string') return page;
+                  const width = widthFor(input.bp, input.width);
+                  const image = await layout.screenshot!({
+                    page,
+                    width,
+                    ...(input.node ? { node: input.node } : {}),
+                    ...(input.theme ? { theme: input.theme } : {}),
+                  });
+                  return {
+                    text: `Screenshot of ${input.node ?? `page ${page}`} at ${width}px.`,
+                    images: [image],
+                  };
+                },
+              }),
+            ]
+          : []),
+      ]
+    : [];
+
   return [
     tool({
       name: 'get_context',
@@ -266,6 +430,12 @@ export function createAgentTools(options: AgentToolsOptions): AgentTool[] {
         for (const t of tokens)
           families.set(t.path.split('.')[0]!, (families.get(t.path.split('.')[0]!) ?? 0) + 1);
         const pages = Object.values(doc.pages);
+        const me = actor();
+        const symbols = store.view.symbols();
+        const protection = store.policy.protectHumanEdits?.(me) ?? 'warn';
+        const mine = store.changesets.filter(
+          (c) => c.actor.id === me.id && c.status.includes('open'),
+        );
         const lines = [
           `# Site context (revision ${doc.revision})`,
           `Pages: ${pages.map((p) => `${p.id} "${p.path}" (${p.title})`).join('; ') || 'none yet — create one with page.create'}`,
@@ -282,6 +452,31 @@ export function createAgentTools(options: AgentToolsOptions): AgentTool[] {
             .join(', ')}`,
           `Tokens: ${[...families].map(([f, n]) => `${f} (${n})`).join(', ')} (list_tokens to see them)`,
           `Themes: ${Object.keys(doc.themes).join(', ') || 'none'}`,
+          `Symbols (linked components): ${
+            symbols
+              .map(
+                (sym) =>
+                  `${sym.id} "${sym.name}" (definition ${sym.rootId}, ${instancesOf(store.view, sym.id).length} instances)`,
+              )
+              .join('; ') || 'none'
+          }`,
+          ...(store.policy.requiresReview?.(me)
+            ? [
+                'Review: your changes are proposed for a person to accept; apply stores them as a changeset.',
+              ]
+            : []),
+          ...(protection === 'confirm'
+            ? [
+                'People’s edits are protected: changing fields marked "edited by <person>" needs overwrite: true (only if they asked) or a proposal.',
+              ]
+            : []),
+          ...(mine.length
+            ? [
+                `Your open proposals: ${mine
+                  .map((c) => `${c.id} (${c.status.filter((st) => st === 'open').length} open ops)`)
+                  .join(', ')}`,
+              ]
+            : []),
           ...(options.contextNotes?.() ?? []),
           '',
           AGENT_GUIDE,
@@ -409,13 +604,18 @@ export function createAgentTools(options: AgentToolsOptions): AgentTool[] {
         input: ApplyInput,
         annotations: { destructiveHint: true, idempotentHint: false },
         run: (input) => {
-          const result = store.apply({
+          const a = actor();
+          const transaction = {
             ops: input.ops,
-            actor: actor(),
+            actor: a,
             ...(input.label ? { label: input.label } : {}),
             ...(input.baseRevision !== undefined ? { baseRevision: input.baseRevision } : {}),
-            ...(input.dryRun ? { dryRun: true } : {}),
-          });
+            ...(input.overwrite ? { overwrite: true } : {}),
+          };
+          if (!input.dryRun && (input.propose || store.policy.requiresReview?.(a))) {
+            return formatProposeResult(store, store.propose(transaction), input.ops.length);
+          }
+          const result = store.apply({ ...transaction, ...(input.dryRun ? { dryRun: true } : {}) });
           return formatApplyResult(store, result, input.ops.length);
         },
       },
@@ -437,6 +637,7 @@ export function createAgentTools(options: AgentToolsOptions): AgentTool[] {
         after: z.string().optional(),
         label: z.string().optional(),
         dryRun: z.boolean().optional(),
+        propose: z.boolean().optional().describe('Store for review instead of applying.'),
       }),
       annotations: { destructiveHint: false },
       run: (input) => {
@@ -471,12 +672,16 @@ export function createAgentTools(options: AgentToolsOptions): AgentTool[] {
           position = i < 0 ? { after: input.after } : next ? { before: next.id } : {};
         }
         const ops = nodes.map((node) => ({ op: 'node.insert', parent, ...position, node }));
-        const result = store.apply({
-          ops,
-          actor: actor(),
-          label: input.label ?? 'Import HTML',
-          ...(input.dryRun ? { dryRun: true } : {}),
-        });
+        const a = actor();
+        const transaction = { ops, actor: a, label: input.label ?? 'Import HTML' };
+        if (!input.dryRun && (input.propose || store.policy.requiresReview?.(a))) {
+          const proposed = formatProposeResult(store, store.propose(transaction), ops.length);
+          return {
+            ...proposed,
+            text: [proposed.text, ...warnings.map((w) => `Note: ${w}`)].join('\n'),
+          };
+        }
+        const result = store.apply({ ...transaction, ...(input.dryRun ? { dryRun: true } : {}) });
         const formatted = formatApplyResult(
           store,
           result,
@@ -518,6 +723,7 @@ export function createAgentTools(options: AgentToolsOptions): AgentTool[] {
         return formatApplyResult(store, store.undo({ actorId: a.id, actor: a }), 1);
       },
     }),
+    ...layoutTools,
   ];
 }
 
@@ -533,7 +739,11 @@ export function toolDefinitions(tools: AgentTool[]) {
 }
 
 /** Runs a tool by name. */
-export function runTool(tools: AgentTool[], name: string, input: unknown): ToolResult {
+export async function runTool(
+  tools: AgentTool[],
+  name: string,
+  input: unknown,
+): Promise<ToolResult> {
   const found = tools.find((t) => t.name === name);
   if (!found)
     return {
@@ -541,4 +751,30 @@ export function runTool(tools: AgentTool[], name: string, input: unknown): ToolR
       text: `Unknown tool "${name}". Tools: ${tools.map((t) => t.name).join(', ')}.`,
     };
   return found.run(input);
+}
+
+/**
+ * The ops of a partially streamed `apply` input that are already complete and valid, in order.
+ * Use it to preview an agent's change on the canvas while the model is still writing it.
+ */
+export function opsFromPartialInput(input: unknown): unknown[] {
+  const ops = (input as { ops?: unknown } | null)?.ops;
+  if (!Array.isArray(ops)) return [];
+  const out: unknown[] = [];
+  for (const op of ops) {
+    if (!OpSchema.safeParse(op).success) break;
+    out.push(op);
+  }
+  return out;
+}
+
+/** Tool result content blocks for the Claude Messages API (text plus any images). */
+export function toolResultContent(result: ToolResult) {
+  return [
+    { type: 'text' as const, text: result.text },
+    ...(result.images ?? []).map((img) => ({
+      type: 'image' as const,
+      source: { type: 'base64' as const, media_type: img.mimeType, data: img.data },
+    })),
+  ];
 }

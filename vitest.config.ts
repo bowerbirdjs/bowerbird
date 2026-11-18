@@ -9,7 +9,7 @@ export default defineConfig({
     // Tests run against package sources, so no build is needed first.
     alias: [
       {
-        find: /^@bowerbirdjs\/(core|css|html|blocks|agent|mcp|import|editor|react|vue)$/,
+        find: /^@bowerbirdjs\/(core|css|html|blocks|agent|mcp|import|layout|editor|react|vue)$/,
         replacement: pkg('$1'),
       },
     ],

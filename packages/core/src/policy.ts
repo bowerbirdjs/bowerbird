@@ -31,6 +31,9 @@ export interface ChangesContext {
   registry: Registry;
 }
 
+/** What happens when an agent changes something a person last edited. */
+export type HumanEditProtection = 'off' | 'warn' | 'confirm';
+
 export interface Policy {
   /** Returns an issue if the actor may not perform the op. */
   check(ctx: PolicyContext): Issue | undefined;
@@ -41,6 +44,13 @@ export interface Policy {
   checkChanges?(ctx: ChangesContext): Issue | undefined;
   /** Whether raw CSS values (px, hex colours, …) are allowed for this actor. */
   allowRawValues(actor: Actor): boolean;
+  /**
+   * For agent changes to fields a person edited last: `warn` (default) applies them with a
+   * warning, `confirm` refuses them unless the transaction sets `overwrite: true`.
+   */
+  protectHumanEdits?(actor: Actor): HumanEditProtection;
+  /** Whether this actor's changes must be proposed as changesets and accepted by someone. */
+  requiresReview?(actor: Actor): boolean;
 }
 
 export interface PolicyOptions {
@@ -52,6 +62,10 @@ export interface PolicyOptions {
   allowRawValues?: boolean | Partial<Record<Actor['kind'], boolean>>;
   /** Nodes (and their subtrees) that may not be changed. */
   lockedNodes?: string[];
+  /** Default `warn`. See `Policy.protectHumanEdits`. */
+  protectHumanEdits?: HumanEditProtection;
+  /** Actor kinds whose changes must be proposed for review, e.g. `{ agent: true }`. */
+  review?: Partial<Record<Actor['kind'], boolean>>;
 }
 
 function containsCode(input: NodeInput, registry: Registry): boolean {
@@ -102,7 +116,19 @@ export function requiredLevel(op: Op, view: DocView, registry: Registry): Freedo
     case 'style.set':
     case 'vars.set':
     case 'token.set':
+    case 'symbol.create':
+    case 'symbol.remove':
       return 'design';
+    case 'symbol.insert': {
+      const def = view.symbol(op.symbol);
+      const root = def && view.node(def.rootId);
+      if (!op.content) return 'layout';
+      const designProps = Object.entries(op.content).some(([path, patch]) => {
+        const target = root && (path === '' ? root : view.node(`${root.id}/${path}`));
+        return !contentOnly(registry, target?.type, Object.keys(patch));
+      });
+      return designProps ? 'design' : 'layout';
+    }
     default:
       return 'layout';
   }
@@ -137,6 +163,20 @@ function touched(op: Op, view: DocView): { nodes: string[]; subtrees: string[] }
     case 'style.set':
     case 'vars.set':
       return { nodes: [op.id], subtrees: [] };
+    case 'symbol.create':
+    case 'symbol.detach':
+    case 'symbol.reset':
+      return { nodes: [op.id], subtrees: [op.id] };
+    case 'symbol.insert': {
+      if (op.parent) return { nodes: [op.parent], subtrees: [] };
+      const pages = view.pages();
+      const page = op.page ? view.page(op.page) : pages.length === 1 ? pages[0] : undefined;
+      return { nodes: page ? [page.rootId] : [], subtrees: [] };
+    }
+    case 'symbol.remove': {
+      const def = view.symbol(op.symbol);
+      return { nodes: [], subtrees: def ? [def.rootId] : [] };
+    }
     default:
       return { nodes: [], subtrees: [] };
   }
@@ -149,7 +189,7 @@ export function requiredLevelForChanges(changes: Change[], registry: Registry): 
     if (RANK[l] > RANK[level]) level = l;
   };
   for (const c of changes) {
-    if (c.kind === 'tokens' || c.kind === 'themes') raise('design');
+    if (c.kind === 'tokens' || c.kind === 'themes' || c.kind === 'symbol') raise('design');
     else if (c.kind === 'page') raise('layout');
     else {
       const node = c.after ?? c.before!;
@@ -259,6 +299,12 @@ export function createPolicy(options: PolicyOptions = {}): Policy {
       const opt = options.allowRawValues;
       if (typeof opt === 'boolean') return opt;
       return opt?.[actor.kind] ?? false;
+    },
+    protectHumanEdits(actor) {
+      return actor.kind === 'agent' ? (options.protectHumanEdits ?? 'warn') : 'off';
+    },
+    requiresReview(actor) {
+      return options.review?.[actor.kind] ?? false;
     },
   };
 }

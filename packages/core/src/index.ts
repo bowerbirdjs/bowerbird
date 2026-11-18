@@ -13,10 +13,15 @@ export {
   DEFAULT_BREAKPOINTS,
   DocIndex,
   type DocView,
+  definitionOf,
   depthOf,
   descendants,
+  instanceRootOf,
+  isInstanceRoot,
+  isScopeOwner,
   pageNodes,
   pageOf,
+  rootOf,
   sectionRootOf,
   subtreeHeight,
 } from './doc.js';
@@ -31,13 +36,22 @@ export {
 } from './errors.js';
 export { duplicateId, ID_PATTERN, isValidId, nextId, slugify } from './ids.js';
 export { type LintIssue, type LintSeverity, lintPage } from './lint.js';
-export { NodeInputSchema, OP_NAMES, type Op, type OpName, OpSchema, parseOps } from './ops.js';
+export {
+  describeOp,
+  NodeInputSchema,
+  OP_NAMES,
+  type Op,
+  type OpName,
+  OpSchema,
+  parseOps,
+} from './ops.js';
 export { compareOrder, keyBetween } from './order.js';
-export { describeNode, type OutlineOptions, outline } from './outline.js';
+export { describeNode, nodeNotes, type OutlineOptions, outline } from './outline.js';
 export {
   type ChangesContext,
   createPolicy,
   type FreedomLevel,
+  type HumanEditProtection,
   type Policy,
   type PolicyContext,
   type PolicyOptions,
@@ -45,6 +59,7 @@ export {
   requiredLevelForChanges,
 } from './policy.js';
 export { PRIMITIVES } from './primitives.js';
+export { changedFields, humanEditConflicts, stampFor } from './provenance.js';
 export {
   type ComponentDef,
   createRegistry,
@@ -64,12 +79,14 @@ export {
 export {
   type ApplyResult,
   type ChangeSummary,
+  type Changeset,
   type CommitEvent,
   createStore,
   type HistoryEntry,
   isSiteDoc,
   LOCAL_USER,
   normalizeDoc,
+  type ProposeResult,
   Store,
   type StoreOptions,
   summarize,
@@ -88,6 +105,7 @@ export {
   type StyleCheckContext,
   tokensForProperty,
 } from './styles.js';
+export { instancesOf, overridesOf } from './symbols.js';
 export * as t from './template.js';
 export {
   aliasToCss,

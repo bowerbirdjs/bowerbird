@@ -28,7 +28,12 @@ export type IssueCode =
   | 'no_change'
   | 'integrity'
   | 'token_in_use'
-  | 'parts_removed';
+  | 'parts_removed'
+  | 'unknown_symbol'
+  | 'instance'
+  | 'human_edit'
+  | 'review_required'
+  | 'unknown_changeset';
 
 /**
  * A structured problem report. Messages are written for both humans and agents: they say what is

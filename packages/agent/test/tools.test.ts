@@ -1,6 +1,12 @@
-import { createAgentTools, runTool, sectionParts, toolDefinitions } from '@bowerbirdjs/agent';
+import {
+  createAgentTools,
+  runTool,
+  sectionParts,
+  toolDefinitions,
+  toolResultContent,
+} from '@bowerbirdjs/agent';
 import { createDefaultRegistry, createStarterDoc, hero, pricing } from '@bowerbirdjs/blocks';
-import { createStore } from '@bowerbirdjs/core';
+import { createPolicy, createStore } from '@bowerbirdjs/core';
 import { describe, expect, it } from 'vitest';
 
 function setup() {
@@ -10,8 +16,8 @@ function setup() {
   return { store, tools, run: (name: string, input: unknown = {}) => runTool(tools, name, input) };
 }
 
-describe('agent tools', () => {
-  it('lists section parts with keyed paths', () => {
+describe('agent tools', async () => {
+  it('lists section parts with keyed paths', async () => {
     expect(sectionParts(hero).map((p) => p.path)).toEqual([
       'content',
       'eyebrow',
@@ -27,21 +33,21 @@ describe('agent tools', () => {
     expect(paths).toContain('tier-team/feature-3');
   });
 
-  it('gives context, sections and tokens', () => {
+  it('gives context, sections and tokens', async () => {
     const { run } = setup();
-    const ctx = run('get_context').text;
+    const ctx = (await run('get_context')).text;
     expect(ctx).toContain('Pages: home "/" (Home)');
     expect(ctx).toContain('only design tokens are allowed');
     expect(ctx).toContain('## Op examples');
-    expect(run('list_sections', { name: 'pricing' }).text).toContain(
+    expect((await run('list_sections', { name: 'pricing' })).text).toContain(
       'tier-pro/price  text<span>  "$29"',
     );
-    expect(run('list_tokens', { prefix: 'space' }).text).toContain('--space-lg: 1.5rem');
+    expect((await run('list_tokens', { prefix: 'space' })).text).toContain('--space-lg: 1.5rem');
   });
 
-  it('applies ops, reports what changed and shows the new outline', () => {
+  it('applies ops, reports what changed and shows the new outline', async () => {
     const { run, store } = setup();
-    const res = run('apply', {
+    const res = await run('apply', {
       label: 'Add hero',
       ops: [
         { op: 'section.insert', section: 'hero', content: { heading: { text: 'Hello agents' } } },
@@ -52,12 +58,12 @@ describe('agent tools', () => {
     expect(res.text).toContain('Created: hero-1 (+');
     expect(res.text).toContain('hero-1/heading');
     expect(store.history.at(-1)?.actor.id).toBe('test-agent');
-    expect(run('get_outline').text).toContain('"Hello agents"');
+    expect((await run('get_outline')).text).toContain('"Hello agents"');
   });
 
-  it('returns actionable errors and changes nothing on failure', () => {
+  it('returns actionable errors and changes nothing on failure', async () => {
     const { run, store } = setup();
-    const res = run('apply', {
+    const res = await run('apply', {
       ops: [
         { op: 'section.insert', section: 'hero' },
         { op: 'style.set', id: 'hero-1/heading', css: 'color: #ff0000' },
@@ -72,24 +78,24 @@ describe('agent tools', () => {
     expect(store.doc.nodes['hero-1']).toBeUndefined();
   });
 
-  it('rejects malformed tool input clearly', () => {
+  it('rejects malformed tool input clearly', async () => {
     const { run } = setup();
-    expect(run('apply', { ops: 'nope' }).text).toContain('Invalid input');
-    expect(run('apply', { ops: [{ op: 'sectoin.insert' }] }).text).toContain(
+    expect((await run('apply', { ops: 'nope' })).text).toContain('Invalid input');
+    expect((await run('apply', { ops: [{ op: 'sectoin.insert' }] })).text).toContain(
       'Did you mean "section.insert"',
     );
-    expect(run('nope').text).toContain('Unknown tool');
+    expect((await run('nope')).text).toContain('Unknown tool');
   });
 
-  it('imports HTML after an anchor, in order, with notes', () => {
+  it('imports HTML after an anchor, in order, with notes', async () => {
     const { run, store } = setup();
-    run('apply', {
+    await run('apply', {
       ops: [
         { op: 'section.insert', section: 'hero' },
         { op: 'section.insert', section: 'cta' },
       ],
     });
-    const res = run('import_html', {
+    const res = await run('import_html', {
       after: 'hero-1',
       html: '<section class="x"><h2>Story</h2></section><section><h2>Team</h2></section>',
     });
@@ -101,33 +107,33 @@ describe('agent tools', () => {
       'box-2',
       'cta-1',
     ]);
-    const raw = run('import_html', { html: '<p style="padding: 13px">x</p>' });
+    const raw = await run('import_html', { html: '<p style="padding: 13px">x</p>' });
     expect(raw.isError).toBe(true);
     expect(raw.text).toContain('Closest tokens: var(--space-sm)');
   });
 
-  it('lints pages', () => {
+  it('lints pages', async () => {
     const { run } = setup();
-    run('apply', { ops: [{ op: 'section.insert', section: 'hero' }] });
-    const text = run('lint').text;
+    await run('apply', { ops: [{ op: 'section.insert', section: 'hero' }] });
+    const text = (await run('lint')).text;
     expect(text).toMatch(/^page home: 0 errors, \d+ warnings, \d+ notes/);
     expect(text).toContain('template-text hero-1/heading');
   });
 
-  it('undoes only its own changes', () => {
+  it('undoes only its own changes', async () => {
     const { run, store } = setup();
-    run('apply', { ops: [{ op: 'section.insert', section: 'hero' }] });
+    await run('apply', { ops: [{ op: 'section.insert', section: 'hero' }] });
     store.apply({
       actor: { kind: 'user', id: 'ana' },
       ops: [{ op: 'section.insert', section: 'cta' }],
     });
-    const res = run('undo');
+    const res = await run('undo');
     expect(res.text).toContain('Applied');
     expect(store.doc.nodes['hero-1']).toBeUndefined();
     expect(store.doc.nodes['cta-1']).toBeDefined();
   });
 
-  it('produces JSON Schema tool definitions', () => {
+  it('produces JSON Schema tool definitions', async () => {
     const { tools } = setup();
     const defs = toolDefinitions(tools);
     const apply = defs.find((d) => d.name === 'apply')!;
@@ -144,5 +150,100 @@ describe('agent tools', () => {
       'lint',
       'undo',
     ]);
+  });
+});
+
+describe('agent tools (phase 2)', () => {
+  it('apply proposes when review is required, and with propose: true', async () => {
+    const store = createStore({
+      registry: createDefaultRegistry(),
+      doc: createStarterDoc(),
+      policy: createPolicy({ review: { agent: true } }),
+    });
+    store.apply({ ops: [{ op: 'page.create', path: '/', title: 'Home' }] });
+    const tools = createAgentTools({ store, actor: { kind: 'agent', id: 'a' } });
+    const res = await runTool(tools, 'apply', { ops: [{ op: 'section.insert', section: 'hero' }] });
+    expect(res.text).toMatch(/^Proposed cs-1 \(1 op\) for review/);
+    expect(res.text).toContain('Would create: hero-1');
+    expect(store.view.node('hero-1')).toBeUndefined();
+    expect((await runTool(tools, 'get_context', {})).text).toContain(
+      'Your open proposals: cs-1 (1 open ops)',
+    );
+  });
+
+  it('overwrite lets an agent change a person’s edit when protection asks for confirmation', async () => {
+    const store = createStore({
+      registry: createDefaultRegistry(),
+      doc: createStarterDoc(),
+      policy: createPolicy({ protectHumanEdits: 'confirm' }),
+    });
+    store.apply({
+      ops: [
+        { op: 'page.create', path: '/', title: 'Home' },
+        { op: 'section.insert', section: 'hero' },
+      ],
+    });
+    store.apply({
+      ops: [{ op: 'props.set', id: 'hero-1/heading', props: { text: 'Mine' } }],
+      actor: { kind: 'user', id: 'sam' },
+    });
+    const tools = createAgentTools({ store, actor: { kind: 'agent', id: 'a' } });
+    const ops = [{ op: 'props.set', id: 'hero-1/heading', props: { text: 'Agent' } }];
+    const refused = await runTool(tools, 'apply', { ops });
+    expect(refused.isError).toBe(true);
+    expect(refused.text).toContain('[human_edit]');
+    expect((await runTool(tools, 'get_outline', {})).text).toContain('[edited by sam]');
+    expect((await runTool(tools, 'apply', { ops, overwrite: true })).isError).toBeFalsy();
+  });
+
+  it('lists symbols in the context and shows links in get_nodes', async () => {
+    const { store, run } = setup();
+    store.apply({
+      ops: [
+        { op: 'section.insert', section: 'footer' },
+        { op: 'symbol.create', id: 'footer-1', name: 'Site footer' },
+      ],
+    });
+    expect((await run('get_context')).text).toContain(
+      'site-footer "Site footer" (definition symbol-site-footer, 1 instances)',
+    );
+    const nodes = JSON.parse((await run('get_nodes', { ids: ['footer-1'] })).text);
+    expect(nodes[0]).toMatchObject({ linkedTo: 'symbol-site-footer', symbol: 'site-footer' });
+  });
+
+  it('offers layout and screenshot tools when a provider is given', async () => {
+    const store = createStore({ registry: createDefaultRegistry(), doc: createStarterDoc() });
+    store.apply({ ops: [{ op: 'page.create', path: '/', title: 'Home' }] });
+    const widths: number[] = [];
+    const tools = createAgentTools({
+      store,
+      layout: {
+        snapshot: async ({ page, width }) => {
+          widths.push(width);
+          return {
+            page,
+            width,
+            height: 500,
+            overflowX: 0,
+            boxes: [
+              { id: 'root-home', parent: null, tag: 'div', x: 0, y: 0, w: width, h: 500 },
+              { id: 'box-1', parent: 'root-home', tag: 'div', x: 0, y: 0, w: width + 40, h: 100 },
+            ],
+          };
+        },
+        screenshot: async () => ({ data: 'iVBORw0KGgo=', mimeType: 'image/png' }),
+      },
+    });
+    const layout = await runTool(tools, 'get_layout', { bp: 'base' });
+    expect(widths).toEqual([390]);
+    expect(layout.text).toContain('horizontal-overflow box-1');
+    const shot = await runTool(tools, 'screenshot', {});
+    expect(shot.images).toEqual([{ data: 'iVBORw0KGgo=', mimeType: 'image/png' }]);
+    expect(toolResultContent(shot)[1]).toEqual({
+      type: 'image',
+      source: { type: 'base64', media_type: 'image/png', data: 'iVBORw0KGgo=' },
+    });
+    // Without a provider the tools aren't offered.
+    expect(createAgentTools({ store }).map((t) => t.name)).not.toContain('get_layout');
   });
 });

@@ -5,6 +5,7 @@ import {
   checkProperty,
   cssValueSyntaxError,
   DocIndex,
+  descendants,
   flattenTokens,
   isStyleState,
   isValidId,
@@ -25,6 +26,8 @@ export interface CompileCssOptions {
   mode?: CssMode;
   /** Only include sections and node rules used on this page. */
   page?: string;
+  /** Only include sections and node rules used in this node's subtree (e.g. a symbol definition). */
+  root?: string;
   /** Editor mode: the canvas element selector. Default `[data-bb-canvas]`. */
   canvasSelector?: string;
 }
@@ -198,9 +201,13 @@ export function compileCss(
   options: CompileCssOptions = {},
 ): string {
   const mode = options.mode ?? 'published';
-  const nodes = options.page
-    ? pageNodes(new DocIndex(doc), options.page)
-    : Object.values(doc.nodes);
+  const index = options.page || options.root ? new DocIndex(doc) : undefined;
+  const rootNode = options.root ? index!.node(options.root) : undefined;
+  const nodes = rootNode
+    ? [rootNode, ...descendants(index!, rootNode.id)]
+    : options.page
+      ? pageNodes(index!, options.page)
+      : Object.values(doc.nodes);
   const { base, themes } = tokenDeclarations(doc);
   const sections = sectionCss(
     registry,

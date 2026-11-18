@@ -1,6 +1,14 @@
 import Anthropic from '@anthropic-ai/sdk';
-import { type AgentTool, createAgentTools, runTool, toolDefinitions } from '@bowerbirdjs/agent';
+import {
+  type AgentTool,
+  createAgentTools,
+  opsFromPartialInput,
+  runTool,
+  toolDefinitions,
+  toolResultContent,
+} from '@bowerbirdjs/agent';
 import type { Actor, Store } from '@bowerbirdjs/core';
+import { createDomLayoutProvider } from '@bowerbirdjs/layout';
 
 export type ChatLine = { kind: 'user' | 'agent' | 'tool' | 'error' | 'note'; text: string };
 
@@ -13,8 +21,14 @@ export interface AgentRunner {
     store: Store,
     onLine: (line: ChatLine) => void,
     signal: AbortSignal,
+    /** Shows ops on the canvas while the agent is still writing them (`null` clears). */
+    preview?: (ops: unknown[] | null, actor: Actor) => void,
   ): Promise<void>;
 }
+
+/** Agent tools with a browser layout provider, so agents can check the rendered page. */
+const toolsFor = (store: Store, actor: Actor) =>
+  createAgentTools({ store, actor, layout: createDomLayoutProvider(store) });
 
 const firstLine = (text: string) => text.split('\n')[0] ?? '';
 const sleep = (ms: number, signal: AbortSignal) =>
@@ -155,6 +169,12 @@ function layoutSteps(store: Store): Step[] {
   ];
 }
 
+const MOBILE: Step[] = [
+  { say: 'Laying the page out at phone width to check it.' },
+  { tool: 'get_layout', input: { bp: 'base', depth: 1 } },
+  { say: 'Those are the boxes and any layout problems at 390px.' },
+];
+
 const REVIEW: Step[] = [
   { tool: 'lint' },
   {
@@ -168,6 +188,7 @@ function scriptFor(prompt: string, store: Store): Step[] {
     (page) => store.view.children(page.rootId).length === 0,
   );
   if (/speaker/.test(p)) return SPEAKERS;
+  if (/mobile|phone|layout check|check the/.test(p)) return MOBILE;
   if (/teal|brand|colou?r/.test(p)) return REBRAND;
   if (/split|layout|image/.test(p)) return layoutSteps(store);
   if (empty || /build|create|page/.test(p))
@@ -181,13 +202,25 @@ export const demoAgent: AgentRunner = {
   id: 'demo',
   label: 'Demo agent (scripted, no API key)',
   actor: { kind: 'agent', id: 'demo-agent', name: 'Demo agent' },
-  async send(prompt, store, onLine, signal) {
-    const tools = createAgentTools({ store, actor: this.actor });
+  async send(prompt, store, onLine, signal, preview) {
+    const tools = toolsFor(store, this.actor);
     for (const step of scriptFor(prompt, store)) {
       await sleep(550, signal);
       if (step.say) onLine({ kind: 'agent', text: step.say });
+      // Stream the ops onto the canvas one by one, as a real model would write them.
+      const ops = step.tool === 'apply' ? opsFromPartialInput(step.input) : [];
+      if (preview && ops.length > 1) {
+        try {
+          for (let k = 1; k <= ops.length; k++) {
+            preview(ops.slice(0, k), this.actor);
+            await sleep(350, signal);
+          }
+        } finally {
+          preview(null, this.actor);
+        }
+      }
       if (step.tool) {
-        const result = runTool(tools, step.tool, step.input ?? {});
+        const result = await runTool(tools, step.tool, step.input ?? {});
         if (result.isError) {
           onLine({
             kind: 'error',
@@ -210,8 +243,9 @@ export const demoAgent: AgentRunner = {
 
 const SYSTEM =
   'You are the page-building assistant inside Acme Events, editing an event page in Bowerbird through tools. ' +
-  'Call get_context first. Make the requested changes, check them with get_outline and lint, then reply in one or two ' +
-  'short sentences. A person may be editing the same page; only change what was asked.';
+  'Call get_context first. Make the requested changes, check them with get_outline, lint and get_layout (at bp "base" ' +
+  'for phones), then reply in one or two short sentences. A person may be editing the same page; only change what was ' +
+  'asked, and leave text and styles they edited alone unless they ask.';
 
 const conversations = new WeakMap<Store, Anthropic.Beta.BetaMessageParam[]>();
 
@@ -219,13 +253,14 @@ export const claudeAgent: AgentRunner = {
   id: 'claude',
   label: 'Claude (needs ANTHROPIC_API_KEY on the dev server)',
   actor: { kind: 'agent', id: 'claude', name: 'Claude' },
-  async send(prompt, store, onLine, signal) {
+  async send(prompt, store, onLine, signal, preview) {
     const client = new Anthropic({
       baseURL: `${location.origin}${location.pathname.replace(/\/[^/]*$/, '')}/api/anthropic`,
       apiKey: 'added-by-the-dev-server',
       dangerouslyAllowBrowser: true,
     });
-    const tools: AgentTool[] = createAgentTools({ store, actor: this.actor });
+    const tools: AgentTool[] = toolsFor(store, this.actor);
+    const actor = this.actor;
     const definitions = toolDefinitions(tools) as Anthropic.Beta.BetaTool[];
     const messages = conversations.get(store) ?? [];
     conversations.set(store, messages);
@@ -242,7 +277,7 @@ export const claudeAgent: AgentRunner = {
 
     async function loop() {
       for (let turn = 0; turn < 25; turn++) {
-        const response = await client.beta.messages.create(
+        const stream = client.beta.messages.stream(
           {
             model: 'claude-opus-5-5',
             max_tokens: 16000,
@@ -256,6 +291,26 @@ export const claudeAgent: AgentRunner = {
           },
           { signal },
         );
+        // Preview apply calls on the canvas while their input streams in.
+        let tool: string | undefined;
+        let shown = 0;
+        stream.on('streamEvent', (event) => {
+          if (event.type === 'content_block_start')
+            tool = event.content_block.type === 'tool_use' ? event.content_block.name : undefined;
+        });
+        stream.on('inputJson', (_partial, snapshot) => {
+          if (tool !== 'apply' || !preview) return;
+          const ops = opsFromPartialInput(snapshot);
+          if (ops.length === shown) return;
+          shown = ops.length;
+          preview(ops, actor);
+        });
+        let response: Anthropic.Beta.BetaMessage;
+        try {
+          response = await stream.finalMessage();
+        } finally {
+          preview?.(null, actor);
+        }
         for (const block of response.content) {
           if (block.type === 'text' && block.text.trim())
             onLine({ kind: 'agent', text: block.text });
@@ -285,7 +340,7 @@ export const claudeAgent: AgentRunner = {
         const results: Anthropic.Beta.BetaToolResultBlockParam[] = [];
         for (const block of response.content) {
           if (block.type !== 'tool_use') continue;
-          const result = runTool(tools, block.name, block.input);
+          const result = await runTool(tools, block.name, block.input);
           onLine({
             kind: result.isError ? 'error' : 'tool',
             text: `${block.name}: ${result.isError ? result.text.split('\n').slice(0, 3).join('\n') : firstLine(result.text)}`,
@@ -293,7 +348,7 @@ export const claudeAgent: AgentRunner = {
           results.push({
             type: 'tool_result',
             tool_use_id: block.id,
-            content: result.text,
+            content: toolResultContent(result),
             ...(result.isError ? { is_error: true } : {}),
           });
         }

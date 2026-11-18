@@ -4,10 +4,13 @@ import {
   type BNode,
   type ComponentDef,
   createStore,
+  describeOp,
   flattenTokens,
   formatIssue,
   type Issue,
+  instanceRootOf,
   type NodeInput,
+  overridesOf,
   type SectionDef,
   STATE_PSEUDO,
   type Store,
@@ -68,7 +71,8 @@ const VAR_FAMILY: Record<string, string> = {
   shadow: '--shadow-',
 };
 
-const TABS = ['layers', 'insert', 'history'] as const;
+const TABS = ['layers', 'insert', 'history', 'review'] as const;
+type TabName = (typeof TABS)[number];
 
 const timeAgo = (time: number) => {
   const s = Math.round((Date.now() - time) / 1000);
@@ -85,6 +89,11 @@ export function createDefaultStore(): Store {
     ops: [{ op: 'page.create', path: '/', title: 'Home' }],
   });
   return store;
+}
+
+/** Stores files the person picks (images) and returns where they can be loaded from. */
+export interface AssetAdapter {
+  upload(file: File): Promise<{ src: string; alt?: string; width?: number; height?: number }>;
 }
 
 export interface EditorChangeDetail {
@@ -108,6 +117,7 @@ export class BowerbirdEditor extends LitElement {
   static override properties = {
     store: { attribute: false },
     actor: { attribute: false },
+    assets: { attribute: false },
     page: { type: String, reflect: true },
     tab: { state: true },
     tick: { state: true },
@@ -116,8 +126,10 @@ export class BowerbirdEditor extends LitElement {
 
   declare store: Store | undefined;
   declare actor: Actor | undefined;
+  /** Where uploaded images go. Without it, image fields take URLs only. */
+  declare assets: AssetAdapter | undefined;
   declare page: string | undefined;
-  declare tab: (typeof TABS)[number];
+  declare tab: TabName;
   declare tick: number;
   declare toast: { message: string; hint?: string } | null;
 
@@ -133,6 +145,8 @@ export class BowerbirdEditor extends LitElement {
   private disconnected = false;
   /** Layer row that holds keyboard focus (roving tabindex). */
   private focusedRow: string | null = null;
+  private collapsedRoot = false;
+  private symbolName = '';
   private visibleRows: {
     id: string;
     parent: string | null;
@@ -268,6 +282,16 @@ export class BowerbirdEditor extends LitElement {
           this.emit('bb-page', { page: c.page });
         }
         break;
+      case 'changesets':
+        this.emit('bb-changesets', { changesets: event.changesets });
+        if (
+          this.tab !== 'review' &&
+          this.openChangesets(c).length &&
+          event.changesets.at(-1)?.status.every((st) => st === 'open')
+        )
+          this.tab = 'review';
+        if (this.tab === 'review' && !this.openChangesets(c).length) this.tab = 'layers';
+        break;
       case 'error':
         this.showError(event.errors);
         this.emit('bb-error', { errors: event.errors, label: event.label });
@@ -334,7 +358,7 @@ export class BowerbirdEditor extends LitElement {
     // Editing shortcuts apply to the canvas and the layers tree only, never in preview.
     const onCanvas = !!target && (target === this || !!this.canvasHost?.contains(target));
     const onLayer = !!target?.closest?.('[role="treeitem"]');
-    if (c.preview || !c.selected || !(onCanvas || onLayer)) return;
+    if (c.readOnly || !c.selected || !(onCanvas || onLayer)) return;
     if (e.key === 'Delete' || e.key === 'Backspace') {
       e.preventDefault();
       c.removeSelected();
@@ -360,7 +384,7 @@ export class BowerbirdEditor extends LitElement {
       <div class="toolbar" role="toolbar" aria-label="Editor">${this.renderToolbar(c)}</div>
       <section class="panel left" aria-label="Page structure">
         <div class="tabs" role="tablist" aria-label="Panels" @keydown=${this.onTabKey}>
-          ${TABS.map(
+          ${this.tabs(c).map(
             (tab) => html`<button
               role="tab"
               id=${`bb-tab-${tab}`}
@@ -371,12 +395,24 @@ export class BowerbirdEditor extends LitElement {
                 this.tab = tab;
               }}
             >
-              ${tab[0]!.toUpperCase() + tab.slice(1)}
+              ${tab[0]!.toUpperCase() + tab.slice(1)}${
+                tab === 'review'
+                  ? html` <span class="count">${this.openChangesets(c).length}</span>`
+                  : nothing
+              }
             </button>`,
           )}
         </div>
         <div role="tabpanel" id="bb-tabpanel" aria-labelledby=${`bb-tab-${this.tab}`}>
-          ${this.tab === 'layers' ? this.renderLayers(c) : this.tab === 'insert' ? this.renderInsert(c) : this.renderHistory(c)}
+          ${
+            this.tab === 'layers'
+              ? this.renderLayers(c)
+              : this.tab === 'insert'
+                ? this.renderInsert(c)
+                : this.tab === 'review'
+                  ? this.renderReview(c)
+                  : this.renderHistory(c)
+          }
         </div>
       </section>
       <div class="center"><slot name="canvas"></slot></div>
@@ -393,19 +429,29 @@ export class BowerbirdEditor extends LitElement {
   }
 
   private onTabKey = (e: KeyboardEvent): void => {
-    const i = TABS.indexOf(this.tab);
+    const tabs = this.controller ? this.tabs(this.controller) : [...TABS];
+    const i = tabs.indexOf(this.tab);
     let next: number | undefined;
-    if (e.key === 'ArrowRight') next = (i + 1) % TABS.length;
-    else if (e.key === 'ArrowLeft') next = (i + TABS.length - 1) % TABS.length;
+    if (e.key === 'ArrowRight') next = (i + 1) % tabs.length;
+    else if (e.key === 'ArrowLeft') next = (i + tabs.length - 1) % tabs.length;
     else if (e.key === 'Home') next = 0;
-    else if (e.key === 'End') next = TABS.length - 1;
+    else if (e.key === 'End') next = tabs.length - 1;
     if (next === undefined) return;
     e.preventDefault();
-    this.tab = TABS[next]!;
+    this.tab = tabs[next]!;
     this.updateComplete.then(() =>
       this.renderRoot.querySelector<HTMLElement>(`#bb-tab-${this.tab}`)?.focus(),
     );
   };
+
+  private openChangesets(c: EditorController) {
+    return c.store.changesets.filter((cs) => cs.status.includes('open'));
+  }
+
+  /** Review appears only while there is something to review. */
+  private tabs(c: EditorController): TabName[] {
+    return this.openChangesets(c).length ? [...TABS] : TABS.filter((t) => t !== 'review');
+  }
 
   private canUndo(c: EditorController): boolean {
     return c.store.history.some((e) => e.actor.id === c.actor.id && e.kind !== 'undo' && !e.undone);
@@ -424,6 +470,7 @@ export class BowerbirdEditor extends LitElement {
   private renderToolbar(c: EditorController): TemplateResult {
     const doc = c.doc;
     const pages = Object.values(doc.pages);
+    const symbols = Object.values(doc.symbols ?? {});
     const themes = Object.keys(doc.themes);
     return html`
       <button
@@ -436,10 +483,27 @@ export class BowerbirdEditor extends LitElement {
         ☰
       </button>
       ${
-        pages.length > 1
-          ? html`<select class="compact" aria-label="Page" @change=${(e: Event) => c.setPage((e.target as HTMLSelectElement).value)}>
-            ${pages.map((p) => html`<option value=${p.id} .selected=${live(p.id === c.page)}>${p.title} (${p.path})</option>`)}
-          </select>`
+        pages.length > 1 || symbols.length
+          ? html`<select
+              class="compact"
+              aria-label="Page"
+              @change=${(e: Event) => {
+                const value = (e.target as HTMLSelectElement).value;
+                if (value.startsWith('symbol:')) c.editSymbol(value.slice(7));
+                else c.setPage(value);
+              }}
+            >
+              <optgroup label="Pages">
+                ${pages.map((p) => html`<option value=${p.id} .selected=${live(!c.symbolView && p.id === c.page)}>${p.title} (${p.path})</option>`)}
+              </optgroup>
+              ${
+                symbols.length
+                  ? html`<optgroup label="Linked components">
+                    ${symbols.map((sym) => html`<option value=${`symbol:${sym.id}`} .selected=${live(c.symbolView === sym.id)}>${sym.name}</option>`)}
+                  </optgroup>`
+                  : nothing
+              }
+            </select>`
           : html`<strong>${c.currentPage?.title ?? ''}</strong>`
       }
       <span class="spacer"></span>
@@ -501,8 +565,9 @@ export class BowerbirdEditor extends LitElement {
   // ---- Layers -------------------------------------------------------------------------------
 
   private renderLayers(c: EditorController): TemplateResult {
-    const page = c.currentPage;
-    if (!page) return html`<p class="empty">No page.</p>`;
+    const rootId = c.currentRootId;
+    if (!rootId) return html`<p class="empty">No page.</p>`;
+    const symbolRoot = c.currentSymbol ? c.node(rootId) : undefined;
     const rows: TemplateResult[] = [];
     const visible: typeof this.visibleRows = [];
     const walk = (id: string, depth: number) => {
@@ -514,7 +579,14 @@ export class BowerbirdEditor extends LitElement {
         if (hasChildren && open) walk(child.id, depth + 1);
       }
     };
-    walk(page.rootId, 0);
+    if (symbolRoot) {
+      // A definition shows its root as the top row (it is the component being edited).
+      const hasChildren = c.store.view.children(symbolRoot.id).length > 0;
+      const open = this.expanded.has(symbolRoot.id) || !this.collapsedRoot;
+      visible.push({ id: symbolRoot.id, parent: null, hasChildren, open });
+      rows.push(this.renderLayerRow(c, symbolRoot, 0, hasChildren, open));
+      if (open) walk(symbolRoot.id, 1);
+    } else walk(rootId, 0);
     this.visibleRows = visible;
     if (!rows.length)
       return html`<p class="empty">This page is empty. Add a section from the Insert tab.</p>`;
@@ -723,17 +795,29 @@ export class BowerbirdEditor extends LitElement {
   // ---- Insert -------------------------------------------------------------------------------
 
   private renderInsert(c: EditorController): TemplateResult {
-    const sections = c.store.registry.listSections();
+    const sections = c.symbolView ? [] : c.store.registry.listSections();
+    const symbols = c.symbolView ? [] : Object.values(c.doc.symbols ?? {});
     const target = c.selectedNode;
     return html`
-      <div class="section">
-        <h3>Sections</h3>
-        <p class="muted">Click to add ${target ? 'after the selected section' : 'to the end of the page'}, or drag onto the page.</p>
-      </div>
-      <div class="cards">
-        ${sections.map((s) => this.renderSectionCard(c, s))}
-      </div>
+      ${
+        symbols.length
+          ? html`<div class="section">
+            <h3>Linked components</h3>
+            <p class="muted">Edit one and every copy follows.</p>
+          </div>
+          <div class="cards">
+            ${symbols.map(
+              (sym) => html`<button class="card linked" @click=${() => c.insertSymbol(sym.id)}>
+                <strong>${sym.name}</strong>
+                <span>${sym.description ?? `Linked copy of ${sym.id}`}</span>
+              </button>`,
+            )}
+          </div>`
+          : nothing
+      }
+      ${sections.length ? this.renderSectionList(c, sections, !!target) : nothing}
       <div class="section"><h3>Elements</h3><p class="muted">Added inside the selected container.</p></div>
+PLACEHOLDER_SECTIONS
       <div class="elements">
         ${ELEMENTS.map(
           ([label, input]) => html`<button
@@ -747,6 +831,14 @@ export class BowerbirdEditor extends LitElement {
         )}
       </div>
     `;
+  }
+
+  private renderSectionList(c: EditorController, sections: SectionDef[], hasTarget: boolean) {
+    return html`<div class="section">
+        <h3>Sections</h3>
+        <p class="muted">Click to add ${hasTarget ? 'after the selected section' : 'to the end of the page'}, or drag onto the page.</p>
+      </div>
+      <div class="cards">${sections.map((s) => this.renderSectionCard(c, s))}</div>`;
   }
 
   private renderSectionCard(c: EditorController, s: SectionDef): TemplateResult {
@@ -824,7 +916,9 @@ export class BowerbirdEditor extends LitElement {
           <code>${node.id}</code>
           ${owner ? html`<button class="link" @click=${() => c.select(owner.id)}>in ${owner.id}</button>` : nothing}
         </div>
+        ${this.renderProvenance(node)}
       </div>
+      ${this.renderLinkPanel(c, node)}
       ${section ? this.renderSectionSettings(c, node, section) : nothing}
       ${def ? this.renderProps(c, node, def) : nothing}
       ${this.renderStyles(c, node)}
@@ -841,6 +935,158 @@ export class BowerbirdEditor extends LitElement {
         </button>
       </div>
     `;
+  }
+
+  /** "Last edited by …" from the node's provenance stamps. */
+  private renderProvenance(node: BNode): TemplateResult | typeof nothing {
+    const stamps = Object.entries(node.edited ?? {}).filter(([field]) => field !== 'node');
+    const latest = stamps.sort((a, b) => b[1].rev - a[1].rev)[0];
+    const created = node.edited?.node;
+    if (!latest && !created) return nothing;
+    const [field, stamp] = latest ?? ['node', created!];
+    const who = (s: typeof stamp) => `${s.by}${s.kind === 'agent' ? ' (agent)' : ''}`;
+    return html`<p class="muted provenance">
+      ${field === 'node' ? html`Added by ${who(stamp)}` : html`${field.replace(/^props\./, '')} last changed by ${who(stamp)}`}
+      <span>· revision ${stamp.rev}</span>
+    </p>`;
+  }
+
+  /** Linked component controls: instance info and actions, or "make linked component". */
+  private renderLinkPanel(c: EditorController, node: BNode): TemplateResult | typeof nothing {
+    const view = c.store.view;
+    if (node.symbol) {
+      const sym = c.doc.symbols?.[node.symbol];
+      return html`<div class="section linked-panel">
+        <h3>Linked component</h3>
+        <p class="muted">This is the definition of “${sym?.name ?? node.symbol}”. Changes here update every instance, except fields an instance overrides.</p>
+      </div>`;
+    }
+    if (node.link) {
+      const sym = c.doc.symbols?.[node.link.symbol];
+      const root = instanceRootOf(view, node.id);
+      const overrides = overridesOf(view, node);
+      return html`<div class="section linked-panel">
+        <h3>Linked component</h3>
+        <p class="muted">
+          ${root?.id === node.id ? 'Instance' : 'Part of an instance'} of “${sym?.name ?? node.link.symbol}”.
+          ${overrides.length ? html`Overrides: ${overrides.map((o) => o.replace(/^props\./, '')).join(', ')}.` : 'Matches the definition.'}
+        </p>
+        <div class="row-inline">
+          <button class="icon-btn" @click=${() => c.select(node.link!.node)}>Edit definition</button>
+          ${overrides.length || root?.id === node.id ? html`<button class="icon-btn" @click=${() => c.resetOverrides(node.id)}>Reset overrides</button>` : nothing}
+          ${root ? html`<button class="icon-btn" @click=${() => c.detachInstance(root.id)}>Detach</button>` : nothing}
+        </div>
+      </div>`;
+    }
+    if (!node.section || c.symbolView) return nothing;
+    return html`<div class="section">
+      <h3>Reuse</h3>
+      <div class="decl">
+        <input aria-label="Linked component name" placeholder="Name, e.g. Site footer" .value=${live(this.symbolName)}
+          @input=${(e: Event) => {
+            this.symbolName = (e.target as HTMLInputElement).value;
+            this.tick++;
+          }} />
+        <button
+          class="icon-btn"
+          ?disabled=${!this.symbolName.trim()}
+          @click=${() => {
+            if (c.createSymbol(node.id, this.symbolName.trim()).ok) this.symbolName = '';
+          }}
+        >
+          Make linked
+        </button>
+      </div>
+    </div>`;
+  }
+
+  // ---- Review -------------------------------------------------------------------------------
+
+  private reviewSelection = new Map<string, Set<number>>();
+
+  private renderReview(c: EditorController): TemplateResult {
+    const open = this.openChangesets(c);
+    if (!open.length) return html`<p class="empty">Nothing to review.</p>`;
+    return html`${open.map((cs) => {
+      const openOps = cs.status.flatMap((st, i) => (st === 'open' ? [i] : []));
+      let chosen = this.reviewSelection.get(cs.id);
+      if (!chosen) {
+        chosen = new Set(openOps);
+        this.reviewSelection.set(cs.id, chosen);
+      }
+      const selected = openOps.filter((i) => chosen!.has(i));
+      const previewing = c.ghost?.label.startsWith(`Preview of ${cs.label ?? cs.id}`);
+      return html`<div class="section changeset">
+        <div class="head">
+          <strong>${cs.label ?? cs.id}</strong>
+          <span class=${`badge actor ${cs.actor.kind}`}>${cs.actor.name ?? cs.actor.id}</span>
+        </div>
+        <ul class="ops">
+          ${openOps.map(
+            (i) => html`<li>
+              <label>
+                <input
+                  type="checkbox"
+                  .checked=${live(chosen!.has(i))}
+                  @change=${(e: Event) => {
+                    const on = (e.target as HTMLInputElement).checked;
+                    // Keep dependencies consistent: an op needs the ops that create what it uses.
+                    const toggle = (j: number, value: boolean) => {
+                      if (value) chosen!.add(j);
+                      else chosen!.delete(j);
+                    };
+                    // Checking an op checks the ops it needs; unchecking one unchecks its dependents.
+                    const cascade = (j: number, value: boolean) => {
+                      if (chosen!.has(j) === value) return;
+                      toggle(j, value);
+                      if (value) {
+                        for (const need of cs.needs[j] ?? [])
+                          if (cs.status[need] === 'open') cascade(need, true);
+                      } else {
+                        cs.needs.forEach((needs, k) => {
+                          if (needs.includes(j)) cascade(k, false);
+                        });
+                      }
+                    };
+                    toggle(i, !on);
+                    cascade(i, on);
+                    if (previewing)
+                      c.previewChangeset(
+                        cs.id,
+                        [...chosen!].sort((a, b) => a - b),
+                      );
+                    this.tick++;
+                  }}
+                />
+                <span>${describeOp(cs.ops[i]!)}</span>
+              </label>
+            </li>`,
+          )}
+        </ul>
+        ${cs.warnings.length ? html`<ul class="notes">${cs.warnings.map((w) => html`<li>${w.message}</li>`)}</ul>` : nothing}
+        <div class="row-inline">
+          <button
+            class="icon-btn"
+            aria-pressed=${!!previewing}
+            @click=${() => (previewing ? c.clearPreview() : c.previewChangeset(cs.id, selected))}
+          >
+            ${previewing ? 'Hide preview' : 'Preview'}
+          </button>
+          <button class="icon-btn primary" ?disabled=${!selected.length} @click=${() => {
+            this.reviewSelection.delete(cs.id);
+            c.acceptChangeset(cs.id, selected);
+          }}>
+            Accept ${selected.length === openOps.length ? 'all' : `${selected.length}`}
+          </button>
+          <button class="icon-btn danger" ?disabled=${!selected.length} @click=${() => {
+            this.reviewSelection.delete(cs.id);
+            c.rejectChangeset(cs.id, selected);
+          }}>
+            Reject
+          </button>
+        </div>
+      </div>`;
+    })}`;
   }
 
   private renderPageSettings(c: EditorController): TemplateResult {
@@ -961,9 +1207,26 @@ export class BowerbirdEditor extends LitElement {
         .value=${live(embedded ? '' : text)}
         placeholder=${embedded ? 'Embedded image (paste a URL to replace)' : field.kind === 'url' ? 'https:// or /path' : ''}
         @change=${onChange}
-      />`;
+      />${
+        field.kind === 'image' && this.assets
+          ? html`<label class="upload">
+              Upload image
+              <input
+                type="file"
+                accept="image/*"
+                @change=${(e: Event) => this.upload(c, node, field.key, e.target as HTMLInputElement)}
+              />
+            </label>`
+          : nothing
+      }`;
     }
-    return html`<div class="field"><label for=${id}>${field.label}${field.required ? ' *' : ''}</label>${control}</div>`;
+    const def = node.link ? c.node(node.link.node) : undefined;
+    const overridden = !!def && JSON.stringify(def.props[field.key]) !== JSON.stringify(value);
+    return html`<div class="field"><label for=${id}>${field.label}${field.required ? ' *' : ''}${
+      overridden
+        ? html` <span class="override" title="Differs from the linked component">●</span>`
+        : nothing
+    }</label>${control}</div>`;
   }
 
   private renderStyles(c: EditorController, node: BNode): TemplateResult {
@@ -1016,6 +1279,36 @@ export class BowerbirdEditor extends LitElement {
       <datalist id="bb-props">${COMMON_PROPS.map((p) => html`<option value=${p}></option>`)}</datalist>
       <datalist id="bb-tokens">${tokens.map((t) => html`<option value=${t}></option>`)}</datalist>
     </div>`;
+  }
+
+  /** Sends a picked file to the host's asset adapter and points the image at the result. */
+  private async upload(
+    c: EditorController,
+    node: BNode,
+    key: string,
+    input: HTMLInputElement,
+  ): Promise<void> {
+    const file = input.files?.[0];
+    input.value = '';
+    if (!file || !this.assets) return;
+    try {
+      const asset = await this.assets.upload(file);
+      const props: Record<string, unknown> = { [key]: asset.src };
+      if (key === 'src') {
+        if (asset.width) props.width = asset.width;
+        if (asset.height) props.height = asset.height;
+        if (asset.alt && !node.props.alt) props.alt = asset.alt;
+      }
+      c.setProps(node.id, props, 'Upload image');
+    } catch (error) {
+      c.report([
+        {
+          code: 'invalid_props',
+          nodeId: node.id,
+          message: `Upload failed: ${error instanceof Error ? error.message : String(error)}`,
+        },
+      ]);
+    }
   }
 
   private addStyle(c: EditorController, id: string, state: string): void {

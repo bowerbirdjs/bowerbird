@@ -1,4 +1,11 @@
-import { createPolicy, type HistoryEntry, outline, type Store } from '@bowerbirdjs/core';
+import {
+  type Actor,
+  createPolicy,
+  type HistoryEntry,
+  outline,
+  type Store,
+} from '@bowerbirdjs/core';
+import type { BowerbirdEditor as EditorElement } from '@bowerbirdjs/editor';
 import { renderDocument } from '@bowerbirdjs/html';
 import { BowerbirdEditor } from '@bowerbirdjs/react';
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -9,15 +16,24 @@ import {
   demoAgent,
   describeError,
 } from './agents.js';
+import { demoAssets } from './assets.js';
 import { createEventStore, EVENTS, type EventInfo } from './events.js';
 
 const USER = { kind: 'user' as const, id: 'sam', name: 'Sam (you)' };
 
 type Role = 'designer' | 'marketer';
-const ROLE_POLICY: Record<Role, ReturnType<typeof createPolicy>> = {
-  designer: createPolicy({ levels: { user: 'code', agent: 'design' } }),
-  marketer: createPolicy({ levels: { user: 'content', agent: 'design' } }),
-};
+const ROLE_LEVELS = {
+  designer: { user: 'code', agent: 'design' },
+  marketer: { user: 'content', agent: 'design' },
+} as const;
+
+/** Role decides what people may change; agents never overwrite people's edits without asking. */
+const policyFor = (role: Role, askFirst: boolean) =>
+  createPolicy({
+    levels: ROLE_LEVELS[role],
+    protectHumanEdits: 'confirm',
+    ...(askFirst ? { review: { agent: true } } : {}),
+  });
 
 const PALETTES: Record<string, Record<string, string>> = {
   Indigo: {
@@ -47,6 +63,7 @@ const PALETTES: Record<string, Record<string, string>> = {
 };
 
 const SUGGESTIONS = [
+  'Check the mobile layout',
   'Build a page for this event',
   'Add a speakers section',
   'Make the hero split',
@@ -67,10 +84,12 @@ export function App() {
   const [last, setLast] = useState<HistoryEntry | null>(null);
   const [, setRevision] = useState(0);
   const [notice, setNotice] = useState<string | null>(null);
+  const [askFirst, setAskFirst] = useState(false);
+  const editor = useRef<EditorElement | null>(null);
 
   useEffect(() => {
-    for (const s of stores.values()) s.setPolicy(ROLE_POLICY[role]);
-  }, [role, stores]);
+    for (const s of stores.values()) s.setPolicy(policyFor(role, askFirst));
+  }, [role, askFirst, stores]);
 
   const applyPalette = (name: string) => {
     const palette = PALETTES[name]!;
@@ -128,6 +147,16 @@ export function App() {
           </select>
         </label>
         <label className="control">
+          Agent changes{' '}
+          <select
+            value={askFirst ? 'review' : 'apply'}
+            onChange={(e) => setAskFirst(e.target.value === 'review')}
+          >
+            <option value="apply">Apply directly</option>
+            <option value="review">Ask me first</option>
+          </select>
+        </label>
+        <label className="control">
           Brand{' '}
           <select value="" onChange={(e) => e.target.value && applyPalette(e.target.value)}>
             <option value="" disabled>
@@ -169,7 +198,9 @@ export function App() {
       </nav>
       <main className="workspace">
         <BowerbirdEditor
+          ref={editor}
           key={eventId}
+          assets={demoAssets}
           className="editor"
           store={store}
           actor={USER}
@@ -199,7 +230,11 @@ export function App() {
           </button>
         </div>
         {panel === 'agent' ? (
-          <AgentPanel key={eventId} store={store} />
+          <AgentPanel
+            key={eventId}
+            store={store}
+            preview={(ops, actor) => editor.current?.controller?.showPreview(ops, { actor })}
+          />
         ) : (
           <DeveloperPanel store={store} last={last} />
         )}
@@ -211,7 +246,13 @@ export function App() {
 /** Stores with an assistant run in progress: one run per event at a time, across remounts. */
 const running = new WeakSet<Store>();
 
-function AgentPanel({ store }: { store: Store }) {
+function AgentPanel({
+  store,
+  preview,
+}: {
+  store: Store;
+  preview: (ops: unknown[] | null, actor: Actor) => void;
+}) {
   const [runner, setRunner] = useState<AgentRunner>(demoAgent);
   const [lines, setLines] = useState<ChatLine[]>([
     {
@@ -255,6 +296,7 @@ function AgentPanel({ store }: { store: Store }) {
         store,
         (line) => setLines((l) => [...l, line]),
         abort.current.signal,
+        preview,
       );
     } catch (error) {
       setLines((l) => [...l, { kind: 'error', text: describeError(error) }]);

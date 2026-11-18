@@ -39,6 +39,34 @@ export interface BNode {
   key?: string;
   /** Optional human-readable label. */
   name?: string;
+  /** On the root of a symbol definition: the id of the symbol it defines. */
+  symbol?: string;
+  /**
+   * On every node of a symbol instance: the definition node it mirrors. Changes to the definition
+   * flow to instance fields that still match the definition; differing fields are overrides.
+   */
+  link?: { symbol: string; node: NodeId };
+  /**
+   * Who last changed each field, for provenance and protecting people's edits from agents. Keys:
+   * `node` (created), `position`, `variant`, `styles`, `vars`, `props.<name>`.
+   */
+  edited?: Record<string, Stamp>;
+}
+
+/** Who made a change, and in which revision. */
+export interface Stamp {
+  by: string;
+  kind: Actor['kind'];
+  rev: number;
+}
+
+/** A linked component: one definition (a node subtree outside any page) and its instances. */
+export interface SymbolDef {
+  id: string;
+  name: string;
+  /** Root node of the definition subtree (its `parent` is null). */
+  rootId: NodeId;
+  description?: string;
 }
 
 export interface Page {
@@ -68,6 +96,8 @@ export interface SiteDoc {
   /** Theme name → token path → CSS value (or `{alias}`). */
   themes: Record<string, Record<string, string>>;
   breakpoints: Breakpoint[];
+  /** Linked components by id. */
+  symbols?: Record<string, SymbolDef>;
   /**
    * Highest number handed out per id prefix (`hero` → 3 means hero-1…hero-3 were used). Ids are
    * never reused, so undo and references can't land on a different node with an old id.

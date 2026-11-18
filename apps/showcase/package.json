@@ -16,6 +16,7 @@
     "@bowerbirdjs/core": "workspace:*",
     "@bowerbirdjs/editor": "workspace:*",
     "@bowerbirdjs/html": "workspace:*",
+    "@bowerbirdjs/layout": "workspace:*",
     "@bowerbirdjs/react": "workspace:*",
     "react": "^19.3.1",
     "react-dom": "^19.3.1"
