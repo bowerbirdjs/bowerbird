@@ -275,3 +275,29 @@ describe('fieldsFor', () => {
     expect(fields.find((f) => f.key === 'title')?.kind).toBe('text');
   });
 });
+
+describe('languages after a reload', () => {
+  test('a language the new document lacks is dropped, so edits keep working', () => {
+    const { store, controller } = setup();
+    store.apply({
+      ops: [
+        { op: 'section.insert', section: 'hero' },
+        { op: 'locale.set', add: ['de'] },
+      ],
+    });
+    controller.locale = 'de';
+    const fresh = createStarterDoc();
+    store.load(fresh);
+    expect(controller.locale).toBeNull();
+    const kept = createStore({ registry: createDefaultRegistry(), doc: createStarterDoc() });
+    kept.apply({
+      ops: [
+        { op: 'page.create', path: '/', title: 'Home' },
+        { op: 'locale.set', add: ['de'] },
+      ],
+    });
+    controller.locale = 'de';
+    controller.setStore(kept);
+    expect(controller.locale).toBe('de');
+  });
+});

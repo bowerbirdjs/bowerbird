@@ -1,5 +1,5 @@
 import { createAgentTools } from '@bowerbirdjs/agent';
-import { type Actor, type Store, slugify } from '@bowerbirdjs/core';
+import { type Actor, checkReadLocale, type Store, slugify } from '@bowerbirdjs/core';
 import { renderDocument } from '@bowerbirdjs/html';
 import type { LayoutProvider } from '@bowerbirdjs/layout';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
@@ -75,8 +75,11 @@ export function createMcpServer(options: McpServerOptions): Server {
   }));
 
   // MCP Apps: hosts that support interactive views render this page inline in the chat when an
-  // agent calls show_page. Other hosts just get the text result.
-  let shown: { page: string; theme?: string } | undefined;
+  // agent calls show_page. Other hosts just get the text result. Each call's result names its own
+  // resource (`ui://bowerbird/page?page=…`), so cached or prefetched views show the right page;
+  // the bare URI shows the page shown last.
+  type Shown = { page: string; theme?: string; locale?: string };
+  let shown: Shown | undefined;
   const pageTool = {
     name: SHOW_PAGE.name,
     title: 'Show page',
@@ -86,19 +89,40 @@ export function createMcpServer(options: McpServerOptions): Server {
       properties: {
         page: { type: 'string', description: 'Page id (default: the home page).' },
         theme: { type: 'string', description: 'Theme to preview, e.g. "dark".' },
+        locale: { type: 'string', description: 'Language to show (default: the default one).' },
       },
     },
     annotations: { title: 'Show page', readOnlyHint: true },
     _meta: { ui: { resourceUri: PAGE_VIEW_URI }, 'ui/resourceUri': PAGE_VIEW_URI },
   };
-  const renderShown = () => {
+  const homePage = () => {
     const pages = Object.values(store.doc.pages);
-    const page =
-      (shown && store.doc.pages[shown.page]) ?? pages.find((p) => p.path === '/') ?? pages[0];
+    return pages.find((p) => p.path === '/') ?? pages[0];
+  };
+  const pageById = (id: string) =>
+    Object.hasOwn(store.doc.pages, id) ? store.doc.pages[id] : undefined;
+  const viewUri = (s: Shown) =>
+    `${PAGE_VIEW_URI}?${new URLSearchParams(Object.entries(s).filter(([, v]) => v !== undefined) as [string, string][])}`;
+  const renderShown = (view: Shown | undefined) => {
+    const page = (view && pageById(view.page)) ?? homePage();
     if (!page) return '<!doctype html><p>No pages yet.</p>';
+    const locale =
+      view?.locale && store.doc.locales?.others.includes(view.locale) ? view.locale : undefined;
     return renderDocument(store.doc, store.registry, page.id, {
-      ...(shown?.theme && /^[a-z0-9-]+$/.test(shown.theme) ? { theme: shown.theme } : {}),
+      ...(view?.theme && /^[a-z0-9-]+$/.test(view.theme) ? { theme: view.theme } : {}),
+      ...(locale ? { locale } : {}),
     });
+  };
+  /** `ui://bowerbird/page?page=home&locale=de` → what to show; the bare URI → the last shown. */
+  const parseViewUri = (uri: string): Shown | undefined | null => {
+    if (uri === PAGE_VIEW_URI) return shown;
+    if (!uri.startsWith(`${PAGE_VIEW_URI}?`)) return null;
+    const q = new URLSearchParams(uri.slice(PAGE_VIEW_URI.length + 1));
+    const page = q.get('page');
+    if (!page) return null;
+    const theme = q.get('theme');
+    const locale = q.get('locale');
+    return { page, ...(theme ? { theme } : {}), ...(locale ? { locale } : {}) };
   };
   server.setRequestHandler(ListResourcesRequestSchema, async () => ({
     resources: [
@@ -111,14 +135,14 @@ export function createMcpServer(options: McpServerOptions): Server {
     ],
   }));
   server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
-    if (request.params.uri !== PAGE_VIEW_URI)
-      throw new Error(`Unknown resource ${request.params.uri}`);
+    const view = parseViewUri(request.params.uri);
+    if (view === null) throw new Error(`Unknown resource ${request.params.uri}`);
     return {
       contents: [
         {
-          uri: PAGE_VIEW_URI,
+          uri: request.params.uri,
           mimeType: MCP_APP_MIME,
-          text: renderShown(),
+          text: renderShown(view),
           _meta: { ui: { prefersBorder: true } },
         },
       ],
@@ -128,33 +152,41 @@ export function createMcpServer(options: McpServerOptions): Server {
   server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: [...listed, pageTool] }));
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
     if (request.params.name === SHOW_PAGE.name) {
-      const args = (request.params.arguments ?? {}) as { page?: unknown; theme?: unknown };
+      const args = (request.params.arguments ?? {}) as {
+        page?: unknown;
+        theme?: unknown;
+        locale?: unknown;
+      };
       const pages = Object.values(store.doc.pages);
-      const page =
-        typeof args.page === 'string'
-          ? store.doc.pages[args.page]
-          : (pages.find((p) => p.path === '/') ?? pages[0]);
+      const page = typeof args.page === 'string' ? pageById(args.page) : homePage();
+      const fail = (text: string) => ({ isError: true, content: [{ type: 'text', text }] });
       if (!page) {
-        return {
-          isError: true,
-          content: [
-            {
-              type: 'text',
-              text: `No page "${String(args.page)}". Pages: ${pages.map((p) => p.id).join(', ') || '(none)'}.`,
-            },
-          ],
-        };
+        return fail(
+          `No page "${String(args.page)}". Pages: ${pages.map((p) => p.id).join(', ') || '(none)'}.`,
+        );
       }
-      shown = { page: page.id, ...(typeof args.theme === 'string' ? { theme: args.theme } : {}) };
+      let locale: string | undefined;
+      if (typeof args.locale === 'string') {
+        const checked = checkReadLocale(store.doc.locales, args.locale);
+        if (checked.error) return fail(checked.error);
+        locale = checked.locale;
+      }
+      shown = {
+        page: page.id,
+        ...(typeof args.theme === 'string' ? { theme: args.theme } : {}),
+        ...(locale ? { locale } : {}),
+      };
       const url = options.previewUrl?.();
+      const resourceUri = viewUri(shown);
       return {
         content: [
           {
             type: 'text',
-            text: `Showing page ${page.id} ("${page.title}", ${page.path}).${url ? ` Live preview: ${url}${page.path}` : ''}`,
+            text: `Showing page ${page.id} ("${page.title}", ${page.path}${locale ? `, ${locale}` : ''}).${url ? ` Live preview: ${url}${page.path}` : ''}`,
           },
         ],
-        _meta: { ui: { resourceUri: PAGE_VIEW_URI } },
+        structuredContent: shown,
+        _meta: { ui: { resourceUri } },
       };
     }
     const found = tools.find((t) => t.name === request.params.name);

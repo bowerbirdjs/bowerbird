@@ -2,6 +2,7 @@ export {
   isValidPagePath,
   MAX_DEPTH,
   orderNextTo,
+  samePagePath,
   sectionVarNames,
   tokenValueMap,
   tokenVarSet,
@@ -35,7 +36,15 @@ export {
   type IssueCode,
 } from './errors.js';
 export { duplicateId, ID_PATTERN, isValidId, nextId, slugify } from './ids.js';
-export { flattenL10n, localizedProps, siteLocales, unflattenL10n } from './l10n.js';
+export {
+  checkReadLocale,
+  flattenL10n,
+  localizedPage,
+  localizedProps,
+  siteLocales,
+  unflattenL10n,
+  untranslatedProps,
+} from './l10n.js';
 export { type LintIssue, type LintSeverity, lintPage } from './lint.js';
 export {
   describeOp,
@@ -77,7 +86,12 @@ export {
   type TemplatePart,
   templateParts,
 } from './registry.js';
-export { RICH_TEXT_TAGS, richTextToPlain, sanitizeRichText } from './richtext.js';
+export {
+  RICH_TEXT_TAGS,
+  richTextToPlain,
+  sanitizeRichText,
+  stripRichTextLinks,
+} from './richtext.js';
 export {
   type ApplyResult,
   type ChangeSummary,

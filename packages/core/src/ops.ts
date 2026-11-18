@@ -5,6 +5,23 @@ import type { NodeInput } from './registry.js';
 const Id = z.string().min(1).max(200);
 const Json = z.record(z.string(), z.unknown());
 const Styles = z.record(z.string(), z.record(z.string(), z.record(z.string(), z.string())));
+/** Control characters and line/paragraph separators (U+2028, U+2029). */
+export function hasControlChars(s: string): boolean {
+  for (const ch of s) {
+    const c = ch.codePointAt(0)!;
+    if (c < 0x20 || c === 0x7f || c === 0x2028 || c === 0x2029) return true;
+  }
+  return false;
+}
+
+/** Page titles and descriptions: one line of text (they end up in <title>, meta tags, comments). */
+const PageText = (max: number) =>
+  z
+    .string()
+    .max(max)
+    .refine((s) => !hasControlChars(s), {
+      message: 'Must be one line of text: no line breaks or control characters.',
+    });
 
 export const NodeInputSchema: z.ZodType<NodeInput> = z.lazy(() =>
   z.object({
@@ -129,7 +146,7 @@ export const OpSchema = z.discriminatedUnion('op', [
       op: z.literal('page.create'),
       id: z.string().optional(),
       path: z.string(),
-      title: z.string(),
+      title: PageText(200),
     })
     .describe('Create a page.'),
   z
@@ -137,8 +154,12 @@ export const OpSchema = z.discriminatedUnion('op', [
       op: z.literal('page.update'),
       id: z.string(),
       path: z.string().optional(),
-      title: z.string().optional(),
-      description: z.string().optional(),
+      title: PageText(200).optional(),
+      description: PageText(500).optional(),
+      locale: z
+        .string()
+        .optional()
+        .describe('Translate title/description into this language; omit for the default.'),
     })
     .describe('Update page settings.'),
   z.object({ op: z.literal('page.remove'), id: z.string() }).describe('Remove a page.'),
@@ -307,7 +328,7 @@ export function describeOp(op: Op): string {
     case 'page.create':
       return `new page ${op.path} ${short(op.title)}`;
     case 'page.update':
-      return `page ${op.id}: ${[op.title && `title ${short(op.title)}`, op.path && `path ${op.path}`, op.description !== undefined && 'description'].filter(Boolean).join(', ')}`;
+      return `page ${op.id}${op.locale ? ` (${op.locale})` : ''}: ${[op.title && `title ${short(op.title)}`, op.path && `path ${op.path}`, op.description !== undefined && 'description'].filter(Boolean).join(', ')}`;
     case 'page.remove':
       return `remove page ${op.id}`;
     case 'locale.set':

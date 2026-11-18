@@ -159,6 +159,8 @@ export const image: ComponentDef = {
   }),
 };
 
+const RICH_TEXT_MAX = 40_000;
+
 const RICH_TAGS = [
   'p',
   'h1',
@@ -179,7 +181,15 @@ export const richText: ComponentDef = {
   description: `Text with inline formatting. Props: html (only ${RICH_TEXT_TAGS.map((t) => `<${t}>`).join(' ')}; links need href), tag (${RICH_TAGS.join('|')}).`,
   props: z.strictObject({
     tag: z.enum(RICH_TAGS).default('p'),
-    html: z.string().max(20_000).default('').transform(sanitizeRichText),
+    // Checked after sanitizing (escaping makes text longer), so stored values stay valid.
+    html: z
+      .string()
+      .max(100_000)
+      .default('')
+      .transform(sanitizeRichText)
+      .pipe(
+        z.string().max(RICH_TEXT_MAX, `Too long: at most ${RICH_TEXT_MAX} characters of HTML.`),
+      ),
   }),
   children: false,
   contentProps: ['html'],

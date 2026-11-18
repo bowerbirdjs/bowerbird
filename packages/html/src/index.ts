@@ -3,12 +3,14 @@ import {
   DocIndex,
   type DocView,
   type ElementSpec,
+  localizedPage,
   localizedProps,
   type Page,
   type Registry,
   type SiteDoc,
   sanitizeRichText,
   sanitizeUrl,
+  stripRichTextLinks,
 } from '@bowerbirdjs/core';
 import { type CompileCssOptions, type CssMode, compileCss } from '@bowerbirdjs/css';
 
@@ -104,7 +106,13 @@ interface Ctx {
   locale?: string;
 }
 
-function renderNode(ctx: Ctx, node: BNode, sectionName: string | undefined, depth = 0): string {
+function renderNode(
+  ctx: Ctx,
+  node: BNode,
+  sectionName: string | undefined,
+  depth = 0,
+  inLink = false,
+): string {
   // Validated documents are at most MAX_DEPTH deep; this guards documents loaded from elsewhere.
   if (depth > 200) return '';
   const def = ctx.registry.component(node.type);
@@ -140,12 +148,16 @@ function renderNode(ctx: Ctx, node: BNode, sectionName: string | undefined, dept
   const open = `<${tag}${attrString(attrs)}>`;
   if (spec.void || VOID.has(tag)) return open;
   const children = ctx.view.children(node.id);
+  // Links can't nest (browsers split them apart), so rich text inside a link loses its own links.
+  const linked = inLink || tag === 'a';
   const inner = children.length
     ? children
-        .map((c) => renderNode(ctx, c, scope, depth + 1))
+        .map((c) => renderNode(ctx, c, scope, depth + 1, linked))
         .join(node.parent === null ? '\n' : '')
     : spec.html !== undefined
-      ? sanitizeRichText(spec.html)
+      ? linked
+        ? stripRichTextLinks(sanitizeRichText(spec.html))
+        : sanitizeRichText(spec.html)
       : escapeHtml(spec.text ?? '');
   return node.parent === null ? `${open}\n${inner}\n</${tag}>` : `${open}${inner}</${tag}>`;
 }
@@ -227,14 +239,15 @@ export function renderDocument(
   options: DocumentOptions = {},
 ): string {
   const { page, html, css } = renderPage(doc, registry, pageId, options);
+  const { title, description } = localizedPage(page, options.locale);
   return [
     '<!doctype html>',
     `<html lang="${escapeAttr(options.lang ?? options.locale ?? doc.locales?.default ?? 'en')}"${options.theme ? ` data-theme="${escapeAttr(options.theme)}"` : ''}>`,
     '<head>',
     '<meta charset="utf-8">',
     '<meta name="viewport" content="width=device-width, initial-scale=1">',
-    `<title>${escapeHtml(page.title)}</title>`,
-    page.description ? `<meta name="description" content="${escapeAttr(page.description)}">` : '',
+    `<title>${escapeHtml(title)}</title>`,
+    description ? `<meta name="description" content="${escapeAttr(description)}">` : '',
     `<style>\n${css.replace(/<\/style/gi, '<\\/style')}</style>`,
     options.head ?? '',
     '</head>',

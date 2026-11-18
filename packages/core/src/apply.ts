@@ -50,7 +50,16 @@ import {
   TOKEN_PATH,
   tokenVar,
 } from './tokens.js';
-import type { Actor, BNode, NodeId, NodeStyles, Props, SectionRef, TokenTree } from './types.js';
+import type {
+  Actor,
+  BNode,
+  NodeId,
+  NodeStyles,
+  Page,
+  Props,
+  SectionRef,
+  TokenTree,
+} from './types.js';
 import { clone, deepEqual, ensure, isPlainObject, isSafeKey, own, pruneEmpty } from './util.js';
 
 export interface OpContext {
@@ -632,7 +641,24 @@ export function setProps(ctx: OpContext, node: BNode, patch: Record<string, unkn
     else merged[k] = v;
   }
   const props = validateProps(ctx, def, merged, node.id);
-  if (props) ctx.draft.setNode({ ...node, props });
+  if (!props) return undefined;
+  const next: BNode = { ...node, props };
+  if (node.link && node.l10n) {
+    // An instance that now says something else than its definition can't keep the definition's
+    // translations of that text: they translate different words. Its own translations stay.
+    const source = ctx.draft.node(node.link.node);
+    const l10n = clone(node.l10n);
+    for (const [locale, values] of Object.entries(l10n)) {
+      for (const prop of def.contentProps ?? []) {
+        if (!(prop in values) || deepEqual(props[prop], source?.props[prop])) continue;
+        if (deepEqual(values[prop], source?.l10n?.[locale]?.[prop])) delete values[prop];
+      }
+      if (!Object.keys(values).length) delete l10n[locale];
+    }
+    if (Object.keys(l10n).length) next.l10n = l10n;
+    else delete next.l10n;
+  }
+  ctx.draft.setNode(next);
   return undefined;
 }
 
@@ -854,14 +880,16 @@ const LOCALE = /^[a-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$/;
  */
 function translationLocale(ctx: OpContext, locale: string | undefined): string | undefined | null {
   const settings = ctx.draft.locales();
-  if (!locale || locale === settings?.default) return undefined;
+  // A site without languages set is in English ("en" is the implicit default).
+  if (!locale || locale === (settings?.default ?? 'en')) return undefined;
   if (settings?.others.includes(locale)) return locale;
+  const add = JSON.stringify(locale);
   fail(ctx, {
     code: 'unknown_locale',
     message: `The site has no language "${locale}".${didYouMean(locale, settings?.others ?? [])}`,
     hint: settings
-      ? `Languages: ${[settings.default, ...settings.others].join(', ')}.`
-      : 'Add it first with {"op":"locale.set","add":["' + locale + '"]}.',
+      ? `Languages: ${[settings.default, ...settings.others].join(', ')}. Add it with {"op":"locale.set","add":[${add}]}.`
+      : `Add it with {"op":"locale.set","default":"<language of the current content>","add":[${add}]}.`,
   });
   return null;
 }
@@ -919,12 +947,23 @@ function localeSet(ctx: OpContext, op: OpOf<'locale.set'>) {
       hint: 'Use codes like "en", "de", "pt-BR".',
     });
   }
-  const hasTranslations = draft.nodeIds().some((id) => draft.node(id)?.l10n);
+  const hasTranslations =
+    draft.nodeIds().some((id) => draft.node(id)?.l10n) || draft.pages().some((p) => p.l10n);
   const nextDefault = op.default ?? current?.default ?? 'en';
-  if (current && op.default && op.default !== current.default && hasTranslations) {
+  const currentDefault = current?.default ?? 'en';
+  if (op.default && op.default !== currentDefault && hasTranslations) {
     return fail(ctx, {
       code: 'invalid_op',
-      message: `Can't change the default language from "${current.default}" to "${op.default}" once there are translations.`,
+      message: `Can't change the default language from "${currentDefault}" to "${op.default}" once there are translations.`,
+    });
+  }
+  if (!op.default && op.add?.length && op.add.every((l) => l === nextDefault)) {
+    return fail(ctx, {
+      code: 'invalid_op',
+      message: `"${nextDefault}" is already the default language (the content itself).`,
+      hint: current
+        ? 'Add other languages to translate into.'
+        : `If the content is in another language, say so: {"op":"locale.set","default":"<content language>","add":["${nextDefault}"]}.`,
     });
   }
   const others = new Set(current?.others ?? []);
@@ -939,6 +978,18 @@ function localeSet(ctx: OpContext, op: OpOf<'locale.set'>) {
     others.delete(l);
   }
   others.delete(nextDefault);
+  // A page at "/de" would clash with the "de" language's pages when published.
+  for (const l of others) {
+    if (current?.others.includes(l)) continue;
+    const clash = draft.pages().find((p) => firstSegment(p.path) === l.toLowerCase());
+    if (clash) {
+      return fail(ctx, {
+        code: 'invalid_op',
+        message: `Page "${clash.id}" (${clash.path}) uses the path of language "${l}", whose pages are published under /${l}/.`,
+        hint: 'Move that page first (page.update with another path).',
+      });
+    }
+  }
   // Translations of removed languages go too (undo brings them back).
   for (const l of op.remove ?? []) {
     for (const id of draft.nodeIds()) {
@@ -949,10 +1000,57 @@ function localeSet(ctx: OpContext, op: OpOf<'locale.set'>) {
       if (!Object.keys(rest).length) delete next.l10n;
       draft.setNode(next);
     }
+    for (const p of draft.pages()) {
+      if (!p.l10n?.[l]) continue;
+      const { [l]: _, ...rest } = p.l10n;
+      const next: Page = { ...p, l10n: rest };
+      if (!Object.keys(rest).length) delete next.l10n;
+      draft.setPage(next);
+    }
   }
+  // Keep a declared default language even without translations ({default: "de", others: []}).
   draft.setLocales(
-    others.size || op.default ? { default: nextDefault, others: [...others].sort() } : undefined,
+    others.size || nextDefault !== 'en'
+      ? { default: nextDefault, others: [...others].sort() }
+      : undefined,
   );
+}
+
+/** "/de/about" → "de"; "/" → "". Lower-cased, without a trailing slash. */
+function firstSegment(path: string): string {
+  return path.split('/')[1]?.toLowerCase() ?? '';
+}
+
+/** Paths that publish to the same URL: "/about" and "/about/" (case-sensitive otherwise). */
+export function samePagePath(a: string, b: string): boolean {
+  const norm = (p: string) => (p.length > 1 ? p.replace(/\/+$/, '') : p);
+  return norm(a) === norm(b);
+}
+
+/** Refuses a path another page publishes to, or one that clashes with a language's pages. */
+function checkPagePath(ctx: OpContext, path: string, pageId?: string): boolean {
+  const other = ctx.draft.pages().find((p) => p.id !== pageId && samePagePath(p.path, path));
+  if (other) {
+    fail(ctx, {
+      code: 'duplicate_id',
+      message:
+        other.path === path
+          ? `Page "${other.id}" already uses the path "${path}".`
+          : `Page "${other.id}" already uses "${other.path}", the same URL as "${path}".`,
+    });
+    return false;
+  }
+  const settings = ctx.draft.locales();
+  const lang = settings?.others.find((l) => l.toLowerCase() === firstSegment(path));
+  if (lang) {
+    fail(ctx, {
+      code: 'invalid_op',
+      message: `"${path}" is where the "${lang}" translation of the site is published.`,
+      hint: `Pick another path; to translate a page, use props.set or page.update with "locale": "${lang}".`,
+    });
+    return false;
+  }
+  return true;
 }
 
 function styleSet(ctx: OpContext, op: OpOf<'style.set'>) {
@@ -1030,13 +1128,7 @@ function pageCreate(ctx: OpContext, op: OpOf<'page.create'>) {
       message: `Page path "${op.path}" must start with "/" and use URL-safe segments (no "//", "." or "..").`,
     });
   }
-  const pages = draft.pages();
-  if (pages.some((p) => p.path === op.path)) {
-    return fail(ctx, {
-      code: 'duplicate_id',
-      message: `A page with path "${op.path}" already exists.`,
-    });
-  }
+  if (!checkPagePath(ctx, op.path)) return;
   let id = op.id ?? (op.path === '/' ? 'home' : slugify(op.path, 'page'));
   if (!PAGE_ID_PATTERN.test(id))
     return fail(ctx, {
@@ -1061,15 +1153,38 @@ function pageCreate(ctx: OpContext, op: OpOf<'page.create'>) {
 function pageUpdate(ctx: OpContext, op: OpOf<'page.update'>) {
   const page = ctx.draft.page(op.id);
   if (!page) return fail(ctx, { code: 'not_found', message: `No page "${op.id}".` });
+  if (op.locale !== undefined) {
+    const locale = translationLocale(ctx, op.locale);
+    if (locale === null) return;
+    if (locale) {
+      if (op.path !== undefined) {
+        return fail(ctx, {
+          code: 'invalid_op',
+          message: `Pages have one path in every language ("${op.locale}" pages are published under /${op.locale}/).`,
+          hint: 'Set the path without "locale".',
+        });
+      }
+      // An empty string removes that translation.
+      const current = { ...(page.l10n?.[locale] ?? {}) };
+      for (const key of ['title', 'description'] as const) {
+        const value = op[key];
+        if (value === undefined) continue;
+        if (value === '') delete current[key];
+        else current[key] = value;
+      }
+      const l10n = { ...(page.l10n ?? {}) };
+      if (Object.keys(current).length) l10n[locale] = current;
+      else delete l10n[locale];
+      const next: Page = { ...page, l10n };
+      if (!Object.keys(l10n).length) delete next.l10n;
+      ctx.draft.setPage(next);
+      return;
+    }
+  }
   if (op.path !== undefined) {
     if (!isValidPagePath(op.path))
       return fail(ctx, { code: 'invalid_op', message: `Page path "${op.path}" is not valid.` });
-    if (ctx.draft.pages().some((p) => p.path === op.path && p.id !== page.id)) {
-      return fail(ctx, {
-        code: 'duplicate_id',
-        message: `Another page already uses "${op.path}".`,
-      });
-    }
+    if (!checkPagePath(ctx, op.path, page.id)) return;
   }
   ctx.draft.setPage({
     ...page,

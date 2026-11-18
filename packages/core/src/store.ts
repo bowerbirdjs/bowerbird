@@ -15,7 +15,7 @@ import {
 } from './provenance.js';
 import type { Registry } from './registry.js';
 import { syncInstances, unlinkDangling } from './symbols.js';
-import type { Actor, BNode, NodeId, PageId, SiteDoc, TokenTree } from './types.js';
+import type { Actor, BNode, Locales, NodeId, PageId, SiteDoc, TokenTree } from './types.js';
 import { clone, deepEqual, ensure, isPlainObject, pruneEmpty } from './util.js';
 
 export const LOCAL_USER: Actor = { kind: 'user', id: 'local' };
@@ -324,6 +324,53 @@ function rebuildThemes(entries: Record<string, unknown>): SiteDoc['themes'] {
     ensure(out, theme, () => ({}))[path] = String(value);
   }
   return out;
+}
+
+/**
+ * Reverts a change to the site's languages as a set, so later language changes survive: languages
+ * the entry removed come back (with their translations, restored per node), languages it added go
+ * (unless there is content in them now), and the default reverts unless it changed again since.
+ */
+function revertLocales(
+  draft: Draft,
+  before: Locales | undefined,
+  after: Locales | undefined,
+  warnings: Issue[],
+): void {
+  const current = draft.locales();
+  const was = new Set(before?.others ?? []);
+  const now = new Set(after?.others ?? []);
+  const others = new Set(current?.others ?? []);
+  for (const l of was) if (!now.has(l)) others.add(l);
+  for (const l of now) {
+    if (was.has(l) || !others.has(l)) continue;
+    const used =
+      draft.nodeIds().some((id) => draft.node(id)?.l10n?.[l]) ||
+      draft.pages().some((p) => p.l10n?.[l]);
+    if (used) {
+      warnings.push({
+        code: 'conflict',
+        message: `Kept language "${l}": it has translations now.`,
+      });
+    } else others.delete(l);
+  }
+  let fallback = current?.default ?? 'en';
+  const beforeDefault = before?.default ?? 'en';
+  const afterDefault = after?.default ?? 'en';
+  if (beforeDefault !== afterDefault) {
+    if (fallback === afterDefault) fallback = beforeDefault;
+    else
+      warnings.push({
+        code: 'conflict',
+        message: `The default language was changed later; kept "${fallback}".`,
+      });
+  }
+  others.delete(fallback);
+  draft.setLocales(
+    others.size || fallback !== 'en'
+      ? { default: fallback, others: [...others].sort() }
+      : undefined,
+  );
 }
 
 type RunOptions = {
@@ -1136,13 +1183,7 @@ export class Store {
     for (const change of [...entry.changes].reverse()) {
       if (change.kind === 'node') continue;
       if (change.kind === 'locales') {
-        const r = revertValue(draft.locales(), change.before, change.after);
-        if (r.conflict)
-          warnings.push({
-            code: 'conflict',
-            message: 'The site languages were changed later; kept them.',
-          });
-        else draft.setLocales(r.value as typeof change.before);
+        revertLocales(draft, change.before, change.after, warnings);
       } else if (change.kind === 'symbol') {
         const cur = draft.symbol(change.id);
         const r = revertValue(cur, change.before, change.after);

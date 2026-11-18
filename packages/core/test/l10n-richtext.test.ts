@@ -22,7 +22,8 @@ describe('sanitizeRichText', () => {
     ['<img src=x onerror=alert(1)>', ''],
     ['</em>stray close', 'stray close'],
     ['5 < 6 && 7 > 3', '5 &lt; 6 &amp;&amp; 7 &gt; 3'],
-    ['<em attr="<b>">x</em>', '&lt;em attr="<b>"&gt;x</b>'],
+    // Quoted attribute values can hold "<" and ">", as browsers parse them.
+    ['<em attr="<b>">x</em>', '<em>x</em>'],
   ])('%s', (input, expected) => {
     expect(sanitizeRichText(input)).toBe(expected);
   });

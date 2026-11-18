@@ -429,9 +429,18 @@ function followNode(inst: BNode, before: BNode, after: BNode): BNode {
   const styles = followStyles(inst.styles, before.styles, after.styles);
   if (styles) next.styles = styles;
   else delete next.styles;
-  const l10n = unflattenL10n(
-    followMap(flattenL10n(inst.l10n), flattenL10n(before.l10n), flattenL10n(after.l10n)),
-  );
+  const own = flattenL10n(inst.l10n);
+  const theirs = flattenL10n(after.l10n);
+  const merged = followMap(own, flattenL10n(before.l10n), theirs);
+  // Where the instance overrides a prop's text, the definition's translations of that prop don't
+  // apply (they translate other words): keep only the instance's own translations.
+  for (const key of new Set([...Object.keys(merged), ...Object.keys(own)])) {
+    const prop = key.slice(key.indexOf('|') + 1);
+    if (deepEqual(next.props[prop], after.props[prop])) continue;
+    if (key in own && !deepEqual(own[key], theirs[key])) merged[key] = own[key];
+    else delete merged[key];
+  }
+  const l10n = unflattenL10n(merged);
   if (l10n) next.l10n = l10n;
   else delete next.l10n;
   return next;

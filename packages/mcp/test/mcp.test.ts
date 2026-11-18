@@ -101,4 +101,39 @@ describe('MCP server', () => {
     expect(html).toContain('<h1 class="bb-hero__heading">Shown inline</h1>');
     expect(html).not.toContain('<script');
   });
+
+  it('show_page ignores prototype names, and each call names its own view', async () => {
+    const { store, client, call } = await connect();
+    store.apply({
+      ops: [
+        { op: 'section.insert', section: 'hero', content: { heading: { text: 'Hello' } } },
+        { op: 'page.create', id: 'about', path: '/about', title: 'About' },
+        { op: 'locale.set', add: ['de'] },
+        { op: 'props.set', id: 'hero-1/heading', locale: 'de', props: { text: 'Hallo' } },
+      ],
+    });
+    for (const page of ['constructor', '__proto__', 'toString']) {
+      const res = await call('show_page', { page });
+      expect(res.isError).toBe(true);
+      expect(res.text).toContain(`No page "${page}"`);
+    }
+    expect((await call('show_page', { locale: 'xx' })).isError).toBe(true);
+    const res = await client.callTool({
+      name: 'show_page',
+      arguments: { page: 'home', locale: 'de' },
+    });
+    const uri = (res._meta as { ui: { resourceUri: string } }).ui.resourceUri;
+    expect(uri).toBe(`${PAGE_VIEW_URI}?page=home&locale=de`);
+    expect(res.structuredContent).toEqual({ page: 'home', locale: 'de' });
+    // A later call shows another page, but the first call's view still shows its own page.
+    await call('show_page', { page: 'about' });
+    const first = (await client.readResource({ uri })).contents[0] as { text: string };
+    expect(first.text).toContain('Hallo');
+    expect(first.text).toContain('<html lang="de"');
+    const latest = (await client.readResource({ uri: PAGE_VIEW_URI })).contents[0] as {
+      text: string;
+    };
+    expect(latest.text).toContain('<title>About</title>');
+    await expect(client.readResource({ uri: 'ui://bowerbird/other' })).rejects.toThrow();
+  });
 });

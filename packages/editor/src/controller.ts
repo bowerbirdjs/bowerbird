@@ -198,6 +198,8 @@ export class EditorController {
     this.page = store.doc.pages[this.page] ? this.page : this.firstPage();
     this.symbolView = null;
     this.ghost = null;
+    // A language the new document doesn't have would make every text edit fail.
+    if (this.locale && !store.doc.locales?.others.includes(this.locale)) this.locale = null;
     const hadSelection = this.selected !== null;
     this.selected = null;
     this.hovered = null;

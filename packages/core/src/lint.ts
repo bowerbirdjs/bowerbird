@@ -1,4 +1,5 @@
 import { type DocView, descendants, pageNodes, sectionRootOf } from './doc.js';
+import { untranslatedProps } from './l10n.js';
 import { type Registry, templateParts } from './registry.js';
 import { richTextToPlain } from './richtext.js';
 import type { BNode, PageId } from './types.js';
@@ -18,11 +19,15 @@ const HEADING = /^h([1-6])$/;
 
 const str = (v: unknown) => (typeof v === 'string' ? v : '');
 
+/** A node's visible text: `text`, or the plain text of rich text. */
+const textOf = (n: BNode) =>
+  n.type === 'rich-text' ? richTextToPlain(str(n.props.html)) : str(n.props.text);
+
 /** Whether a node's subtree has text, a label or an image with alt text to name it by. */
 function hasAccessibleContent(view: DocView, id: string): boolean {
   return descendants(view, id).some(
     (d) =>
-      str(d.props.text).trim() !== '' ||
+      textOf(d).trim() !== '' ||
       str(d.props.label).trim() !== '' ||
       (d.type === 'image' && str(d.props.alt).trim() !== ''),
   );
@@ -65,7 +70,9 @@ export function lintPage(view: DocView, registry: Registry, pageId: PageId): Lin
     });
   }
 
-  const headings = nodes.filter((n) => n.type === 'text' && HEADING.test(str(n.props.tag)));
+  const headings = nodes.filter(
+    (n) => (n.type === 'text' || n.type === 'rich-text') && HEADING.test(str(n.props.tag)),
+  );
   const h1s = headings.filter((n) => n.props.tag === 'h1');
   if (!h1s.length && nodes.length > 1) {
     issues.push({ rule: 'single-h1', severity: 'warning', message: 'The page has no h1 heading.' });
@@ -111,6 +118,20 @@ export function lintPage(view: DocView, registry: Registry, pageId: PageId): Lin
         nodeId: n.id,
         message: `"${n.id}" has no text.`,
       });
+    }
+    // Translated URLs are rendered (and blocked) like the default ones.
+    for (const [locale, values] of Object.entries(n.l10n ?? {})) {
+      for (const attr of ['href', 'src'] as const) {
+        const url = str(values[attr]).trim();
+        if (url && isUnsafeUrl(url, attr)) {
+          issues.push({
+            rule: 'unsafe-url',
+            severity: 'error',
+            nodeId: n.id,
+            message: `"${n.id}" has a "${locale}" ${attr} with a URL scheme that will be blocked: "${url}".`,
+          });
+        }
+      }
     }
     if (n.type === 'link') {
       const href = str(n.props.href).trim();
@@ -178,18 +199,7 @@ export function lintPage(view: DocView, registry: Registry, pageId: PageId): Lin
     const missing: string[] = [];
     for (const n of nodes) {
       const content = registry.component(n.type)?.contentProps ?? [];
-      const has = n.l10n?.[locale] ?? {};
-      if (
-        content.some(
-          (k) =>
-            typeof n.props[k] === 'string' &&
-            (n.props[k] as string).trim() &&
-            k !== 'href' &&
-            k !== 'src' &&
-            !(k in has),
-        )
-      )
-        missing.push(n.id);
+      if (untranslatedProps(n, content, locale).length) missing.push(n.id);
     }
     if (missing.length) {
       issues.push({
