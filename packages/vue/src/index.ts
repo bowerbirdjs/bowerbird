@@ -2,6 +2,8 @@ import type { Actor, Store } from '@bowerbirdjs/core';
 import '@bowerbirdjs/editor/define';
 import type {
   AssetAdapter,
+  EditorAppearance,
+  EditorDensity,
   BowerbirdEditor as EditorElement,
   EditorPreset,
   EditorUI,
@@ -10,8 +12,13 @@ import { defineComponent, h, onBeforeUnmount, onMounted, type PropType, ref } fr
 
 export {
   createDefaultStore,
+  EDITOR_TOKENS,
+  type EditorAppearance,
+  type EditorDensity,
   type EditorFeature,
   type EditorPreset,
+  type EditorToken,
+  type EditorTokens,
   type EditorUI,
 } from '@bowerbirdjs/editor';
 
@@ -36,10 +43,14 @@ export const BowerbirdEditor = defineComponent({
     actor: { type: Object as PropType<Actor>, default: undefined },
     page: { type: String, default: undefined },
     assets: { type: Object as PropType<AssetAdapter>, default: undefined },
-    /** What the editor offers (preset, features, allowlists). */
+    /** What the editor offers and how it looks (preset, features, allowlists, appearance, tokens). */
     ui: { type: Object as PropType<EditorUI>, default: undefined },
     /** Shorthand for `ui.preset`. */
     preset: { type: String as PropType<EditorPreset | 'auto'>, default: undefined },
+    /** Shorthand for `ui.appearance`: `light` (default), `dark` or `auto`. */
+    appearance: { type: String as PropType<EditorAppearance>, default: undefined },
+    /** Shorthand for `ui.density`: `comfortable` (default) or `compact`. */
+    density: { type: String as PropType<EditorDensity>, default: undefined },
   },
   emits: ['change', 'transaction', 'selection', 'page-change', 'error', 'data-click'],
   setup(props, { emit, expose }) {
@@ -64,6 +75,8 @@ export const BowerbirdEditor = defineComponent({
         ...(props.assets ? { assets: props.assets } : {}),
         ...(props.ui ? { ui: props.ui } : {}),
         ...(props.preset ? { preset: props.preset } : {}),
+        ...(props.appearance ? { appearance: props.appearance } : {}),
+        ...(props.density ? { density: props.density } : {}),
       });
   },
 });

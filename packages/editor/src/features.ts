@@ -1,4 +1,5 @@
 import type { FreedomLevel } from '@bowerbirdjs/core';
+import type { EditorAppearance, EditorDensity, EditorTokens } from './theme.js';
 
 /**
  * Every part of the editor a host can turn off, with what it is. A key with a dot belongs to the
@@ -124,6 +125,15 @@ export interface EditorUI {
   elements?: readonly EditorElementName[];
   /** CSS properties the style editor offers. Default: any property. */
   styleProperties?: readonly string[];
+  /** Light or dark editor; `auto` follows the system setting. Default `light`. The page keeps its own colours. */
+  appearance?: EditorAppearance;
+  /** `compact` makes controls smaller and spacing tighter. Default `comfortable`. */
+  density?: EditorDensity;
+  /**
+   * Design tokens of the editor (see `EDITOR_TOKENS`), e.g. `{ accent: '#0f766e', radius: '2px' }`.
+   * The same as setting `--bb-editor-accent` and so on in CSS; set here, they win over CSS.
+   */
+  tokens?: EditorTokens;
 }
 
 /** The resolved settings: which features are on, and the allowlists. */

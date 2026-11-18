@@ -10,7 +10,9 @@ import {
   startDrag,
 } from './dnd.js';
 import { FIELD_PANEL_CSS, FieldPanel, type PanelField } from './field-panel.js';
+import { type IconName, iconMarkup } from './icons.js';
 import { fieldsFor } from './schema-form.js';
+import { CANVAS_TOKEN_CSS } from './theme.js';
 
 /** Where picked image files go (the element's `assets`). */
 export interface CanvasAssets {
@@ -34,64 +36,73 @@ let counter = 0;
  * Page content has its own reset in the page CSS.
  */
 export const CANVAS_CSS = `
-.bbx-host.bbx-host, .bbx-host.bbx-host :where(:not(.bb-page, .bb-page *)) { all: revert; }
-.bbx-host.bbx-host { position: absolute; inset: 0; display: block; font: 13px/1.4 system-ui, sans-serif; color: #111827; }
-.bbx-host .bbx-frame { position: relative; height: 100%; overflow: auto; background: var(--bb-editor-canvas-bg, #e9ebf0); outline: none; }
-.bbx-host .bbx-frame:focus-visible { box-shadow: inset 0 0 0 2px var(--bb-editor-accent, #4f46e5); }
+.bbx-host.bbx-host, .bbx-host.bbx-host :where(:not(.bb-page, .bb-page *, svg *)) { all: revert; }
+${CANVAS_TOKEN_CSS}
+.bbx-host.bbx-host { position: absolute; inset: 0; display: block; font: 400 var(--bbe-font-size)/1.4 var(--bbe-font); color: var(--bbe-fg); }
+.bbx-host .bbx-icon { display: block; flex: none; width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.75px;
+  stroke-linecap: round; stroke-linejoin: round; overflow: visible; }
+.bbx-host .bbx-frame { position: relative; height: 100%; overflow: auto; background: var(--bbe-canvas-bg); outline: none;
+  scrollbar-width: thin; scrollbar-color: var(--bbe-border-strong) transparent; }
+.bbx-host .bbx-frame:focus-visible { box-shadow: inset 0 0 0 2px var(--bbe-focus); }
 .bbx-host .bbx-stage { position: relative; margin: 24px auto 48px; }
 .bbx-host .bbx-viewport { position: absolute; top: 0; left: 0; transform-origin: top left; contain: layout paint; background: #fff;
-  box-shadow: 0 1px 2px rgb(15 23 42 / .08), 0 8px 28px rgb(15 23 42 / .10); }
+  color-scheme: normal; box-shadow: 0 0 0 1px rgb(0 0 0 / .05), 0 1px 2px rgb(0 0 0 / .06), 0 10px 30px rgb(0 0 0 / .10); }
 .bbx-host .bbx-overlay { position: absolute; inset: 0; pointer-events: none; z-index: 1; }
-.bbx-host .bbx-box { position: absolute; border: 1.5px solid var(--bb-editor-accent, #4f46e5); border-radius: 2px; box-sizing: border-box; }
+.bbx-host .bbx-box { position: absolute; border: 1.5px solid var(--bbe-selection); border-radius: 2px; box-sizing: border-box; }
 .bbx-host .bbx-box[hidden], .bbx-host .bbx-toolbar[hidden], .bbx-host .bbx-drop[hidden] { display: none; }
-.bbx-host .bbx-hover { border-style: dashed; }
-.bbx-host .bbx-label { position: absolute; left: -1.5px; bottom: 100%; padding: 0 6px; border-radius: 4px 4px 0 0; white-space: nowrap;
-  background: var(--bb-editor-accent, #4f46e5); color: #fff; font: 600 11px/20px system-ui, sans-serif; }
-.bbx-host .bbx-toolbar { position: absolute; display: flex; gap: 1px; padding: 2px; border-radius: 6px; pointer-events: auto;
-  background: #111827; box-shadow: 0 4px 12px rgb(0 0 0 / .2); }
-.bbx-host .bbx-toolbar button { all: unset; display: grid; place-items: center; width: 24px; height: 24px; border-radius: 4px; color: #e5e7eb;
-  cursor: pointer; font: 13px/1 system-ui, sans-serif; }
-.bbx-host .bbx-toolbar button:hover, .bbx-host .bbx-toolbar button:focus-visible { background: #374151; color: #fff; }
+.bbx-host .bbx-hover { border-width: 1px; opacity: .75; }
+.bbx-host .bbx-label { position: absolute; left: -1.5px; bottom: 100%; padding: 0 7px; border-radius: 4px 4px 0 0; white-space: nowrap;
+  background: var(--bbe-selection); color: var(--bbe-accent-fg); font: 600 11px/20px var(--bbe-font); }
+.bbx-host .bbx-toolbar { position: absolute; display: flex; gap: 2px; padding: 3px; border-radius: calc(var(--bbe-radius) + 3px); pointer-events: auto;
+  background: var(--bbe-floating-bg); color: var(--bbe-floating-fg); box-shadow: var(--bbe-shadow); }
+.bbx-host .bbx-toolbar button { all: unset; display: grid; place-items: center; width: 26px; height: 26px; border-radius: var(--bbe-radius);
+  color: color-mix(in srgb, var(--bbe-floating-fg) 78%, transparent); cursor: pointer; }
+.bbx-host .bbx-toolbar button:hover, .bbx-host .bbx-toolbar button:focus-visible { background: color-mix(in srgb, var(--bbe-floating-fg) 16%, transparent);
+  color: var(--bbe-floating-fg); }
+.bbx-host .bbx-toolbar button:focus-visible { outline: 2px solid var(--bbe-focus); outline-offset: 1px; }
+.bbx-host .bbx-toolbar button[data-action="delete"]:hover { color: color-mix(in srgb, var(--bbe-danger) 55%, var(--bbe-floating-fg)); }
 .bbx-host .bbx-toolbar button[hidden], .bbx-host .bbx-label[hidden] { display: none; }
 .bbx-host .bbx-toolbar [draggable="true"] { cursor: grab; }
-.bbx-host .bbx-drop { position: absolute; background: var(--bb-editor-accent, #4f46e5); border-radius: 2px; }
-.bbx-host .bbx-drop.bbx-inside { background: color-mix(in srgb, var(--bb-editor-accent, #4f46e5) 10%, transparent);
-  outline: 2px dashed var(--bb-editor-accent, #4f46e5); outline-offset: -2px; }
-.bbx-host .bbx-empty { padding: 64px 24px; text-align: center; font: 15px/1.5 system-ui, sans-serif; color: #64748b; }
-.bbx-host .bbx-content [contenteditable] { outline: 2px solid var(--bb-editor-accent, #4f46e5); outline-offset: 2px; cursor: text; }
+.bbx-host .bbx-drop { position: absolute; background: var(--bbe-selection); border-radius: 2px; }
+.bbx-host .bbx-drop.bbx-inside { background: color-mix(in srgb, var(--bbe-selection) 10%, transparent);
+  outline: 2px dashed var(--bbe-selection); outline-offset: -2px; }
+.bbx-host .bbx-empty { padding: 64px 24px; text-align: center; font: 15px/1.5 var(--bbe-font); color: var(--bbe-muted); }
+.bbx-host .bbx-content [contenteditable] { outline: 2px solid var(--bbe-selection); outline-offset: 2px; cursor: text; }
 .bbx-host .bbx-content :is(a, button) { cursor: default; }
 .bbx-host .bbx-banner { position: sticky; top: 0; z-index: 2; display: flex; gap: 8px; align-items: center; justify-content: center;
-  margin: 0 auto; padding: 6px 12px; font: 600 12px/1.4 system-ui, sans-serif; color: #fff; background: #111827; }
+  margin: 0 auto; padding: 7px 12px; font: 600 12px/1.4 var(--bbe-font); color: var(--bbe-floating-fg); background: var(--bbe-floating-bg);
+  box-shadow: inset 0 -3px 0 var(--bbe-accent); }
 .bbx-host .bbx-banner[hidden] { display: none; }
-.bbx-host .bbx-banner.bbx-ghost-banner { background: #b45309; }
-.bbx-host .bbx-banner.bbx-symbol-banner { background: #7c3aed; }
+.bbx-host .bbx-banner.bbx-ghost-banner { box-shadow: inset 0 -3px 0 var(--bbe-warning); }
+.bbx-host .bbx-banner.bbx-symbol-banner { box-shadow: inset 0 -3px 0 var(--bbe-linked); }
 .bbx-host .bbx-peer { position: absolute; box-sizing: border-box; border: 2px solid var(--peer); border-radius: 3px; pointer-events: none; }
 .bbx-host .bbx-peer-tag { position: absolute; right: -2px; bottom: 100%; padding: 0 6px; border-radius: 4px 4px 0 0; white-space: nowrap;
-  background: var(--peer); color: #fff; font: 600 11px/18px system-ui, sans-serif; }
+  background: var(--peer); color: #fff; font: 600 11px/18px var(--bbe-font); }
 .bbx-host .bbx-mark { position: absolute; box-sizing: border-box; border-radius: 3px; pointer-events: none; }
-.bbx-host .bbx-mark.bbx-created { outline: 2px solid #16a34a; background: rgb(22 163 74 / .08); }
-.bbx-host .bbx-mark.bbx-updated { outline: 2px dashed #d97706; background: rgb(217 119 6 / .06); }
-.bbx-host .bbx-frame:not([data-preview]) .bbx-content [data-bb-edit]:hover { outline: 1px dashed var(--bb-editor-accent, #4f46e5); outline-offset: 2px; cursor: text; }
+.bbx-host .bbx-mark.bbx-created { outline: 2px solid var(--bbe-success); background: color-mix(in srgb, var(--bbe-success) 8%, transparent); }
+.bbx-host .bbx-mark.bbx-updated { outline: 2px dashed var(--bbe-warning); background: color-mix(in srgb, var(--bbe-warning) 6%, transparent); }
+.bbx-host .bbx-frame:not([data-preview]) .bbx-content [data-bb-edit]:hover { outline: 1px dashed var(--bbe-selection); outline-offset: 2px; cursor: text; }
 .bbx-host .bbx-frame:not([data-preview]) .bbx-content [data-bb-add] { cursor: pointer; }
-.bbx-host .bbx-frame:not([data-preview]) .bbx-content [data-bb-add]:hover { outline: 1px dashed var(--bb-editor-accent, #4f46e5); outline-offset: 2px; }
+.bbx-host .bbx-frame:not([data-preview]) .bbx-content [data-bb-add]:hover { outline: 1px dashed var(--bbe-selection); outline-offset: 2px; }
 .bbx-host .bbx-frame[data-preview] .bbx-content [data-bb-add], .bbx-host .bbx-content [data-bb-add][data-bbx-off] { display: none !important; }
-.bbx-host .bbx-item-box { position: absolute; border: 1.5px dotted var(--bb-editor-accent, #4f46e5); border-radius: 4px; pointer-events: none; }
+.bbx-host .bbx-item-box { position: absolute; border: 1.5px dotted var(--bbe-selection); border-radius: 4px; pointer-events: none; }
 .bbx-host .bbx-item-box[hidden], .bbx-host .bbx-itembar[hidden] { display: none; }
-.bbx-host .bbx-itembar { position: absolute; z-index: 2; display: flex; gap: 1px; padding: 2px; border-radius: 6px; pointer-events: auto;
-  background: var(--bb-editor-accent, #4f46e5); box-shadow: 0 4px 12px rgb(0 0 0 / .2); }
-.bbx-host .bbx-itembar button { all: unset; display: grid; place-items: center; width: 22px; height: 22px; border-radius: 4px; color: #fff;
-  cursor: pointer; font: 12px/1 system-ui, sans-serif; }
-.bbx-host .bbx-itembar button:hover, .bbx-host .bbx-itembar button:focus-visible { background: rgb(255 255 255 / .2); }
+.bbx-host .bbx-itembar { position: absolute; z-index: 2; display: flex; gap: 2px; padding: 2px; border-radius: calc(var(--bbe-radius) + 2px); pointer-events: auto;
+  background: var(--bbe-selection); color: var(--bbe-accent-fg); box-shadow: var(--bbe-shadow); }
+.bbx-host .bbx-itembar button { all: unset; display: grid; place-items: center; width: 24px; height: 24px; border-radius: var(--bbe-radius);
+  color: var(--bbe-accent-fg); cursor: pointer; }
+.bbx-host .bbx-itembar .bbx-icon { width: 14px; height: 14px; }
+.bbx-host .bbx-itembar button:hover, .bbx-host .bbx-itembar button:focus-visible { background: color-mix(in srgb, var(--bbe-accent-fg) 22%, transparent); }
 .bbx-host .bbx-itembar button:disabled { opacity: .4; cursor: default; }
 ${FIELD_PANEL_CSS}`;
 
-const TOOLBAR: [action: string, label: string, glyph: string][] = [
-  ['drag', 'Drag to move', '⠿'],
-  ['parent', 'Select parent', '↰'],
-  ['up', 'Move up', '↑'],
-  ['down', 'Move down', '↓'],
-  ['duplicate', 'Duplicate', '⧉'],
-  ['delete', 'Delete', '✕'],
+const TOOLBAR: [action: string, label: string, icon: IconName][] = [
+  ['drag', 'Drag to move', 'grip'],
+  ['parent', 'Select parent', 'parent'],
+  ['up', 'Move up', 'arrow-up'],
+  ['down', 'Move down', 'arrow-down'],
+  ['duplicate', 'Duplicate', 'copy'],
+  ['delete', 'Delete', 'trash'],
 ];
 
 const TEXT_TYPES = new Set(['text', 'button', 'link', 'rich-text']);
@@ -274,12 +285,12 @@ export class CanvasView {
     this.toolbar = el('div', 'bbx-toolbar', this.overlay);
     this.toolbar.setAttribute('role', 'toolbar');
     this.toolbar.setAttribute('aria-label', 'Selected element');
-    for (const [action, label, glyph] of TOOLBAR) {
+    for (const [action, label, name] of TOOLBAR) {
       const b = el('button', '', this.toolbar);
       b.dataset.action = action;
       b.title = label;
       b.setAttribute('aria-label', label);
-      b.textContent = glyph;
+      b.innerHTML = iconMarkup(name, 'bbx-icon');
       if (action === 'drag') b.draggable = true;
     }
     this.drop = el('div', 'bbx-drop', this.overlay);
@@ -287,17 +298,18 @@ export class CanvasView {
     this.itembar = el('div', 'bbx-itembar', this.overlay);
     this.itembar.setAttribute('role', 'toolbar');
     this.itembar.setAttribute('aria-label', 'List item');
-    for (const [action, label, glyph] of [
-      ['up', 'Move item up', '↑'],
-      ['down', 'Move item down', '↓'],
-      ['duplicate', 'Copy item', '⧉'],
-      ['remove', 'Remove item', '✕'],
+    for (const [action, label, name] of [
+      ['up', 'Move item up', 'arrow-up'],
+      ['down', 'Move item down', 'arrow-down'],
+      ['duplicate', 'Copy item', 'copy'],
+      ['remove', 'Remove item', 'trash'],
     ] as const) {
       const b = el('button', '', this.itembar);
       b.dataset.action = action;
       b.title = label;
       b.setAttribute('aria-label', label);
-      b.textContent = glyph;
+      // Static markup from icons.ts.
+      b.innerHTML = iconMarkup(name, 'bbx-icon');
     }
     this.panel = new FieldPanel(this.overlay, (refocus) => {
       if (refocus) this.frame.focus({ preventScroll: true });
@@ -572,7 +584,7 @@ export class CanvasView {
       const tw = this.toolbar.offsetWidth || 160;
       const lw = this.selectLabel.hidden ? 0 : this.selectLabel.offsetWidth || 120;
       const left = Math.max(0, Math.min(rect.right - s.left - tw, this.stage.clientWidth - tw));
-      const above = rect.top - s.top - 32;
+      const above = rect.top - s.top - 38;
       // Above the element on the right, unless that would cover the label or leave the stage.
       const collides = rect.width < lw + tw + 8;
       this.toolbar.style.left = `${left}px`;
@@ -609,7 +621,7 @@ export class CanvasView {
     this.itembar.hidden = false;
     const width = this.itembar.offsetWidth || 100;
     this.itembar.style.left = `${Math.max(0, rect.right - s.left - width)}px`;
-    this.itembar.style.top = `${Math.max(0, rect.top - s.top - 28)}px`;
+    this.itembar.style.top = `${Math.max(0, rect.top - s.top - 32)}px`;
   }
 
   private itemElement(path: string): HTMLElement | null {

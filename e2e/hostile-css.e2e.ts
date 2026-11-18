@@ -101,6 +101,10 @@ describe.skipIf(!apps)('hostile host CSS', () => {
     ).toBe('1280px');
     expect(diff(published, editor.styles)).toEqual([]);
     expect(editor.styles['hero-1/actions']?.['justify-content']).toBe('flex-start');
+    // A dark editor keeps the page as it will be published.
+    await editor.editor.evaluate((e) => e.setAttribute('appearance', 'dark'));
+    const dark = await collect(editor.page, '[data-bb-canvas] .bb-page');
+    expect(diff(published, dark)).toEqual([]);
   });
 
   test('canvas chrome keeps its own styles under host rules', async () => {
@@ -119,7 +123,7 @@ describe.skipIf(!apps)('hostile host CSS', () => {
     expect(chrome).toEqual({
       host: ['0px', 'rgba(0, 0, 0, 0)', 'absolute'],
       select: ['solid', 'absolute'],
-      toolbar: ['rgb(17, 24, 39)', 'absolute'],
+      toolbar: ['rgb(24, 24, 27)', 'absolute'],
       overlay: 'rgba(0, 0, 0, 0)',
     });
     expect(errors).toEqual([]);

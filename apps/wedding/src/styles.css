@@ -145,7 +145,16 @@ textarea {
   display: grid;
   min-height: 0;
   height: 100%;
+  /* The editor takes the planner's look through its design tokens. */
   --bb-editor-accent: var(--brand);
+  --bb-editor-fg: var(--ink);
+  --bb-editor-muted: var(--muted);
+  --bb-editor-panel: var(--bg);
+  --bb-editor-border: var(--line);
+  --bb-editor-border-strong: #ddd2d6;
+  --bb-editor-canvas-bg: #eee6e2;
+  --bb-editor-radius: 8px;
+  --bb-editor-radius-lg: 12px;
   --bb-editor-left: 220px;
   --bb-editor-right: 270px;
 }
