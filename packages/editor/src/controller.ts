@@ -58,6 +58,11 @@ const sharesPresence = (store: unknown): store is PresenceStore =>
   typeof (store as PresenceStore).onPeers === 'function' &&
   typeof (store as PresenceStore).setPresence === 'function';
 
+/** `schedule.0.time` → `['schedule', 0, 'time']`. */
+export function splitDataPath(path: string): (string | number)[] {
+  return path.split('.').map((s) => (/^\d+$/.test(s) ? Number(s) : s));
+}
+
 /** What the person can do with the selected node (see `EditorController.selectionActions`). */
 export interface SelectionActions {
   delete: boolean;
@@ -212,6 +217,77 @@ export class EditorController {
   setUI(ui: EditorUI): void {
     this.ui = ui;
     this.emit({ type: 'view' });
+  }
+
+  /**
+   * Changes one piece of site data (`schedule.0.time`), e.g. from the canvas. An empty value
+   * removes it, unless `required` (then the data's schema says why it can't be empty).
+   */
+  setData(path: string, value: string, options: { required?: boolean; label?: string } = {}) {
+    const [first, ...rest] = splitDataPath(path);
+    const key = first === undefined ? '' : String(first);
+    if (!key || !this.can('data')) return undefined;
+    const removed = value.trim() === '' && !options.required;
+    return this.apply(
+      [
+        {
+          op: 'data.set',
+          key,
+          ...(rest.length ? { path: rest } : {}),
+          value: removed ? null : value,
+        },
+      ],
+      options.label ?? 'Edit',
+    );
+  }
+
+  /**
+   * Moves, copies or removes one item of a list in site data (`faq.2`). Copies get fresh values
+   * for `unique` keys (e.g. ids other data refers to). Returns the item's new path, if any.
+   */
+  dataItem(
+    path: string,
+    action: 'up' | 'down' | 'duplicate' | 'remove',
+    unique: string[] = [],
+  ): string | undefined {
+    if (!this.can('data.items')) return undefined;
+    const [first, ...rest] = splitDataPath(path);
+    const key = first === undefined ? '' : String(first);
+    const index = rest.at(-1);
+    if (!key || typeof index !== 'number') return undefined;
+    const listPath = rest.slice(0, -1);
+    let list: unknown = this.store.view.data?.(String(key));
+    for (const seg of listPath)
+      list = (list as Record<string | number, unknown> | undefined)?.[seg];
+    if (!Array.isArray(list) || index >= list.length) return undefined;
+    const at = (i: number) => [key, ...listPath, i].join('.');
+    const set = (value: unknown, label: string) =>
+      this.apply(
+        [{ op: 'data.set', key, ...(listPath.length ? { path: listPath } : {}), value }],
+        label,
+      );
+    if (action === 'remove') {
+      const result = this.apply([{ op: 'data.set', key, path: rest, value: null }], 'Remove item');
+      return result.ok ? undefined : path;
+    }
+    if (action === 'duplicate') {
+      const copy = structuredClone(list[index]) as Record<string, unknown>;
+      for (const k of unique) {
+        const taken = new Set(list.map((item) => (item as Record<string, unknown>)?.[k]));
+        const base = String(copy[k] ?? 'item').replace(/-\d+$/, '');
+        let n = 2;
+        while (taken.has(`${base}-${n}`)) n++;
+        copy[k] = `${base}-${n}`;
+      }
+      const next = [...list];
+      next.splice(index + 1, 0, copy);
+      return set(next, 'Copy item').ok ? at(index + 1) : path;
+    }
+    const to = action === 'up' ? index - 1 : index + 1;
+    if (to < 0 || to >= list.length) return path;
+    const next = [...list];
+    next.splice(to, 0, ...next.splice(index, 1));
+    return set(next, 'Move item').ok ? at(to) : path;
   }
 
   /** Tells the host which piece of site data the person clicked on the page. */

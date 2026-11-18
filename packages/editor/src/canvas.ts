@@ -1,6 +1,6 @@
-import { localizedProps, sanitizeRichText } from '@bowerbirdjs/core';
+import { type EditField, localizedProps, sanitizeRichText } from '@bowerbirdjs/core';
 import { renderPage, renderSubtree } from '@bowerbirdjs/html';
-import type { EditorController, EditorEvent } from './controller.js';
+import { type EditorController, type EditorEvent, splitDataPath } from './controller.js';
 import {
   currentDrag,
   type DropTarget,
@@ -9,6 +9,21 @@ import {
   performDrop,
   startDrag,
 } from './dnd.js';
+import { FIELD_PANEL_CSS, FieldPanel, type PanelField } from './field-panel.js';
+import { fieldsFor } from './schema-form.js';
+
+/** Where picked image files go (the element's `assets`). */
+export interface CanvasAssets {
+  upload(file: File): Promise<{ src: string; alt?: string; width?: number; height?: number }>;
+}
+
+/** Text props edited in place; the field panel offers the other content props. */
+const INLINE_PROP: Record<string, string> = {
+  text: 'text',
+  link: 'text',
+  button: 'text',
+  'rich-text': 'html',
+};
 
 let counter = 0;
 
@@ -61,7 +76,16 @@ export const CANVAS_CSS = `
 .bbx-host .bbx-mark { position: absolute; box-sizing: border-box; border-radius: 3px; pointer-events: none; }
 .bbx-host .bbx-mark.bbx-created { outline: 2px solid #16a34a; background: rgb(22 163 74 / .08); }
 .bbx-host .bbx-mark.bbx-updated { outline: 2px dashed #d97706; background: rgb(217 119 6 / .06); }
-`;
+.bbx-host .bbx-frame:not([data-preview]) .bbx-content [data-bb-edit]:hover { outline: 1px dashed var(--bb-editor-accent, #4f46e5); outline-offset: 2px; cursor: text; }
+.bbx-host .bbx-item-box { position: absolute; border: 1.5px dotted var(--bb-editor-accent, #4f46e5); border-radius: 4px; pointer-events: none; }
+.bbx-host .bbx-item-box[hidden], .bbx-host .bbx-itembar[hidden] { display: none; }
+.bbx-host .bbx-itembar { position: absolute; z-index: 2; display: flex; gap: 1px; padding: 2px; border-radius: 6px; pointer-events: auto;
+  background: var(--bb-editor-accent, #4f46e5); box-shadow: 0 4px 12px rgb(0 0 0 / .2); }
+.bbx-host .bbx-itembar button { all: unset; display: grid; place-items: center; width: 22px; height: 22px; border-radius: 4px; color: #fff;
+  cursor: pointer; font: 12px/1 system-ui, sans-serif; }
+.bbx-host .bbx-itembar button:hover, .bbx-host .bbx-itembar button:focus-visible { background: rgb(255 255 255 / .2); }
+.bbx-host .bbx-itembar button:disabled { opacity: .4; cursor: default; }
+${FIELD_PANEL_CSS}`;
 
 const TOOLBAR: [action: string, label: string, glyph: string][] = [
   ['drag', 'Drag to move', '⠿'],
@@ -193,7 +217,23 @@ export class CanvasView {
   private readonly resize: ResizeObserver;
   private frameRequest = 0;
   private needsRender = true;
-  private editing: { id: string; el: HTMLElement; original: string; key: string } | null = null;
+  private editing: {
+    id: string;
+    el: HTMLElement;
+    original: string;
+    key: string;
+    /** Editing a piece of site data in place, rather than a node's prop. */
+    data?: { path: string; required: boolean; multiline: boolean };
+  } | null = null;
+  /** Where picked image files go (set by the element from its `assets`). */
+  assets: CanvasAssets | undefined;
+  private readonly panel: FieldPanel;
+  private readonly itemBox: HTMLElement;
+  private readonly itembar: HTMLElement;
+  /** The editable data field last clicked (Enter edits it). */
+  private activeField: string | null = null;
+  /** The list item from site data last clicked. */
+  private activeItem: { path: string; unique?: string[] } | null = null;
   private dropTargetState: DropTarget | null = null;
   private scale = 1;
 
@@ -243,7 +283,34 @@ export class CanvasView {
       if (action === 'drag') b.draggable = true;
     }
     this.drop = el('div', 'bbx-drop', this.overlay);
-    for (const e of [this.hoverBox, this.selectBox, this.toolbar, this.drop]) e.hidden = true;
+    this.itemBox = el('div', 'bbx-item-box', this.overlay);
+    this.itembar = el('div', 'bbx-itembar', this.overlay);
+    this.itembar.setAttribute('role', 'toolbar');
+    this.itembar.setAttribute('aria-label', 'List item');
+    for (const [action, label, glyph] of [
+      ['up', 'Move item up', '↑'],
+      ['down', 'Move item down', '↓'],
+      ['duplicate', 'Copy item', '⧉'],
+      ['remove', 'Remove item', '✕'],
+    ] as const) {
+      const b = el('button', '', this.itembar);
+      b.dataset.action = action;
+      b.title = label;
+      b.setAttribute('aria-label', label);
+      b.textContent = glyph;
+    }
+    this.panel = new FieldPanel(this.overlay, (refocus) => {
+      if (refocus) this.frame.focus({ preventScroll: true });
+    });
+    for (const e of [
+      this.hoverBox,
+      this.selectBox,
+      this.toolbar,
+      this.drop,
+      this.itemBox,
+      this.itembar,
+    ])
+      e.hidden = true;
 
     this.off = controller.on((event) => this.onEvent(event));
     this.resize = new ResizeObserver(() => this.layout());
@@ -525,6 +592,256 @@ export class CanvasView {
     const target = this.dropTargetState;
     this.drop.classList.toggle('bbx-inside', target?.indicator.kind === 'box');
     this.place(this.drop, target?.indicator.rect ?? null);
+    this.updateItem();
+    this.updatePanel(rect);
+  }
+
+  /** The active list item's outline and toolbar (move, copy, remove). */
+  private updateItem(): void {
+    const c = this.controller;
+    const item = this.activeItem;
+    const el = item && !c.readOnly && c.can('data.items') ? this.itemElement(item.path) : null;
+    if (!el) {
+      this.itemBox.hidden = true;
+      this.itembar.hidden = true;
+      return;
+    }
+    const rect = el.getBoundingClientRect();
+    this.place(this.itemBox, rect);
+    const s = this.stage.getBoundingClientRect();
+    const index = Number(item!.path.split('.').at(-1));
+    const siblings = this.siblingItems(item!.path);
+    for (const b of this.itembar.querySelectorAll<HTMLButtonElement>('button')) {
+      const action = b.dataset.action;
+      b.disabled = (action === 'up' && index === 0) || (action === 'down' && index >= siblings - 1);
+    }
+    this.itembar.hidden = false;
+    const width = this.itembar.offsetWidth || 100;
+    this.itembar.style.left = `${Math.max(0, rect.right - s.left - width)}px`;
+    this.itembar.style.top = `${Math.max(0, rect.top - s.top - 28)}px`;
+  }
+
+  private itemElement(path: string): HTMLElement | null {
+    for (const el of this.content.querySelectorAll<HTMLElement>('[data-bb-item]')) {
+      if (readItem(el)?.path === path) return el;
+    }
+    return null;
+  }
+
+  /** How many items the list holding `path` has. */
+  private siblingItems(path: string): number {
+    const parent = path.slice(0, path.lastIndexOf('.'));
+    let n = 0;
+    for (const el of this.content.querySelectorAll<HTMLElement>('[data-bb-item]')) {
+      const p = readItem(el)?.path;
+      if (p && p.slice(0, p.lastIndexOf('.')) === parent) n++;
+    }
+    return n;
+  }
+
+  /**
+   * The field panel: a form for data opened by a double-click, or the fields of the selected
+   * element that aren't edited in place (a photo, its alt text, a link's address).
+   */
+  private updatePanel(selected: DOMRect | null): void {
+    const c = this.controller;
+    const panel = this.panel;
+    const s = this.stage.getBoundingClientRect();
+    const toStage = (r: DOMRect) => ({
+      left: r.left - s.left,
+      top: r.top - s.top,
+      bottom: r.bottom - s.top,
+      width: r.width,
+    });
+    if (panel.anchor?.startsWith('data:')) {
+      const el = this.content.querySelector<HTMLElement>(
+        `[data-bb-data="${CSS.escape(panel.anchor.slice(5))}"]`,
+      );
+      if (!el || c.readOnly) panel.close();
+      else panel.place(toStage(el.getBoundingClientRect()), this.stage.clientHeight);
+      return;
+    }
+    const node = c.selected ? c.node(c.selected) : undefined;
+    const fields =
+      node && selected && !c.readOnly && !this.editing && c.can('canvas.fields')
+        ? this.nodeFields(node.id)
+        : [];
+    if (!fields.length) {
+      if (panel.anchor?.startsWith('node:')) panel.close();
+      return;
+    }
+    const anchor = `node:${node!.id}`;
+    if (panel.anchor !== anchor) panel.show(anchor, 'Selected element', fields, { modal: false });
+    panel.place(toStage(selected!), this.stage.clientHeight);
+  }
+
+  /** Content props of a node that aren't edited in place, as panel fields. */
+  private nodeFields(id: string): PanelField[] {
+    const c = this.controller;
+    const node = c.node(id);
+    const def = node ? c.store.registry.component(node.type) : undefined;
+    if (!node || !def) return [];
+    const content = new Set(def.contentProps ?? []);
+    const inline = INLINE_PROP[node.type];
+    const props = localizedProps(node, c.locale ?? undefined);
+    return fieldsFor(def)
+      .filter((f) => content.has(f.key) && f.key !== inline)
+      .map((f): PanelField => {
+        const value = props[f.key];
+        const kind: PanelField['kind'] =
+          f.kind === 'image'
+            ? 'image'
+            : f.kind === 'url'
+              ? 'url'
+              : f.key === 'date'
+                ? 'date'
+                : f.kind === 'textarea'
+                  ? 'multiline'
+                  : 'text';
+        return {
+          label: f.label,
+          kind,
+          value: typeof value === 'string' ? value : value === undefined ? '' : String(value),
+          commit: (v) =>
+            !!c.setProps(
+              id,
+              { [f.key]: v === '' && !f.required ? null : v },
+              `Edit ${f.label.toLowerCase()}`,
+            ).ok,
+          ...(kind === 'image' && this.assets
+            ? { upload: (file: File) => this.upload(id, f.key, file) }
+            : {}),
+        };
+      });
+  }
+
+  private async upload(id: string, key: string, file: File): Promise<void> {
+    const c = this.controller;
+    try {
+      const asset = await this.assets!.upload(file);
+      const node = c.node(id);
+      const props: Record<string, unknown> = { [key]: asset.src };
+      if (key === 'src') {
+        if (asset.width) props.width = asset.width;
+        if (asset.height) props.height = asset.height;
+        if (asset.alt && !node?.props.alt) props.alt = asset.alt;
+      }
+      c.setProps(id, props, 'Upload image');
+    } catch (error) {
+      c.report([
+        {
+          code: 'invalid_props',
+          nodeId: id,
+          message: `Upload failed: ${error instanceof Error ? error.message : String(error)}`,
+        },
+      ]);
+    }
+  }
+
+  /** An element's box in stage coordinates (where overlays are placed). */
+  private stageRect(el: Element) {
+    const s = this.stage.getBoundingClientRect();
+    const r = el.getBoundingClientRect();
+    return { left: r.left - s.left, top: r.top - s.top, bottom: r.bottom - s.top, width: r.width };
+  }
+
+  /** Edits the data field last clicked (Enter on the canvas). */
+  editActiveField(): boolean {
+    if (!this.activeField) return false;
+    const el = this.content.querySelector<HTMLElement>(
+      `[data-bb-data="${CSS.escape(this.activeField)}"][data-bb-edit]`,
+    );
+    return !!el && this.startDataEditing(el);
+  }
+
+  /**
+   * Edits site data shown by an element: in place when it's one text field showing its value,
+   * otherwise in a form over it.
+   */
+  startDataEditing(el: HTMLElement): boolean {
+    const c = this.controller;
+    if (c.readOnly || !c.can('data')) return false;
+    let fields: EditField[];
+    try {
+      fields = JSON.parse(el.getAttribute('data-bb-edit') ?? '[]') as EditField[];
+    } catch {
+      return false;
+    }
+    if (!fields.length) return false;
+    if (this.editing) this.finishEditing(true);
+    const first = fields[0]!;
+    const kind = first.kind ?? 'text';
+    const shown = (el.textContent ?? '').trim();
+    const value = first.value ?? shown;
+    const owner = el.closest('[data-bb-node]')?.getAttribute('data-bb-node') ?? '';
+    const inPlace =
+      fields.length === 1 &&
+      (kind === 'text' || kind === 'multiline') &&
+      el.children.length === 0 &&
+      shown === value.trim();
+    if (!inPlace) {
+      this.panel.show(
+        `data:${first.path}`,
+        first.label ?? 'Edit',
+        fields.map((f) => ({
+          label: f.label ?? f.path.split('.').at(-1)!,
+          kind: f.kind ?? 'text',
+          value: f.value ?? '',
+          ...(f.options ? { options: f.options } : {}),
+          commit: (v: string) =>
+            !!c.setData(f.path, v, {
+              ...(f.required ? { required: true } : {}),
+              label: `Edit ${f.label?.toLowerCase() ?? 'field'}`,
+            })?.ok,
+        })),
+        { modal: true, at: { rect: this.stageRect(el), stageHeight: this.stage.clientHeight } },
+      );
+      this.updateOverlays();
+      return true;
+    }
+    this.editing = {
+      id: owner,
+      el,
+      original: value,
+      key: '',
+      data: { path: first.path, required: !!first.required, multiline: kind === 'multiline' },
+    };
+    try {
+      el.contentEditable = 'plaintext-only';
+    } catch {
+      el.contentEditable = 'true';
+    }
+    el.spellcheck = true;
+    el.focus();
+    const range = el.ownerDocument.createRange();
+    range.selectNodeContents(el);
+    const selection = el.ownerDocument.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+    const multiline = kind === 'multiline';
+    const onKey = (e: KeyboardEvent) => {
+      e.stopPropagation();
+      // No formatting in data: it's plain text.
+      if ((e.metaKey || e.ctrlKey) && ['b', 'i', 'k', 'u'].includes(e.key.toLowerCase())) {
+        e.preventDefault();
+        return;
+      }
+      if (e.key === 'Enter' && (!multiline || e.metaKey || e.ctrlKey)) {
+        e.preventDefault();
+        this.finishEditing(true);
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        this.finishEditing(false);
+      }
+    };
+    const onBlur = () => this.finishEditing(true);
+    el.addEventListener('keydown', onKey);
+    el.addEventListener('blur', onBlur, { once: true });
+    this.cleanupEditing = () => {
+      el.removeEventListener('keydown', onKey);
+      el.removeEventListener('blur', onBlur);
+    };
+    return true;
   }
 
   private idAt(target: EventTarget | null): string | null {
@@ -547,20 +864,44 @@ export class CanvasView {
         e.preventDefault();
         if (c.readOnly) return;
         const id = this.idAt(e.target);
+        const target = e.target as Element;
+        // Remember the data field and list item clicked (Enter edits the field; the item gets a toolbar).
+        this.activeField = target.closest?.('[data-bb-edit]')?.getAttribute('data-bb-data') ?? null;
+        const itemEl = target.closest?.<HTMLElement>('[data-bb-item]');
+        this.activeItem = itemEl ? readItem(itemEl) : null;
+        if (
+          this.panel.anchor?.startsWith('data:') &&
+          this.panel.anchor.slice(5) !== this.activeField
+        )
+          this.panel.close();
         c.select(id);
         this.frame.focus({ preventScroll: true });
+        this.updateOverlays();
         // Text shown from site data (e.g. a schedule item): the host can open where it's edited.
-        const path = (e.target as Element)
-          .closest?.('[data-bb-data]')
-          ?.getAttribute('data-bb-data');
+        const path = target.closest?.('[data-bb-data]')?.getAttribute('data-bb-data');
         if (path) c.openData(path, id);
       },
       true,
     );
     content.addEventListener('submit', (e) => e.preventDefault(), true);
     content.addEventListener('dblclick', (e) => {
+      // Site data first: its text sits inside a component node that isn't text itself.
+      const field = (e.target as Element).closest?.<HTMLElement>('[data-bb-edit]');
+      if (field && this.content.contains(field) && this.startDataEditing(field)) return;
       const id = this.idAt(e.target);
       if (id && !c.readOnly) this.startEditing(id);
+    });
+    this.itembar.addEventListener('click', (e) => {
+      const action = (e.target as HTMLElement).closest<HTMLElement>('button')?.dataset.action;
+      const item = this.activeItem;
+      if (!item || !action) return;
+      const next = c.dataItem(
+        item.path,
+        action as 'up' | 'down' | 'duplicate' | 'remove',
+        item.unique,
+      );
+      this.activeItem = next ? { ...item, path: next } : null;
+      this.updateOverlays();
     });
     this.frame.addEventListener('scroll', () => this.updateOverlays(), { passive: true });
 
@@ -755,6 +1096,33 @@ export class CanvasView {
     state.el.removeAttribute('contenteditable');
     // Enter or Escape: keep keyboard focus in the canvas. A blur moved it elsewhere already.
     if (focused) this.frame.focus({ preventScroll: true });
+    if (state.data) {
+      // Site data: plain text, saved through data.set (empty removes an optional value).
+      const typed = state.data.multiline ? text : text.replace(/\s*\n\s*/g, ' ');
+      const current = readData(this.controller, state.data.path);
+      if (commit && typed !== normalize(state.original)) {
+        if (current !== undefined && current !== state.original) {
+          state.el.textContent = current;
+          this.controller.report([
+            {
+              code: 'conflict',
+              path: state.data.path,
+              message: `Someone else changed ${state.data.path} while you were editing, so your text wasn't saved: “${typed.slice(0, 120)}”.`,
+              hint: 'Edit it again to replace their version.',
+            },
+          ]);
+        } else {
+          const result = this.controller.setData(state.data.path, typed, {
+            required: state.data.required,
+            label: 'Edit text',
+          });
+          if (!result?.ok) state.el.textContent = state.original;
+        }
+      } else state.el.textContent = current ?? state.original;
+      this.needsRender = true;
+      this.schedule();
+      return;
+    }
     const node = this.controller.node(state.id);
     const currentValue = node
       ? localizedProps(node, this.controller.locale ?? undefined)[state.key]
@@ -789,4 +1157,31 @@ export class CanvasView {
   get isEditing(): boolean {
     return !!this.editing;
   }
+}
+
+/** The list item an element shows (`data-bb-item`). */
+function readItem(el: Element): { path: string; unique?: string[] } | null {
+  try {
+    const item = JSON.parse(el.getAttribute('data-bb-item') ?? 'null') as {
+      path?: unknown;
+      unique?: unknown;
+    } | null;
+    if (!item || typeof item.path !== 'string') return null;
+    return {
+      path: item.path,
+      ...(Array.isArray(item.unique)
+        ? { unique: item.unique.filter((u): u is string => typeof u === 'string') }
+        : {}),
+    };
+  } catch {
+    return null;
+  }
+}
+
+/** The current value of a piece of site data, as text (undefined when absent). */
+function readData(c: EditorController, path: string): string | undefined {
+  const [key, ...rest] = splitDataPath(path);
+  let value: unknown = c.store.view.data?.(String(key));
+  for (const seg of rest) value = (value as Record<string | number, unknown> | undefined)?.[seg];
+  return value === undefined || value === null ? undefined : String(value);
 }

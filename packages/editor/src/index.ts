@@ -1,10 +1,11 @@
-export { CANVAS_CSS, CanvasView } from './canvas.js';
+export { CANVAS_CSS, type CanvasAssets, CanvasView } from './canvas.js';
 export {
   EditorController,
   type EditorEvent,
   type GhostPreview,
   type Position,
   type SelectionActions,
+  splitDataPath,
 } from './controller.js';
 export {
   currentDrag,

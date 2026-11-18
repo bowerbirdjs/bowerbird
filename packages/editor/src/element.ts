@@ -317,6 +317,7 @@ export class BowerbirdEditor extends LitElement {
     if (changed.has('store') && this.store && this.store !== c.store) c.setStore(this.store);
     if (changed.has('actor') && this.actor) c.actor = this.actor;
     if (changed.has('ui') || changed.has('preset')) c.setUI(this.effectiveUI());
+    if (this.canvas) this.canvas.assets = this.assets;
     if (requested && requested !== c.page) c.setPage(requested);
     if (this.page !== c.page) this.page = c.page;
     // Panels with nothing to show give their space to the canvas.
@@ -479,7 +480,9 @@ export class BowerbirdEditor extends LitElement {
       e.preventDefault();
       c.nudge(e.key === 'ArrowUp' ? -1 : 1);
     } else if (e.key === 'Enter' && onCanvas) {
-      if (this.canvas?.startEditing(c.selected)) e.preventDefault();
+      // The data field last clicked, else the selected text.
+      if (this.canvas?.editActiveField() || this.canvas?.startEditing(c.selected))
+        e.preventDefault();
     }
   };
 

@@ -20,11 +20,9 @@ describe.skipIf(!apps)('wedding planner POC', () => {
       .poll(() => canvas.locator('[data-bb-data="schedule.0.time"]').textContent())
       .toBe('14:30 Uhr');
 
-    // A click on fact text on the page opens its field.
+    // A click on fact text shows where it lives in Details (the group opens).
     await canvas.locator('[data-bb-data="faq.1.q"]').click();
-    await expect
-      .poll(() => page.evaluate(() => document.activeElement?.getAttribute('data-path')))
-      .toBe('faq.1.q');
+    await expect.poll(() => page.locator('[data-group="faq"]').getAttribute('open')).toBe('');
 
     // A bad value is refused, with the reason, and the page keeps the old one.
     await page.locator('[data-group="gifts"] > summary').click();
@@ -125,6 +123,110 @@ describe.skipIf(!apps)('wedding planner POC', () => {
     await expect.poll(() => site.locator('.site-menu').count()).toBe(1);
     expect(await site.locator('#location-1').isHidden()).toBe(true);
     expect(await site.locator('.site-menu a', { hasText: 'Where we celebrate' }).count()).toBe(1);
+    expect(errors).toEqual([]);
+  });
+
+  test('every field can be edited on the page itself', async () => {
+    const { page, errors } = await open(apps?.wedding ?? '', { width: 1600, height: 950 });
+    const canvas = page.locator('[data-bb-canvas]');
+    const panel = page.locator('.bbx-fields');
+    await canvas.locator('[data-bb-node="hero-1"]').waitFor();
+    const data = (path: string) =>
+      page.evaluate((p) => {
+        const raw = localStorage.getItem('bowerbird-wedding/v1');
+        return raw
+          ? p.split('.').reduce<unknown>((v, k) => (v as never)?.[k], JSON.parse(raw).draft.data)
+          : undefined;
+      }, path);
+
+    // Text shown from the facts is edited in place.
+    const title = canvas.locator('[data-bb-data="schedule.1.title"]');
+    await title.dblclick();
+    await page.keyboard.press('Control+A');
+    await page.keyboard.type('Sekt und Kuchen');
+    await page.keyboard.press('Enter');
+    await expect.poll(() => title.textContent()).toBe('Sekt und Kuchen');
+
+    // A formatted value (the time) opens a form with the right input.
+    await canvas.locator('[data-bb-data="schedule.0.time"]').dblclick();
+    await expect.poll(() => panel.isVisible()).toBe(true);
+    const time = panel.getByLabel('Time');
+    expect(await time.getAttribute('type')).toBe('time');
+    await time.fill('13:45');
+    await time.press('Enter');
+    await expect
+      .poll(() => canvas.locator('[data-bb-data="schedule.0.time"]').textContent())
+      .toBe('13:45 Uhr');
+    expect(await panel.isVisible()).toBe(false);
+
+    // Picking a venue for a schedule item.
+    await canvas.locator('[data-bb-data="schedule.1.venue"]').dblclick();
+    await panel.getByLabel('Where').selectOption({ label: 'Altes Rathaus Sonnenfeld' });
+    await expect
+      .poll(() => canvas.locator('[data-bb-data="schedule.1.venue"]').textContent())
+      .toBe('Altes Rathaus Sonnenfeld');
+    await page.keyboard.press('Escape');
+
+    // Several fields at once: a gift link's label and address. A bad address is refused.
+    await canvas.locator('[data-bb-data="gifts.links.0.label"]').dblclick();
+    await panel.getByLabel('Link').fill('http://insecure.example');
+    await panel.getByLabel('Link').press('Tab');
+    await expect
+      .poll(() =>
+        page
+          .locator('.bbx-host')
+          .evaluate(
+            () =>
+              document.querySelector('bowerbird-editor')?.shadowRoot?.querySelector('.toast')
+                ?.textContent ?? '',
+          ),
+      )
+      .toMatch(/https/);
+    await panel.getByLabel('Label').fill('Unsere Reisekasse');
+    await panel.getByLabel('Label').press('Enter');
+    await expect
+      .poll(() => canvas.locator('[data-bb-data="gifts.links.0.label"]').textContent())
+      .toBe('Unsere Reisekasse');
+
+    // The event date, from the hero.
+    await canvas.locator('[data-bb-node="hero-1/date"]').dblclick();
+    await panel.getByLabel('Event date').fill('2027-07-03');
+    await panel.getByLabel('Event date').press('Enter');
+    await expect
+      .poll(() => canvas.locator('[data-bb-node="hero-1/date"]').textContent())
+      .toBe('3. Juli 2027');
+
+    // List items: copy a question, move it up, remove it again.
+    await canvas.locator('[data-bb-data="faq.0.q"]').click();
+    const itembar = page.locator('.bbx-itembar');
+    await expect.poll(() => itembar.isVisible()).toBe(true);
+    await itembar.getByRole('button', { name: 'Copy item' }).click();
+    await expect.poll(() => canvas.locator('.ev-faq__item').count()).toBe(4);
+    await itembar.getByRole('button', { name: 'Move item down' }).click();
+    await itembar.getByRole('button', { name: 'Remove item' }).click();
+    await expect.poll(() => canvas.locator('.ev-faq__item').count()).toBe(3);
+
+    // A venue copy gets its own id, so the schedule's references stay right.
+    await canvas.locator('[data-bb-data="venues.1.name"]').click();
+    await itembar.getByRole('button', { name: 'Copy item' }).click();
+    await expect.poll(() => canvas.locator('.ev-card').count()).toBe(3);
+    await expect.poll(() => data('venues.2.id')).toBe('lindenhof-2');
+
+    // What isn't text: select the hero photo and give it alt text right there.
+    await canvas.locator('[data-bb-node="hero-1/media"]').click();
+    const alt = panel.getByLabel('Alt');
+    await alt.fill('Lena und Jonas am See');
+    await alt.press('Enter');
+    await expect
+      .poll(() => canvas.locator('[data-bb-node="hero-1/media"]').getAttribute('alt'))
+      .toBe('Lena und Jonas am See');
+
+    // Everything went through the shared history: undo takes back the last change.
+    await canvas.locator('[data-bb-node="hero-1/heading"]').click();
+    await page.keyboard.press('Control+z');
+    await expect
+      .poll(() => canvas.locator('[data-bb-node="hero-1/media"]').getAttribute('alt'))
+      .toBe('');
     expect(errors).toEqual([]);
   });
 });

@@ -77,6 +77,7 @@ export {
   defineComponent,
   defineData,
   defineSection,
+  type EditField,
   type ElementSpec,
   type NodeInput,
   Registry,

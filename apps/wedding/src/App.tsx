@@ -210,7 +210,8 @@ export function App() {
           assets={inlineAssets}
           onDataClick={({ path }) => {
             setTab('details');
-            setFocus({ path, at: Date.now(), field: true });
+            // Editing happens on the page; the details show where the value lives.
+            setFocus({ path, at: Date.now(), field: false });
           }}
           onSelection={({ id }) => {
             // Selecting what shows facts opens their group (keyboard focus stays on the page).
