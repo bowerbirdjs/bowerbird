@@ -327,7 +327,7 @@ export const cta = defineSection({
   background: var(--cta-bg); color: var(--cta-fg);
 }
 .bb-cta__heading { font-size: var(--text-3xl); font-weight: var(--weight-bold); letter-spacing: -0.02em; }
-.bb-cta__text { font-size: var(--text-lg); ${MUTED} }
+.bb-cta__text { font-size: var(--text-lg); }
 .bb-cta__button {
   display: inline-flex; margin-top: var(--space-xs); padding: var(--space-sm) var(--space-lg); border-radius: var(--radius-md);
   background: var(--cta-fg); color: var(--cta-bg); font-weight: var(--weight-semibold); text-decoration: none;

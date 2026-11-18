@@ -21,7 +21,8 @@ describe('htmlToNodes', () => {
         css: 'padding-block: var(--space-2xl)',
         children: [
           { type: 'text', props: { tag: 'h2', text: 'Our story' } },
-          { type: 'text', props: { tag: 'p', text: 'We started in 2019.' } },
+          // Emphasis and links in running text are kept as rich text.
+          { type: 'rich-text', props: { tag: 'p', html: 'We started in <strong>2019</strong>.' } },
           {
             type: 'box',
             props: { tag: 'ul' },
@@ -37,20 +38,30 @@ describe('htmlToNodes', () => {
     ]);
   });
 
-  it('drops scripts, flattens inline links and explains what changed', () => {
+  it('drops scripts, keeps inline links as rich text and explains what changed', () => {
     const { nodes, warnings } = htmlToNodes(
       '<div class="x"><script>alert(1)</script><p>See <a href="/a">this</a></p><img src="a.png"><custom-thing>Hi</custom-thing></div>',
     );
     expect(JSON.stringify(nodes)).not.toContain('alert');
+    expect(nodes[0]?.children?.[0]).toEqual({
+      type: 'rich-text',
+      props: { tag: 'p', html: 'See <a href="/a">this</a>' },
+    });
     expect(warnings).toEqual(
       expect.arrayContaining([
         '<script> elements were skipped.',
         expect.stringContaining('class attributes were ignored'),
-        expect.stringContaining('Links inside running text'),
         expect.stringContaining('no alt attribute'),
         '<custom-thing> was converted to a <div>.',
       ]),
     );
+    // Formatting in an element rich text can't render stays plain text, and says so.
+    const label = htmlToNodes('<label>Name <b>required</b></label>');
+    expect(label.nodes[0]).toEqual({
+      type: 'text',
+      props: { tag: 'label', text: 'Name required' },
+    });
+    expect(label.warnings[0]).toMatch(/imported as plain text/);
   });
 
   it('wraps loose text and keeps block links with children', () => {
@@ -58,7 +69,7 @@ describe('htmlToNodes', () => {
       '<div>Hello <em>there</em><a href="/x"><img src="a.png" alt="A"></a></div>',
     );
     expect(nodes[0]?.children).toEqual([
-      { type: 'text', props: { tag: 'p', text: 'Hello there' } },
+      { type: 'rich-text', props: { tag: 'p', html: 'Hello <em>there</em>' } },
       {
         type: 'link',
         props: { href: '/x' },

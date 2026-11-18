@@ -14,6 +14,8 @@ export const defaultTokens: TokenTree = {
       50: { $value: '#eef2ff' },
       100: { $value: '#e0e7ff' },
       200: { $value: '#c7d2fe' },
+      300: { $value: '#a5b4fc' },
+      400: { $value: '#818cf8' },
       500: { $value: '#6366f1' },
       600: { $value: '#4f46e5' },
       700: { $value: '#4338ca' },
@@ -119,7 +121,10 @@ export const defaultTokens: TokenTree = {
   },
 };
 
-/** A dark theme: alternate values for the semantic colour tokens. */
+/**
+ * A dark theme: alternate values for the semantic colour tokens. The accent is a lighter step with
+ * dark text on it, so buttons and accent text keep WCAG AA contrast on dark surfaces.
+ */
 export const darkTheme: Record<string, string> = {
   'color.surface': '{color.neutral.950}',
   'color.surface-muted': '{color.neutral.900}',
@@ -127,7 +132,9 @@ export const darkTheme: Record<string, string> = {
   'color.on-surface': '{color.neutral.50}',
   'color.on-surface-muted': '{color.neutral.400}',
   'color.on-inverse': '{color.neutral.50}',
-  'color.accent': '{color.brand.500}',
+  'color.accent': '{color.brand.400}',
+  'color.accent-hover': '{color.brand.300}',
+  'color.on-accent': '{color.neutral.950}',
   'color.accent-subtle': '{color.neutral.800}',
   'color.border': '{color.neutral.800}',
 };

@@ -6,6 +6,7 @@ import {
   type CommitEvent,
   definitionOf,
   type Issue,
+  isInstanceRoot,
   LOCAL_USER,
   type NodeInput,
   type Page,
@@ -315,6 +316,15 @@ export class EditorController {
     return this.preview || !!this.ghost;
   }
 
+  /**
+   * Preview mode, or a proposed changeset shown on the canvas: adding, moving, duplicating and
+   * deleting are off everywhere (panels too), since the canvas doesn't show the real page. While
+   * an agent's edit streams in, people can keep working in the panels.
+   */
+  get previewing(): boolean {
+    return this.preview || !!this.ghost?.changeset;
+  }
+
   node(id: string | null | undefined): BNode | undefined {
     return id ? this.store.doc.nodes[id] : undefined;
   }
@@ -327,6 +337,16 @@ export class EditorController {
   isRoot(id: string): boolean {
     const n = this.store.doc.nodes[id];
     return n?.parent === null && !n.symbol;
+  }
+
+  /**
+   * Whether `id` can be moved, duplicated or removed: not while previewing, and not inside a linked
+   * component instance (its structure follows the definition; only the instance root moves).
+   */
+  canRestructure(id: string | null | undefined): boolean {
+    const node = this.node(id);
+    if (!node || this.previewing || node.parent === null) return false;
+    return !node.link || isInstanceRoot(this.store.view, node);
   }
 
   sectionOf(id: string): BNode | undefined {
@@ -511,6 +531,30 @@ export class EditorController {
     return result;
   }
 
+  /**
+   * Whether `undo()` has something to undo: this person's own changes, and changesets they
+   * accepted (the same entries `Store.undo` finds for them).
+   */
+  canUndo(): boolean {
+    const me = this.identity.id;
+    return this.store.history.some(
+      (e) => (e.actor.id === me || e.approvedBy?.id === me) && e.kind !== 'undo' && !e.undone,
+    );
+  }
+
+  /** Whether `redo()` has something to redo (an undo by this person with no edit of theirs since). */
+  canRedo(): boolean {
+    const me = this.identity.id;
+    const history = this.store.history;
+    for (let i = history.length - 1; i >= 0; i--) {
+      const e = history[i]!;
+      if (e.actor.id !== me) continue;
+      if (e.kind === 'edit') return false;
+      if (e.kind === 'undo' && !e.redone) return true;
+    }
+    return false;
+  }
+
   undo(): ApplyResult | undefined {
     if (!this.can('undo')) return undefined;
     const result = this.store.undo({ actorId: this.identity.id, actor: this.actor });
@@ -540,7 +584,12 @@ export class EditorController {
     variant?: Record<string, string>,
   ) {
     const page = this.currentPage;
-    if (!page || (this.symbolView && !position.parent) || !this.features.section(name))
+    if (
+      !page ||
+      this.previewing ||
+      (this.symbolView && !position.parent) ||
+      !this.features.section(name)
+    )
       return undefined;
     const result = this.apply(
       [
@@ -564,7 +613,7 @@ export class EditorController {
 
   /** Inserts a node into the selected container (or after the selected node). */
   insertNode(input: NodeInput, position?: Position) {
-    if (!this.can('insert.elements')) return undefined;
+    if (!this.can('insert.elements') || this.previewing) return undefined;
     const target = position ?? this.defaultNodePosition(input.type);
     if (!target) {
       this.emit({
@@ -598,7 +647,7 @@ export class EditorController {
   }
 
   move(id: string, position: Position) {
-    if (!this.can('move')) return undefined;
+    if (!this.can('move') || this.previewing) return undefined;
     return this.apply([{ op: 'node.move', id, ...position }], 'Move');
   }
 
@@ -615,7 +664,7 @@ export class EditorController {
 
   removeSelected() {
     const node = this.selectedNode;
-    if (!node || !this.can('delete')) return undefined;
+    if (!node || !this.can('delete') || this.previewing) return undefined;
     const parent = node.parent;
     const result = this.apply([{ op: 'node.remove', id: node.id }], 'Delete');
     if (result.ok && parent && !this.isRoot(parent)) this.select(parent);
@@ -624,7 +673,7 @@ export class EditorController {
 
   duplicateSelected() {
     const node = this.selectedNode;
-    if (!node || !this.can('duplicate')) return undefined;
+    if (!node || !this.can('duplicate') || this.previewing) return undefined;
     const result = this.apply([{ op: 'node.duplicate', id: node.id }], 'Duplicate');
     if (result.ok) {
       const copy = result.summary.created.find((id) => this.node(id)?.parent === node.parent);
@@ -668,6 +717,34 @@ export class EditorController {
     this.emit({ type: 'view' });
   }
 
+  /**
+   * Updates page settings. In another language, the title and description are written as that
+   * language's translation (an empty value falls back to the default); the path is shared.
+   */
+  updatePage(
+    id: string,
+    patch: { title?: string; description?: string; path?: string },
+    label = 'Page settings',
+  ) {
+    const { path, ...text } = patch;
+    const ops: Record<string, unknown>[] = [];
+    if (Object.keys(text).length)
+      ops.push({ op: 'page.update', id, ...text, ...(this.locale ? { locale: this.locale } : {}) });
+    if (path !== undefined) ops.push({ op: 'page.update', id, path });
+    return this.apply(ops, label);
+  }
+
+  /**
+   * Sets one style declaration for the current breakpoint; an empty value removes it, as clearing
+   * a field means "no value" to people.
+   */
+  setDeclaration(id: string, property: string, value: string, options: { state?: string } = {}) {
+    const v = value.trim();
+    return v
+      ? this.setStyle(id, `${property}: ${v}`, options)
+      : this.setStyle(id, '', { ...options, remove: [property] });
+  }
+
   setStyle(
     id: string,
     css: string,
@@ -695,7 +772,8 @@ export class EditorController {
   /** Inserts an instance of a symbol where a section would go. */
   insertSymbol(symbol: string, position: Position = this.defaultSectionPosition()) {
     const page = this.currentPage;
-    if (!page || this.symbolView || !this.can('insert.components')) return undefined;
+    if (!page || this.symbolView || this.previewing || !this.can('insert.components'))
+      return undefined;
     const result = this.apply(
       [
         {

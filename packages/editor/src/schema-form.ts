@@ -29,6 +29,7 @@ const LABELS: Record<string, string> = {
   tag: 'Element',
   label: 'Accessible label',
   target: 'Open in',
+  html: 'Formatted text (HTML)',
 };
 
 const label = (key: string) =>

@@ -120,6 +120,7 @@ export {
   findRawValue,
   isStyleState,
   parseDeclarations,
+  propertyTypo,
   STATE_PSEUDO,
   type StyleCheckContext,
   tokensForProperty,

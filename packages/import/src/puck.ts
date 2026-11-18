@@ -1,4 +1,4 @@
-import type { NodeInput } from '@bowerbirdjs/core';
+import { MAX_DEPTH, type NodeInput } from '@bowerbirdjs/core';
 
 /** Puck's saved data (https://puckeditor.com): a list of components plus nested zones/slots. */
 export interface PuckData {
@@ -148,6 +148,19 @@ export function importPuck(
     }
   };
 
+  // Plain nodes go under the page root, where documents allow MAX_DEPTH levels. Generic boxes put
+  // their text one level below the box, so the converted tree can be deeper than the components.
+  let cut = 0;
+  const count = (n: NodeInput): number => 1 + (n.children ?? []).reduce((a, c) => a + count(c), 0);
+  const trim = (n: NodeInput, level: number): NodeInput => {
+    if (!n.children?.length) return n;
+    if (level >= MAX_DEPTH) {
+      cut += n.children.reduce((a, c) => a + count(c), 0);
+      return { ...n, children: [] };
+    }
+    return { ...n, children: n.children.map((c) => trim(c, level + 1)) };
+  };
+
   const ops: Record<string, unknown>[] = [];
   const place = options.page ? { page: options.page } : {};
   for (const item of data.content ?? []) {
@@ -166,13 +179,14 @@ export function importPuck(
         ...(target.content ? { content: target.content } : {}),
       });
     } else if (options.parent) {
-      ops.push({ op: 'node.insert', parent: options.parent, node: target.node });
+      ops.push({ op: 'node.insert', parent: options.parent, node: trim(target.node, 1) });
     } else {
       warnings.push(
         `"${item.type}" became plain nodes, but no parent was given; pass the page root id as "parent".`,
       );
     }
   }
+  if (cut) warnings.push(`${cut} node(s) nested deeper than ${MAX_DEPTH} levels were left out.`);
   if (unmapped.size)
     warnings.push(
       `No mapping for ${[...unmapped].join(', ')}; imported as plain boxes with their text.`,

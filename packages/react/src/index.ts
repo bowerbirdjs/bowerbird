@@ -1,7 +1,16 @@
-import type { Actor, ChangeSummary, HistoryEntry, Issue, SiteDoc, Store } from '@bowerbirdjs/core';
+import type {
+  Actor,
+  ChangeSummary,
+  Changeset,
+  HistoryEntry,
+  Issue,
+  SiteDoc,
+  Store,
+} from '@bowerbirdjs/core';
 import '@bowerbirdjs/editor/define';
 import type {
   AssetAdapter,
+  EditorAppearance,
   BowerbirdEditor as EditorElement,
   EditorPreset,
   EditorUI,
@@ -19,6 +28,7 @@ import {
 
 export {
   createDefaultStore,
+  type EditorAppearance,
   type EditorFeature,
   type EditorPreset,
   type EditorUI,
@@ -40,6 +50,8 @@ export interface BowerbirdEditorProps {
   ui?: EditorUI;
   /** Shorthand for `ui.preset`. */
   preset?: EditorPreset | 'auto';
+  /** Chrome colours: `light` (default), `dark` or `auto` (follows the system). */
+  appearance?: EditorAppearance;
   className?: string;
   style?: CSSProperties;
   onChange?: (detail: { doc: SiteDoc }) => void;
@@ -48,6 +60,8 @@ export interface BowerbirdEditorProps {
   /** The page shown changed (picked in the editor, or the shown page was removed). */
   onPageChange?: (detail: { page: string }) => void;
   onError?: (detail: { errors: Issue[]; label?: string }) => void;
+  /** Proposed changes waiting for review changed (proposed, accepted or rejected). */
+  onChangesets?: (detail: { changesets: readonly Changeset[] }) => void;
 }
 
 const EVENTS = {
@@ -56,6 +70,7 @@ const EVENTS = {
   'bb-selection': 'onSelection',
   'bb-page': 'onPageChange',
   'bb-error': 'onError',
+  'bb-changesets': 'onChangesets',
 } as const;
 
 // Layout effects run after the element is inserted but before its first (microtask) update, so it
@@ -98,6 +113,9 @@ export const BowerbirdEditor = forwardRef<EditorElement | null, BowerbirdEditorP
     useIsomorphicLayoutEffect(() => {
       if (element.current) element.current.preset = props.preset;
     }, [mounted, props.preset]);
+    useIsomorphicLayoutEffect(() => {
+      if (element.current) element.current.appearance = props.appearance;
+    }, [mounted, props.appearance]);
 
     useIsomorphicLayoutEffect(() => {
       const el = element.current;

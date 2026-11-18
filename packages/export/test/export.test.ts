@@ -42,6 +42,8 @@ describe('exportStaticSite', () => {
     ]);
     const nested = files.find((f) => f.path === 'pricing/teams/index.html')!.contents;
     expect(nested).toContain('<link rel="stylesheet" href="../../styles.css">');
+    // The page background fills the window (no white band under a short dark page).
+    expect(nested).toContain('<body style="margin:0;background:var(--color-surface,Canvas)">');
     expect(nested).toContain('<link rel="canonical" href="https://example.com/pricing/teams/">');
     expect(nested).not.toContain('<style');
     expect(files.at(-1)!.contents).toContain('<loc>https://example.com/pricing/teams/</loc>');

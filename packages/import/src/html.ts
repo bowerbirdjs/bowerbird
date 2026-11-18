@@ -1,4 +1,4 @@
-import { type NodeInput, sanitizeUrl } from '@bowerbirdjs/core';
+import { type NodeInput, RICH_TEXT_TAGS, sanitizeRichText, sanitizeUrl } from '@bowerbirdjs/core';
 import { type ChildNode, type Element, isTag, isText } from 'domhandler';
 import { parseDocument } from 'htmlparser2';
 
@@ -113,6 +113,60 @@ function textOf(node: ChildNode): string {
   return out;
 }
 
+/** Formatting rich text keeps (other inline tags, like <span>, are unwrapped). */
+const RICH = new Set<string>(RICH_TEXT_TAGS);
+/** Tags a rich-text node can render as. */
+const RICH_BLOCK_TAGS = new Set(['p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'li', 'figcaption']);
+/** Rich text longer than this (as HTML) is imported as plain text. */
+const RICH_MAX = 20_000;
+
+const escapeText = (s: string) =>
+  s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+/** Whether inline content has formatting or links that rich text can keep. */
+function hasFormatting(nodes: ChildNode[]): boolean {
+  const stack = [...nodes];
+  while (stack.length) {
+    const n = stack.pop()!;
+    if (!isTag(n)) continue;
+    const name = n.name.toLowerCase();
+    if (name !== 'br' && RICH.has(name)) return true;
+    if (!SKIP.has(name)) stack.push(...n.children);
+  }
+  return false;
+}
+
+/**
+ * Inline content as rich-text HTML: kept tags are written out (links with their href only),
+ * others unwrapped, dropped elements skipped. Iterative, so deep markup is safe. The result still
+ * goes through `sanitizeRichText`.
+ */
+function inlineHtml(nodes: ChildNode[], safeHref: (url: string) => string): string {
+  let out = '';
+  const stack: (ChildNode | string)[] = [...nodes].reverse();
+  while (stack.length) {
+    const n = stack.pop()!;
+    if (typeof n === 'string') out += n;
+    else if (isText(n)) out += escapeText(n.data.replace(/\s+/g, ' '));
+    else if (isTag(n)) {
+      const name = n.name.toLowerCase();
+      if (SKIP.has(name)) continue;
+      if (name === 'br') {
+        out += '<br>';
+        continue;
+      }
+      const keep = RICH.has(name);
+      if (keep) {
+        const href = name === 'a' ? safeHref(n.attribs.href ?? '#') : '';
+        out += name === 'a' ? `<a href="${href.replace(/"/g, '&quot;')}">` : `<${name}>`;
+        stack.push(`</${name}>`);
+      }
+      for (let i = n.children.length - 1; i >= 0; i--) stack.push(n.children[i]!);
+    }
+  }
+  return out.trim();
+}
+
 /** Text limits of the primitives, so an import never fails on one long paragraph. */
 const MAX_TEXT: Record<string, number> = { text: 5000, link: 500, button: 200 };
 
@@ -157,17 +211,28 @@ export function htmlToNodes(html: string, options: HtmlImportOptions = {}): Html
     return { type: 'text', props: { tag, text: t }, ...(el ? common(el) : {}) };
   };
 
+  /** Running text: rich text when it has emphasis or links (and the tag allows), else plain text. */
+  const inlineNode = (nodes: ChildNode[], tag: string, el?: Element): NodeInput | undefined => {
+    if (RICH_BLOCK_TAGS.has(tag) && hasFormatting(nodes)) {
+      const html = sanitizeRichText(inlineHtml(nodes, (url) => safeUrl(url, 'href')));
+      if (html && html.length <= RICH_MAX) {
+        count++;
+        return { type: 'rich-text', props: { tag, html }, ...(el ? common(el) : {}) };
+      }
+    }
+    if (hasFormatting(nodes))
+      warnings.add(
+        "Some formatted text was imported as plain text (it was too long, or in an element rich text can't render, like <label>).",
+      );
+    return textNode(nodes.map(textOf).join(''), tag, el);
+  };
+
   const children = (parent: Element, depth: number, looseTag = 'p'): NodeInput[] => {
     const out: NodeInput[] = [];
     let run: ChildNode[] = [];
     const flush = () => {
       if (!run.length) return;
-      if (run.some((n) => isTag(n) && n.name === 'a')) {
-        warnings.add(
-          'Links inside running text were flattened to plain text (rich text is not supported yet).',
-        );
-      }
-      const node = textNode(run.map(textOf).join(''), looseTag);
+      const node = inlineNode(run, looseTag);
       if (node) out.push(node);
       run = [];
     };
@@ -181,8 +246,8 @@ export function htmlToNodes(html: string, options: HtmlImportOptions = {}): Html
         run.push(child);
         continue;
       }
-      // A text-only link mixed into running text is flattened; a link on its own, or one that
-      // wraps an image or other blocks, becomes a real link node.
+      // A text-only link mixed into running text stays in that text (as rich text); a link on its
+      // own, or one that wraps an image or other blocks, becomes a real link node.
       if (blockLink && !hasBlockContent(child) && run.some((n) => textOf(n).trim())) {
         run.push(child);
         continue;
@@ -262,12 +327,10 @@ export function htmlToNodes(html: string, options: HtmlImportOptions = {}): Html
     }
     const textTag = TEXT_TAGS[tag];
     if (textTag) {
-      if (node.children.some((c) => isTag(c) && c.name === 'a')) {
-        warnings.add(
-          'Links inside running text were flattened to plain text (rich text is not supported yet).',
-        );
-      }
-      const t = textNode(textOf(node), textTag, node);
+      // <strong>, <em>… on their own are text in that tag; inside a paragraph they are formatting.
+      const t = RICH.has(tag)
+        ? textNode(textOf(node), textTag, node)
+        : inlineNode(node.children, textTag, node);
       return t ? [t] : [];
     }
     // A list item that only holds one link keeps the link (navigation lists).
@@ -280,12 +343,7 @@ export function htmlToNodes(html: string, options: HtmlImportOptions = {}): Html
       ];
     }
     if (tag === 'li' && node.children.every(isInline)) {
-      if (node.children.some((c) => isTag(c) && c.name === 'a')) {
-        warnings.add(
-          'Links inside running text were flattened to plain text (rich text is not supported yet).',
-        );
-      }
-      const t = textNode(textOf(node), 'li', node);
+      const t = inlineNode(node.children, 'li', node);
       return t ? [t] : [];
     }
     let boxTag = tag;

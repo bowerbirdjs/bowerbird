@@ -236,8 +236,20 @@ export function formatApplyResult(
         ? `Applied ${result.txId}. Document is now at revision ${result.revision}.`
         : `Nothing changed (revision ${result.revision}).`,
   ];
+  // Nested means inside another listed node: by parent links where the node still exists
+  // (imported ids aren't scoped, e.g. box-1 > text-1), by id prefix for removed ones.
+  const view = store.view;
+  const topsOf = (ids: string[]) => {
+    const set = new Set(ids);
+    return ids.filter((id) => {
+      const node = view.node(id);
+      if (!node) return !ids.some((o) => o !== id && id.startsWith(`${o}/`));
+      for (let p = node.parent; p; p = view.node(p)?.parent ?? null) if (set.has(p)) return false;
+      return true;
+    });
+  };
   const brief = (ids: string[]) => {
-    const tops = ids.filter((id) => !ids.some((o) => o !== id && id.startsWith(`${o}/`)));
+    const tops = topsOf(ids);
     return `${tops.slice(0, 20).join(', ')}${tops.length > 20 ? `, … (${tops.length - 20} more)` : ''}${
       ids.length > tops.length ? ` (+${ids.length - tops.length} nested)` : ''
     }`;
@@ -250,9 +262,7 @@ export function formatApplyResult(
   if (s.tokens) lines.push('Tokens or themes changed.');
   for (const w of result.warnings) lines.push(`Warning: ${formatIssue(w)}`);
   if (!result.dryRun && s.created.length) {
-    const roots = s.created
-      .filter((id) => !s.created.some((o) => o !== id && id.startsWith(`${o}/`)))
-      .slice(0, 5);
+    const roots = topsOf(s.created).slice(0, 5);
     for (const id of roots) lines.push(outline(store.view, { root: id, depth: 2 }));
   }
   return { text: lines.join('\n') };
@@ -818,11 +828,22 @@ export function createAgentTools(options: AgentToolsOptions): AgentTool[] {
       name: 'undo',
       title: 'Undo my last change',
       description: "Reverts your most recent apply. Other people's later edits are kept.",
-      input: z.object({}),
+      input: z.object({
+        overwrite: z
+          .boolean()
+          .optional()
+          .describe(
+            'Undo even though it removes what a person edited since. Only when the person asked.',
+          ),
+      }),
       annotations: { destructiveHint: true },
-      run: () => {
+      run: ({ overwrite }) => {
         const a = actor();
-        return formatApplyResult(store, store.undo({ actorId: a.id, actor: a }), 1);
+        return formatApplyResult(
+          store,
+          store.undo({ actorId: a.id, actor: a, ...(overwrite ? { overwrite } : {}) }),
+          1,
+        );
       },
     }),
     ...layoutTools,

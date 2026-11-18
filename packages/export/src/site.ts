@@ -8,7 +8,7 @@ import {
   samePagePath,
 } from '@bowerbirdjs/core';
 import { compileCss } from '@bowerbirdjs/css';
-import { escapeAttr, escapeHtml, renderPage } from '@bowerbirdjs/html';
+import { DOCUMENT_BODY_STYLE, escapeAttr, escapeHtml, renderPage } from '@bowerbirdjs/html';
 
 /** A file to write, with a path relative to the output folder (forward slashes). */
 export interface ExportedFile {
@@ -135,7 +135,7 @@ function pageDocument(
     `<link rel="stylesheet" href="${escapeAttr(css)}">`,
     options.head ?? '',
     '</head>',
-    '<body style="margin:0">',
+    `<body style="${DOCUMENT_BODY_STYLE}">`,
     html,
     '</body>',
     '</html>',

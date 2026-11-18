@@ -221,6 +221,12 @@ export function renderSubtree(
   return { html, css };
 }
 
+/**
+ * Inline style for a standalone document's `<body>`: the page background fills the whole window,
+ * so a short page in a dark theme doesn't end in a white band.
+ */
+export const DOCUMENT_BODY_STYLE = 'margin:0;background:var(--color-surface,Canvas)';
+
 export interface DocumentOptions extends RenderOptions {
   lang?: string;
   /** Sets `data-theme` on `<html>`. */
@@ -251,7 +257,7 @@ export function renderDocument(
     `<style>\n${css.replace(/<\/style/gi, '<\\/style')}</style>`,
     options.head ?? '',
     '</head>',
-    '<body style="margin:0">',
+    `<body style="${DOCUMENT_BODY_STYLE}">`,
     html,
     options.bodyEnd ?? '',
     '</body>',

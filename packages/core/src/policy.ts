@@ -30,6 +30,11 @@ export interface ChangesContext {
   /** The document as it would be after the changes. */
   view: DocView;
   registry: Registry;
+  /**
+   * Why records change without ops: `revert` (undo, redo, revert; the default) or `sync` (linked
+   * component instances following their definition). Only changes the wording of refusals.
+   */
+  purpose?: 'revert' | 'sync';
 }
 
 /** What happens when an agent changes something a person last edited. */
@@ -108,12 +113,14 @@ export function requiredLevel(op: Op, view: DocView, registry: Registry): Freedo
     case 'section.insert': {
       const def = registry.section(op.section);
       if (!def || !op.content) return 'layout';
-      const types = new Map(
-        templateParts(def, resolveVariant(def, op.variant).variant).map((p) => [
-          p.path,
-          p.input.type,
-        ]),
-      );
+      let parts: ReturnType<typeof templateParts>;
+      try {
+        parts = templateParts(def, resolveVariant(def, op.variant).variant);
+      } catch {
+        // A template that fails to build is reported by section.insert itself.
+        return 'layout';
+      }
+      const types = new Map(parts.map((p) => [p.path, p.input.type]));
       const designProps = Object.entries(op.content).some(
         ([path, patch]) => !contentOnly(registry, types.get(path), Object.keys(patch)),
       );
@@ -162,8 +169,13 @@ function touched(op: Op, view: DocView): { nodes: string[]; subtrees: string[] }
     case 'section.variant':
       return { nodes: [op.id], subtrees: [op.id] };
     case 'page.remove': {
+      // A locked page root locks the page itself: it can't be removed, renamed or moved.
       const page = view.page(op.id);
-      return { nodes: [], subtrees: page ? [page.rootId] : [] };
+      return { nodes: page ? [page.rootId] : [], subtrees: page ? [page.rootId] : [] };
+    }
+    case 'page.update': {
+      const page = view.page(op.id);
+      return { nodes: page ? [page.rootId] : [], subtrees: [] };
     }
     case 'node.duplicate':
     case 'props.set':
@@ -240,6 +252,31 @@ export function requiredLevelForChanges(changes: Change[], registry: Registry): 
   return level;
 }
 
+/** What each op does, in words people understand (refusals are read by people and agents). */
+const OP_PHRASES: Partial<Record<Op['op'], string>> = {
+  'section.insert': 'adding a section',
+  'section.variant': "changing a section's layout",
+  'node.insert': 'adding this element',
+  'node.move': 'moving things',
+  'node.remove': 'removing things',
+  'node.duplicate': 'duplicating things',
+  'props.set': 'changing settings other than text, links and images',
+  'text.edit': 'changing this',
+  'style.set': 'styling',
+  'vars.set': 'changing section colours and spacing',
+  'page.create': 'adding a page',
+  'page.update': 'changing page settings',
+  'page.remove': 'removing a page',
+  'locale.set': 'changing languages',
+  'symbol.create': 'making a linked component',
+  'symbol.insert': 'adding a linked component',
+  'symbol.detach': 'detaching a linked component',
+  'symbol.reset': "resetting an instance's overrides",
+  'symbol.update': 'renaming a linked component',
+  'symbol.remove': 'deleting a linked component',
+  'token.set': 'changing design tokens (brand colours, spacing, fonts)',
+};
+
 export function createPolicy(options: PolicyOptions = {}): Policy {
   const locked = new Set(options.lockedNodes ?? []);
   const levelOf = (actor: Actor): FreedomLevel =>
@@ -256,7 +293,7 @@ export function createPolicy(options: PolicyOptions = {}): Policy {
       if (RANK[has] < RANK[needed]) {
         return {
           code: 'policy',
-          message: `${actor.kind} "${actor.id}" may make ${has} changes, but ${op.op} here needs ${needed} access.`,
+          message: `${actor.kind} "${actor.id}" may make ${has} changes, but ${OP_PHRASES[op.op] ?? 'this'} (${op.op}) needs ${needed} access.`,
           hint:
             has === 'content'
               ? 'Only text, links and images can be changed; ask a person with more access for layout or design changes.'
@@ -287,14 +324,17 @@ export function createPolicy(options: PolicyOptions = {}): Policy {
       }
       return undefined;
     },
-    checkChanges({ actor, changes, view, registry }) {
+    checkChanges({ actor, changes, view, registry, purpose = 'revert' }) {
       const needed = requiredLevelForChanges(changes, registry);
       const has = levelOf(actor);
+      const sync = purpose === 'sync';
       if (RANK[has] < RANK[needed]) {
         return {
           code: 'policy',
-          message: `${actor.kind} "${actor.id}" may make ${has} changes, but reverting this needs ${needed} access.`,
-          hint: 'Ask a person with more access to undo it.',
+          message: `${actor.kind} "${actor.id}" may make ${has} changes, but ${sync ? 'updating the instances of this linked component' : 'reverting this'} needs ${needed} access.`,
+          hint: sync
+            ? 'Ask a person with more access to change the linked component.'
+            : 'Ask a person with more access to undo it.',
         };
       }
       if (!locked.size) return undefined;
@@ -310,7 +350,7 @@ export function createPolicy(options: PolicyOptions = {}): Policy {
           return {
             code: 'policy',
             nodeId: c.id,
-            message: `"${c.id}" is locked${hit !== c.id ? ` (inside locked "${hit}")` : ''}, so this can't be reverted.`,
+            message: `"${c.id}" is locked${hit !== c.id ? ` (inside locked "${hit}")` : ''}, so ${sync ? "this linked component instance can't be updated" : "this can't be reverted"}.`,
           };
         }
       }

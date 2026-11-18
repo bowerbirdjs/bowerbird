@@ -18,6 +18,7 @@ export {
   type AssetAdapter,
   BowerbirdEditor,
   createDefaultStore,
+  type EditorAppearance,
   type EditorChangeDetail,
 } from './element.js';
 export {

@@ -24,7 +24,7 @@ const PageText = (max: number) =>
     });
 
 export const NodeInputSchema: z.ZodType<NodeInput> = z.lazy(() =>
-  z.object({
+  z.strictObject({
     type: z
       .string()
       .describe('Component type: box, text, link, button, image, or a registered code component.'),
@@ -50,7 +50,7 @@ const position = {
 
 export const OpSchema = z.discriminatedUnion('op', [
   z
-    .object({
+    .strictObject({
       op: z.literal('section.insert'),
       section: z.string().describe('Section name from list_sections, e.g. "hero".'),
       page: z.string().optional().describe('Page id; the section is added to the page root.'),
@@ -67,7 +67,7 @@ export const OpSchema = z.discriminatedUnion('op', [
     })
     .describe('Insert a prebuilt section, optionally filling its parts in the same op.'),
   z
-    .object({
+    .strictObject({
       op: z.literal('section.variant'),
       id: Id.describe('Section root id, e.g. "hero-1".'),
       variant: z
@@ -78,17 +78,19 @@ export const OpSchema = z.discriminatedUnion('op', [
       'Switch a section to other variant values. Parts present in both variants keep their content, styles and variables; nodes you added are kept.',
     ),
   z
-    .object({ op: z.literal('node.insert'), parent: Id, ...position, node: NodeInputSchema })
+    .strictObject({ op: z.literal('node.insert'), parent: Id, ...position, node: NodeInputSchema })
     .describe('Insert a node (with optional children) under a parent.'),
   z
-    .object({ op: z.literal('node.move'), id: Id, parent: Id.optional(), ...position })
+    .strictObject({ op: z.literal('node.move'), id: Id, parent: Id.optional(), ...position })
     .describe('Move a node to another position or parent.'),
-  z.object({ op: z.literal('node.remove'), id: Id }).describe('Remove a node and its subtree.'),
   z
-    .object({ op: z.literal('node.duplicate'), id: Id })
+    .strictObject({ op: z.literal('node.remove'), id: Id })
+    .describe('Remove a node and its subtree.'),
+  z
+    .strictObject({ op: z.literal('node.duplicate'), id: Id })
     .describe('Copy a node and its subtree after itself.'),
   z
-    .object({
+    .strictObject({
       op: z.literal('props.set'),
       id: Id,
       props: Json.describe('Props to merge; null removes a prop.'),
@@ -99,7 +101,7 @@ export const OpSchema = z.discriminatedUnion('op', [
     })
     .describe('Merge props into a node.'),
   z
-    .object({
+    .strictObject({
       op: z.literal('text.edit'),
       id: Id,
       find: z.string().min(1),
@@ -109,7 +111,7 @@ export const OpSchema = z.discriminatedUnion('op', [
     })
     .describe('Replace one exact occurrence of text inside a text prop.'),
   z
-    .object({
+    .strictObject({
       op: z.literal('style.set'),
       id: Id,
       css: z
@@ -131,7 +133,7 @@ export const OpSchema = z.discriminatedUnion('op', [
       'Set CSS declarations on a node for a breakpoint and state. Values must use design tokens unless raw values are allowed.',
     ),
   z
-    .object({
+    .strictObject({
       op: z.literal('vars.set'),
       id: Id,
       vars: z
@@ -142,7 +144,7 @@ export const OpSchema = z.discriminatedUnion('op', [
       "Override CSS variables on a node: the section's style variables or design tokens (re-themes a subtree).",
     ),
   z
-    .object({
+    .strictObject({
       op: z.literal('page.create'),
       id: z.string().optional(),
       path: z.string(),
@@ -150,7 +152,7 @@ export const OpSchema = z.discriminatedUnion('op', [
     })
     .describe('Create a page.'),
   z
-    .object({
+    .strictObject({
       op: z.literal('page.update'),
       id: z.string(),
       path: z.string().optional(),
@@ -162,9 +164,9 @@ export const OpSchema = z.discriminatedUnion('op', [
         .describe('Translate title/description into this language; omit for the default.'),
     })
     .describe('Update page settings.'),
-  z.object({ op: z.literal('page.remove'), id: z.string() }).describe('Remove a page.'),
+  z.strictObject({ op: z.literal('page.remove'), id: z.string() }).describe('Remove a page.'),
   z
-    .object({
+    .strictObject({
       op: z.literal('locale.set'),
       default: z
         .string()
@@ -178,7 +180,7 @@ export const OpSchema = z.discriminatedUnion('op', [
     })
     .describe('Set the languages the site is published in.'),
   z
-    .object({
+    .strictObject({
       op: z.literal('symbol.create'),
       id: Id.describe('Node to turn into a linked component; it becomes the first instance.'),
       name: z.string().min(1).max(80),
@@ -189,7 +191,7 @@ export const OpSchema = z.discriminatedUnion('op', [
       'Make a linked component (symbol) from a node and its subtree. Editing the definition updates every instance.',
     ),
   z
-    .object({
+    .strictObject({
       op: z.literal('symbol.insert'),
       symbol: z.string().describe('Symbol id from get_context.'),
       page: z.string().optional(),
@@ -203,15 +205,15 @@ export const OpSchema = z.discriminatedUnion('op', [
     })
     .describe('Insert an instance of a symbol.'),
   z
-    .object({ op: z.literal('symbol.detach'), id: Id.describe('Instance root id.') })
+    .strictObject({ op: z.literal('symbol.detach'), id: Id.describe('Instance root id.') })
     .describe('Unlink an instance: its nodes stay but stop following the definition.'),
   z
-    .object({ op: z.literal('symbol.reset'), id: Id })
+    .strictObject({ op: z.literal('symbol.reset'), id: Id })
     .describe(
       'Drop local overrides on an instance node and everything inside it, so it matches the definition again.',
     ),
   z
-    .object({
+    .strictObject({
       op: z.literal('symbol.update'),
       symbol: z.string(),
       name: z.string().min(1).max(80).optional(),
@@ -219,7 +221,7 @@ export const OpSchema = z.discriminatedUnion('op', [
     })
     .describe('Rename or describe a symbol.'),
   z
-    .object({
+    .strictObject({
       op: z.literal('symbol.remove'),
       symbol: z.string(),
       instances: z
@@ -231,7 +233,7 @@ export const OpSchema = z.discriminatedUnion('op', [
     })
     .describe('Delete a symbol definition.'),
   z
-    .object({
+    .strictObject({
       op: z.literal('token.set'),
       path: z.string().describe('Token path, e.g. "color.brand.600".'),
       value: z.string().nullable().describe('CSS value or {alias}; null removes the token.'),
@@ -251,6 +253,25 @@ export const OpSchema = z.discriminatedUnion('op', [
 export type Op = z.infer<typeof OpSchema>;
 export type OpName = Op['op'];
 export const OP_NAMES: OpName[] = OpSchema.options.map((o) => o.shape.op.value);
+
+const NODE_INPUT_KEYS = [
+  'type',
+  'id',
+  'part',
+  'key',
+  'props',
+  'css',
+  'styles',
+  'vars',
+  'name',
+  'children',
+];
+
+/** The fields an op takes (for "did you mean" on misspelled ones). */
+function opFields(name: OpName): string[] {
+  const option = OpSchema.options.find((o) => o.shape.op.value === name);
+  return option ? Object.keys(option.shape) : [];
+}
 
 /** Validates raw op objects (e.g. from an agent). */
 export function parseOps(input: unknown): { ops: Op[]; issues: Issue[] } {
@@ -279,6 +300,22 @@ export function parseOps(input: unknown): { ops: Op[]; issues: Issue[] } {
       return;
     }
     for (const zi of parsed.error.issues) {
+      if (zi.code === 'unrecognized_keys') {
+        // A misspelled field would otherwise be dropped silently (e.g. "local" for "locale").
+        const inNode = zi.path.length > 0;
+        const known = inNode ? NODE_INPUT_KEYS : opFields(name as OpName);
+        const where = inNode ? `"${zi.path.join('.')}" ` : '';
+        for (const key of zi.keys) {
+          issues.push({
+            code: 'invalid_op',
+            opIndex,
+            path: [...zi.path, key].join('.'),
+            message: `${name}: ${where}has no field "${key}".${didYouMean(key, known)}`,
+            hint: `${inNode ? 'Node' : name} fields: ${known.join(', ')}.`,
+          });
+        }
+        continue;
+      }
       issues.push({
         code: 'invalid_op',
         opIndex,
@@ -303,8 +340,13 @@ export function describeOp(op: Op): string {
       return `${op.id}: variant ${Object.entries(op.variant)
         .map(([k, v]) => `${k}=${v}`)
         .join(', ')}`;
-    case 'node.insert':
-      return `add ${op.node.type}${op.node.props?.text ? ` ${short(op.node.props.text)}` : ''} in ${op.parent}`;
+    case 'node.insert': {
+      // Name it by its name or first text, so "add box in root-home" says what the box is.
+      const firstText = (n: NodeInput): unknown =>
+        n.props?.text ?? n.children?.map(firstText).find((t) => typeof t === 'string');
+      const label = op.node.name ?? firstText(op.node);
+      return `add ${op.node.type}${typeof label === 'string' && label ? ` ${short(label)}` : ''} in ${op.parent}`;
+    }
     case 'node.move':
       return `move ${op.id}${op.parent ? ` into ${op.parent}` : ''}${op.after ? ` after ${op.after}` : op.before ? ` before ${op.before}` : ''}`;
     case 'node.remove':

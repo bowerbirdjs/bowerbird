@@ -2,6 +2,7 @@ import type { Actor, Store } from '@bowerbirdjs/core';
 import '@bowerbirdjs/editor/define';
 import type {
   AssetAdapter,
+  EditorAppearance,
   BowerbirdEditor as EditorElement,
   EditorPreset,
   EditorUI,
@@ -10,6 +11,7 @@ import { defineComponent, h, onBeforeUnmount, onMounted, type PropType, ref } fr
 
 export {
   createDefaultStore,
+  type EditorAppearance,
   type EditorFeature,
   type EditorPreset,
   type EditorUI,
@@ -21,12 +23,13 @@ const EVENTS = {
   'bb-selection': 'selection',
   'bb-page': 'page-change',
   'bb-error': 'error',
+  'bb-changesets': 'changesets',
 } as const;
 
 /**
  * Vue wrapper for `<bowerbird-editor>`. Props are passed as element properties (set when the
  * element is created, and again only when they change); DOM events are re-emitted as `change`,
- * `transaction`, `selection`, `page-change` and `error`. `expose`s the element.
+ * `transaction`, `selection`, `page-change`, `error` and `changesets`. `expose`s the element.
  */
 export const BowerbirdEditor = defineComponent({
   name: 'BowerbirdEditor',
@@ -39,8 +42,10 @@ export const BowerbirdEditor = defineComponent({
     ui: { type: Object as PropType<EditorUI>, default: undefined },
     /** Shorthand for `ui.preset`. */
     preset: { type: String as PropType<EditorPreset | 'auto'>, default: undefined },
+    /** Chrome colours: `light`, `dark` or `auto` (follows the system). */
+    appearance: { type: String as PropType<EditorAppearance>, default: undefined },
   },
-  emits: ['change', 'transaction', 'selection', 'page-change', 'error'],
+  emits: ['change', 'transaction', 'selection', 'page-change', 'error', 'changesets'],
   setup(props, { emit, expose }) {
     const element = ref<EditorElement | null>(null);
     const listeners = Object.entries(EVENTS).map(
@@ -63,6 +68,7 @@ export const BowerbirdEditor = defineComponent({
         ...(props.assets ? { assets: props.assets } : {}),
         ...(props.ui ? { ui: props.ui } : {}),
         ...(props.preset ? { preset: props.preset } : {}),
+        ...(props.appearance ? { appearance: props.appearance } : {}),
       });
   },
 });

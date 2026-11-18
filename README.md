@@ -75,7 +75,7 @@ The editor is one custom element. The page you edit renders in your document as 
 </script>
 ```
 
-Pass your own `store` to load a saved document, set a policy or register your own sections. React and Vue wrappers set the same properties and turn the `bb-*` events into callbacks:
+Pass your own `store` to load a saved document, set a policy or register your own sections. The editor adapts to its own width, not the window's: below 900px it shows the page and opens one panel at a time over it. React and Vue wrappers set the same properties and turn the `bb-*` events into callbacks:
 
 ```tsx
 import { BowerbirdEditor } from '@bowerbirdjs/react';
@@ -103,7 +103,7 @@ editor.ui = {
 };
 ```
 
-`<bowerbird-editor preset="content">` is the HTML shorthand; the React and Vue wrappers take `ui` and `preset` props. Turning off a feature also turns off what belongs to it (`inspector` hides every inspector section), and an action like `delete` disappears everywhere: buttons, the canvas toolbar and the Delete key. Panels with nothing left in them give their space to the page.
+`<bowerbird-editor preset="content">` is the HTML shorthand; the React and Vue wrappers take `ui`, `preset` and `appearance` props. Turning off a feature also turns off what belongs to it (`inspector` hides every inspector section), and an action like `delete` disappears everywhere: buttons, the canvas toolbar and the Delete key. Panels with nothing left in them give their space to the page.
 
 | Feature                                          | What it is                                                                                                                                                                                                                                                                                 |
 | ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -119,7 +119,7 @@ editor.ui = {
 
 `EDITOR_FEATURES` in `@bowerbirdjs/editor` lists every key with a description. Hiding is not a permission: the store's policy decides what may change, for people and agents alike, so set both.
 
-For the look, set `--bb-editor-*` variables (accent, fg, muted, bg, panel, border, hover, danger, font, left, right, canvas-bg) or style parts with `::part()`: `toolbar`, `structure`, `inspector`, `tabs`, `tab`, `panel-section`, `card`, `button`, `field`, `toast`. Your own controls go in the `toolbar-start` and `toolbar-end` slots:
+For the look, pick `appearance="dark"` (or `auto`, which follows the system; the default is `light`) and set `--bb-editor-*` variables (accent, on-accent, fg, muted, bg, panel, border, hover, danger, linked, warning, font, left, right, canvas-bg, color-scheme), which win over the appearance's defaults, or style parts with `::part()`: `toolbar`, `structure`, `inspector`, `tabs`, `tab`, `panel-section`, `card`, `button`, `select`, `input`, `field`, `toast`. Your own controls go in the `toolbar-start` and `toolbar-end` slots:
 
 ```html
 <bowerbird-editor>

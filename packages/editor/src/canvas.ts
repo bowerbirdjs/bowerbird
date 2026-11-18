@@ -20,18 +20,22 @@ let counter = 0;
  */
 export const CANVAS_CSS = `
 .bbx-host.bbx-host, .bbx-host.bbx-host :where(:not(.bb-page, .bb-page *)) { all: revert; }
-.bbx-host.bbx-host { position: absolute; inset: 0; display: block; font: 13px/1.4 system-ui, sans-serif; color: #111827; }
-.bbx-host .bbx-frame { position: relative; height: 100%; overflow: auto; background: var(--bb-editor-canvas-bg, #e9ebf0); outline: none; }
-.bbx-host .bbx-frame:focus-visible { box-shadow: inset 0 0 0 2px var(--bb-editor-accent, #4f46e5); }
+.bbx-host.bbx-host { position: absolute; inset: 0; display: block; font: 13px/1.4 system-ui, sans-serif; color: var(--bb-editor-fg, var(--_bb-fg, #111827));
+  text-transform: none; letter-spacing: normal; word-spacing: normal; text-align: start; text-indent: 0; text-shadow: none;
+  white-space: normal; cursor: auto; }
+.bbx-host .bbx-frame { position: relative; height: 100%; overflow: auto; background: var(--bb-editor-canvas-bg, var(--_bb-canvas-bg, #e9ebf0)); outline: none; }
+.bbx-host .bbx-frame:focus-visible { box-shadow: inset 0 0 0 2px var(--bb-editor-accent, var(--_bb-accent, #4f46e5)); }
 .bbx-host .bbx-stage { position: relative; margin: 24px auto 48px; }
-.bbx-host .bbx-viewport { position: absolute; top: 0; left: 0; transform-origin: top left; contain: layout paint; background: #fff;
+.bbx-host .bbx-viewport { position: absolute; top: 0; left: 0; transform-origin: top left; contain: layout paint;
+  background: var(--color-surface, #fff);
   box-shadow: 0 1px 2px rgb(15 23 42 / .08), 0 8px 28px rgb(15 23 42 / .10); }
 .bbx-host .bbx-overlay { position: absolute; inset: 0; pointer-events: none; z-index: 1; }
-.bbx-host .bbx-box { position: absolute; border: 1.5px solid var(--bb-editor-accent, #4f46e5); border-radius: 2px; box-sizing: border-box; }
+.bbx-host .bbx-box { position: absolute; border: 1.5px solid var(--bb-editor-accent, var(--_bb-accent, #4f46e5)); border-radius: 2px; box-sizing: border-box; }
 .bbx-host .bbx-box[hidden], .bbx-host .bbx-toolbar[hidden], .bbx-host .bbx-drop[hidden] { display: none; }
 .bbx-host .bbx-hover { border-style: dashed; }
 .bbx-host .bbx-label { position: absolute; left: -1.5px; bottom: 100%; padding: 0 6px; border-radius: 4px 4px 0 0; white-space: nowrap;
-  background: var(--bb-editor-accent, #4f46e5); color: #fff; font: 600 11px/20px system-ui, sans-serif; }
+  background: var(--bb-editor-accent, var(--_bb-accent, #4f46e5)); color: var(--bb-editor-on-accent, var(--_bb-on-accent, #fff));
+  font: 600 11px/20px system-ui, sans-serif; }
 .bbx-host .bbx-toolbar { position: absolute; display: flex; gap: 1px; padding: 2px; border-radius: 6px; pointer-events: auto;
   background: #111827; box-shadow: 0 4px 12px rgb(0 0 0 / .2); }
 .bbx-host .bbx-toolbar button { all: unset; display: grid; place-items: center; width: 24px; height: 24px; border-radius: 4px; color: #e5e7eb;
@@ -39,11 +43,12 @@ export const CANVAS_CSS = `
 .bbx-host .bbx-toolbar button:hover, .bbx-host .bbx-toolbar button:focus-visible { background: #374151; color: #fff; }
 .bbx-host .bbx-toolbar button[hidden], .bbx-host .bbx-label[hidden] { display: none; }
 .bbx-host .bbx-toolbar [draggable="true"] { cursor: grab; }
-.bbx-host .bbx-drop { position: absolute; background: var(--bb-editor-accent, #4f46e5); border-radius: 2px; }
-.bbx-host .bbx-drop.bbx-inside { background: color-mix(in srgb, var(--bb-editor-accent, #4f46e5) 10%, transparent);
-  outline: 2px dashed var(--bb-editor-accent, #4f46e5); outline-offset: -2px; }
-.bbx-host .bbx-empty { padding: 64px 24px; text-align: center; font: 15px/1.5 system-ui, sans-serif; color: #64748b; }
-.bbx-host .bbx-content [contenteditable] { outline: 2px solid var(--bb-editor-accent, #4f46e5); outline-offset: 2px; cursor: text; }
+.bbx-host .bbx-drop { position: absolute; background: var(--bb-editor-accent, var(--_bb-accent, #4f46e5)); border-radius: 2px; }
+.bbx-host .bbx-drop.bbx-inside { background: color-mix(in srgb, var(--bb-editor-accent, var(--_bb-accent, #4f46e5)) 10%, transparent);
+  outline: 2px dashed var(--bb-editor-accent, var(--_bb-accent, #4f46e5)); outline-offset: -2px; }
+.bbx-host .bbx-empty { padding: 64px 24px; text-align: center; font: 15px/1.5 system-ui, sans-serif;
+  color: var(--color-on-surface-muted, #64748b); }
+.bbx-host .bbx-content [contenteditable] { outline: 2px solid var(--bb-editor-accent, var(--_bb-accent, #4f46e5)); outline-offset: 2px; cursor: text; }
 .bbx-host .bbx-content :is(a, button) { cursor: default; }
 .bbx-host .bbx-banner { position: sticky; top: 0; z-index: 2; display: flex; gap: 8px; align-items: center; justify-content: center;
   margin: 0 auto; padding: 6px 12px; font: 600 12px/1.4 system-ui, sans-serif; color: #fff; background: #111827; }
@@ -475,9 +480,11 @@ export class CanvasView {
     this.place(this.selectBox, rect);
     // What the host turned off disappears from the selection's label and toolbar.
     let actions = 0;
+    const restructure = c.canRestructure(c.selected);
     for (const b of this.toolbar.querySelectorAll<HTMLElement>('button')) {
       const needs = TOOLBAR_FEATURE[b.dataset.action as keyof typeof TOOLBAR_FEATURE];
-      b.hidden = !!needs && !c.can(needs);
+      // Instance parts follow their definition: moving or removing them always fails.
+      b.hidden = !!needs && (!c.can(needs) || !restructure);
       if (!b.hidden && b.dataset.action !== 'parent') actions++;
     }
     const showToolbar = c.can('canvas.toolbar') && actions > 0;
@@ -493,12 +500,21 @@ export class CanvasView {
       this.toolbar.hidden = false;
       const tw = this.toolbar.offsetWidth || 160;
       const lw = this.selectLabel.hidden ? 0 : this.selectLabel.offsetWidth || 120;
-      const left = Math.max(0, Math.min(rect.right - s.left - tw, this.stage.clientWidth - tw));
+      const stageWidth = this.stage.clientWidth;
+      const selLeft = rect.left - s.left;
       const above = rect.top - s.top - 32;
-      // Above the element on the right, unless that would cover the label or leave the stage.
-      const collides = rect.width < lw + tw + 8;
+      // Above the element, right-aligned; for a narrow element, just after its label instead.
+      // Only below it when there's no room above: there it would cover the next element.
+      let left = Math.max(0, Math.min(rect.right - s.left - tw, stageWidth - tw));
+      let top = above;
+      const afterLabel = selLeft + lw + 4;
+      if (above < 0) top = rect.bottom - s.top + 6;
+      else if (lw && left < afterLabel) {
+        if (afterLabel + tw <= stageWidth) left = afterLabel;
+        else top = rect.bottom - s.top + 6;
+      }
       this.toolbar.style.left = `${left}px`;
-      this.toolbar.style.top = `${above >= 0 && !collides ? above : rect.bottom - s.top + 6}px`;
+      this.toolbar.style.top = `${top}px`;
     } else {
       this.toolbar.hidden = true;
     }
@@ -648,6 +664,12 @@ export class CanvasView {
         }
         return;
       }
+      // An editable <button> takes Space as a click instead of typing it.
+      if (e.key === ' ' && el.localName === 'button' && !e.metaKey && !e.ctrlKey) {
+        e.preventDefault();
+        doc.execCommand('insertText', false, ' ');
+        return;
+      }
       if (rich && e.key === 'Enter' && e.shiftKey) {
         e.preventDefault();
         doc.execCommand('insertLineBreak');
@@ -677,11 +699,17 @@ export class CanvasView {
           );
       el.ownerDocument.execCommand('insertHTML', false, clean);
     };
+    // Keyup would still activate an editable <button> (Space/Enter "click" it).
+    const onKeyUp = (e: KeyboardEvent) => {
+      if (e.key === ' ' || e.key === 'Enter') e.preventDefault();
+    };
     el.addEventListener('keydown', onKey);
+    el.addEventListener('keyup', onKeyUp);
     el.addEventListener('paste', onPaste);
     el.addEventListener('blur', onBlur, { once: true });
     this.cleanupEditing = () => {
       el.removeEventListener('keydown', onKey);
+      el.removeEventListener('keyup', onKeyUp);
       el.removeEventListener('paste', onPaste);
       el.removeEventListener('blur', onBlur);
     };

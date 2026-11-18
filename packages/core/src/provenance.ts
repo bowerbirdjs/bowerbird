@@ -2,7 +2,7 @@ import type { Draft } from './draft.js';
 import type { Issue } from './errors.js';
 import { flattenL10n } from './l10n.js';
 import type { Actor, BNode, SiteDoc, Stamp, TokenTree } from './types.js';
-import { deepEqual, isPlainObject } from './util.js';
+import { deepEqual, isPlainObject, own } from './util.js';
 
 /**
  * Provenance: each node records who last changed each of its fields (`BNode.edited`). It is
@@ -32,14 +32,26 @@ export function stampFor(node: BNode, field: string): Stamp | undefined {
   return node.edited?.[field] ?? node.edited?.node;
 }
 
-/** Stamps every node changed in the draft with `actor` (created nodes get a fresh `node` stamp). */
-export function stampChanges(draft: Draft, actor: Actor, rev: number): void {
+/**
+ * Stamps every node changed in the draft with `actor`. Created nodes get a fresh `node` stamp, plus
+ * the fields the actor set on purpose (`explicit`: content given with a section, a node.insert's
+ * props), so what a person wrote into a new node is protected like an edit; template placeholders
+ * are not.
+ */
+export function stampChanges(
+  draft: Draft,
+  actor: Actor,
+  rev: number,
+  explicit?: ReadonlyMap<string, ReadonlySet<string>>,
+): void {
   const stamp: Stamp = { by: actor.id, kind: actor.kind, rev };
   for (const c of draft.changes()) {
     if (c.kind !== 'node' || !c.after) continue;
     let edited: Record<string, Stamp> | undefined;
-    if (!c.before) edited = { node: stamp };
-    else {
+    if (!c.before) {
+      edited = { node: stamp };
+      for (const f of explicit?.get(c.id) ?? []) edited[f] = stamp;
+    } else {
       const fields = changedFields(c.before, c.after);
       if (!fields.length) continue;
       edited = { ...(c.after.edited ?? {}) };
@@ -58,19 +70,52 @@ const describeStamp = (s: Stamp) => `${s.by} (${s.kind}) in revision ${s.rev}`;
  */
 export function humanEditConflicts(draft: Draft): Omit<Issue, 'code'>[] {
   const out: Omit<Issue, 'code'>[] = [];
-  for (const c of draft.changes()) {
+  const changes = draft.changes();
+  const removedNodes = changes.filter(
+    (c): c is Extract<typeof c, { kind: 'node' }> => c.kind === 'node' && !!c.before && !c.after,
+  );
+  const removed = new Set(removedNodes.map((c) => c.id));
+  // Stamps of everything removed under a removed node (by its original parent links).
+  const children = new Map<string, BNode[]>();
+  for (const c of removedNodes) {
+    const parent = c.before!.parent;
+    if (parent) children.set(parent, [...(children.get(parent) ?? []), c.before!]);
+  }
+  // A person's field edits, or the top node of something a person added (a section, an element,
+  // an instance), are theirs. The rest of an added template or instance copy is placeholder.
+  const edit = (n: BNode) =>
+    Object.entries(n.edited ?? {}).find(([field, s]) => field !== 'node' && s.kind === 'user')?.[1];
+  const addition = (n: BNode): Stamp | undefined => {
+    const s = n.edited?.node;
+    if (s?.kind !== 'user') return undefined;
+    const parent = n.parent ? own(draft.base.nodes, n.parent)?.edited?.node : undefined;
+    return parent && parent.by === s.by && parent.rev === s.rev ? undefined : s;
+  };
+  function* descendantStamps(id: string): Generator<Stamp> {
+    for (const child of children.get(id) ?? []) {
+      const s = edit(child) ?? addition(child);
+      if (s) yield s;
+      yield* descendantStamps(child.id);
+    }
+  }
+  for (const c of changes) {
     if (c.kind !== 'node' || !c.before) continue;
     const before = c.before;
     if (!c.after) {
-      const human = Object.entries(before.edited ?? {}).find(
-        ([field, s]) => field !== 'node' && s.kind === 'user',
-      )?.[1];
-      if (human) {
-        out.push({
-          nodeId: c.id,
-          message: `Removes "${c.id}", which ${describeStamp(human)} edited.`,
-        });
-      }
+      // Removing what a person added or changed counts (reported once, at the top of a removed
+      // subtree): they put it there on purpose.
+      if (before.parent && removed.has(before.parent)) continue;
+      const edited = edit(before);
+      const added = addition(before);
+      const inside = edited || added ? undefined : descendantStamps(c.id).next().value;
+      const message = edited
+        ? `Removes "${c.id}", which ${describeStamp(edited)} edited.`
+        : added
+          ? `Removes "${c.id}", which ${describeStamp(added)} added.`
+          : inside
+            ? `Removes "${c.id}" with what ${describeStamp(inside)} added or edited inside it.`
+            : undefined;
+      if (message) out.push({ nodeId: c.id, message });
       continue;
     }
     // Only fields a person changed count; creating a node (e.g. inserting a template section)
@@ -113,7 +158,7 @@ export function themeEntries(themes: SiteDoc['themes']): Record<string, unknown>
 }
 
 /** Token and theme values that differ between two documents, as `token:<path>` / `theme:<name>:<path>` keys. */
-function changedTokenKeys(draft: Draft): string[] {
+export function changedTokenKeys(draft: Draft): string[] {
   const out: string[] = [];
   const diff = (
     a: Record<string, unknown>,

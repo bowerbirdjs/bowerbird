@@ -101,6 +101,9 @@ describe('agent tools', async () => {
     });
     expect(res.isError).toBeFalsy();
     expect(res.text).toContain('Note: class attributes were ignored');
+    // Imported ids aren't scoped: nesting is read from the tree, so nothing is listed twice.
+    expect(res.text).toContain('Created: box-1, box-2 (+2 nested)');
+    expect(res.text.match(/text-1/g)).toHaveLength(1);
     expect(store.view.children('root-home').map((n) => n.id)).toEqual([
       'hero-1',
       'box-1',
@@ -302,5 +305,25 @@ describe('agent tools (phase 2)', () => {
     expect((await runTool(tools, 'lint', { changeset: 'cs-1' })).text).toContain('template-text');
     expect((await runTool(tools, 'lint', {})).text).not.toContain('template-text');
     expect((await runTool(tools, 'undo', {})).text).toContain('[review_required]');
+  });
+
+  it('undo takes overwrite, for when the person asked to undo over their later edits', async () => {
+    const store = createStore({
+      registry: createDefaultRegistry(),
+      doc: createStarterDoc(),
+      policy: createPolicy({ protectHumanEdits: 'confirm' }),
+    });
+    store.apply({ ops: [{ op: 'page.create', path: '/', title: 'Home' }] });
+    const tools = createAgentTools({ store, actor: { kind: 'agent', id: 'bot' } });
+    await runTool(tools, 'apply', { ops: [{ op: 'section.insert', section: 'hero' }] });
+    store.apply({
+      actor: { kind: 'user', id: 'sam' },
+      ops: [{ op: 'props.set', id: 'hero-1/heading', props: { text: 'Sam’s words' } }],
+    });
+    const refused = await runTool(tools, 'undo', {});
+    expect(refused.isError).toBe(true);
+    expect(refused.text).toContain('undo with overwrite: true');
+    expect((await runTool(tools, 'undo', { overwrite: true })).isError).toBeFalsy();
+    expect(store.view.node('hero-1')).toBeUndefined();
   });
 });

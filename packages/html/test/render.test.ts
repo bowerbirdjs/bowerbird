@@ -150,3 +150,11 @@ describe('code components', () => {
     expect(renderPage(store.doc, registry, 'home').html).not.toContain('data-bb-code');
   });
 });
+
+describe('standalone documents', () => {
+  it('the page background fills the window, so a short dark page has no white band', () => {
+    const html = renderDocument(site().doc, createDefaultRegistry(), 'home', { theme: 'dark' });
+    expect(html).toContain('<html lang="en" data-theme="dark">');
+    expect(html).toContain('<body style="margin:0;background:var(--color-surface,Canvas)">');
+  });
+});

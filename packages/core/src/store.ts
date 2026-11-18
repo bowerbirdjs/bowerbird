@@ -6,6 +6,7 @@ import { flattenL10n, unflattenL10n } from './l10n.js';
 import { type Op, parseOps } from './ops.js';
 import { createPolicy, type Policy } from './policy.js';
 import {
+  changedTokenKeys,
   humanEditConflicts,
   humanTokenConflicts,
   stampChanges,
@@ -13,9 +14,10 @@ import {
   themeEntries,
   tokenLeaves,
 } from './provenance.js';
-import type { Registry } from './registry.js';
+import type { NodeInput, Registry } from './registry.js';
 import { syncInstances, unlinkDangling } from './symbols.js';
-import type { Actor, BNode, Locales, NodeId, PageId, SiteDoc, TokenTree } from './types.js';
+import { aliasesIn, getTokenLeaf, tokenVar } from './tokens.js';
+import type { Actor, BNode, Locales, NodeId, PageId, SiteDoc, Stamp, TokenTree } from './types.js';
 import { clone, deepEqual, ensure, isPlainObject, pruneEmpty } from './util.js';
 
 export const LOCAL_USER: Actor = { kind: 'user', id: 'local' };
@@ -92,6 +94,11 @@ export interface HistoryEntry {
   approvedBy?: Actor;
   changeset?: string;
   changes: Change[];
+  /**
+   * Who had last set the token and theme values this entry changed, before and after it
+   * (`token:<path>` / `theme:<name>:<path>` keys), so undo restores that provenance too.
+   */
+  tokenEdits?: { before: Record<string, Stamp>; after: Record<string, Stamp> };
   time: number;
   undone?: boolean;
   redone?: boolean;
@@ -173,6 +180,28 @@ function idRefs(op: Op): Set<string> {
   const out = new Set<string>();
   const o = op as Record<string, unknown>;
   for (const f of ID_FIELDS) if (typeof o[f] === 'string') out.add(o[f] as string);
+  return out;
+}
+
+/** CSS variables an op's styles, variables or token value refer to (`--color-accent`). */
+function tokenRefs(op: Op): Set<string> {
+  const out = new Set<string>();
+  const scan = (text: string | null | undefined) => {
+    if (!text) return;
+    for (const m of text.matchAll(/var\(\s*(--[A-Za-z0-9_-]+)/g)) out.add(m[1]!);
+    for (const alias of aliasesIn(text)) out.add(tokenVar(alias));
+  };
+  const scanInput = (n: NodeInput) => {
+    scan(n.css);
+    for (const states of Object.values(n.styles ?? {}))
+      for (const decls of Object.values(states)) for (const v of Object.values(decls)) scan(v);
+    for (const v of Object.values(n.vars ?? {})) scan(v);
+    for (const c of n.children ?? []) scanInput(c);
+  };
+  if (op.op === 'style.set') scan(op.css);
+  else if (op.op === 'vars.set') for (const v of Object.values(op.vars)) scan(v);
+  else if (op.op === 'token.set') scan(op.value);
+  else if (op.op === 'node.insert') scanInput(op.node);
   return out;
 }
 
@@ -693,7 +722,7 @@ export class Store {
     if (!run.ok) return run.result;
     const actor = input.actor ?? LOCAL_USER;
     if (!input.dryRun) {
-      stampChanges(run.draft, actor, this.current.revision + 1);
+      stampChanges(run.draft, actor, this.current.revision + 1, run.ctx.explicit);
       stampTokens(run.draft, actor, this.current.revision + 1);
     }
     const result = this.commit(run.draft, actor, {
@@ -857,15 +886,9 @@ export class Store {
           changes,
           view: draft,
           registry: this.registry,
+          purpose: 'sync',
         });
-        if (denied) {
-          return failed([
-            {
-              ...denied,
-              message: `${denied.message} (an instance of a linked component would change)`,
-            },
-          ]);
-        }
+        if (denied) return failed([denied]);
       }
     }
     const protectedEdits = this.protect(draft, actor, {
@@ -884,7 +907,7 @@ export class Store {
   private protect(
     draft: Draft,
     actor: Actor,
-    options: { allow: boolean },
+    options: { allow: boolean; undo?: boolean },
   ): { blocked: boolean; issues: Issue[] } {
     const mode =
       this.policy.protectHumanEdits?.(actor) ?? (actor.kind === 'agent' ? 'warn' : 'off');
@@ -902,8 +925,9 @@ export class Store {
     }
     const blocked = mode === 'confirm' && !options.allow;
     if (blocked) {
-      issues.at(-1)!.hint =
-        'People edited these last. Only change them if the person asked: pass overwrite: true, or propose the change for review.';
+      issues.at(-1)!.hint = options.undo
+        ? 'People changed these since. Only undo if the person asked: undo with overwrite: true.'
+        : 'People edited these last. Only change them if the person asked: pass overwrite: true, or propose the change for review.';
     }
     return { blocked, issues };
   }
@@ -960,13 +984,26 @@ export class Store {
     }
     const ops = run.ops.map((op, i) => pinIds(op, run.createdBy[i]!));
     const createdSets = run.createdBy.map((c) => new Set([...c.nodes, ...c.pages, ...c.symbols]));
+    // Tokens an op creates (new paths): later styles that use them depend on it.
+    const madeTokens = ops.map((op) =>
+      op.op === 'token.set' &&
+      op.value !== null &&
+      !op.theme &&
+      !getTokenLeaf(this.current.tokens, op.path)
+        ? tokenVar(op.path)
+        : undefined,
+    );
     const needs = ops.map((op, j) => {
       const refs = idRefs(op);
+      const vars = tokenRefs(op);
       const out: number[] = [];
       for (let i = 0; i < j; i++) {
         const made = createdSets[i]!;
         // A reference to a created id, or to something nested under one, is a dependency.
-        if ([...refs].some((r) => made.has(r) || [...made].some((m) => r.startsWith(`${m}/`))))
+        if (
+          [...refs].some((r) => made.has(r) || [...made].some((m) => r.startsWith(`${m}/`))) ||
+          (madeTokens[i] && vars.has(madeTokens[i]!))
+        )
           out.push(i);
       }
       return out;
@@ -1089,7 +1126,7 @@ export class Store {
           : {}),
       };
     }
-    stampChanges(run.draft, cs.actor, revision + 1);
+    stampChanges(run.draft, cs.actor, revision + 1, run.ctx.explicit);
     stampTokens(run.draft, cs.actor, revision + 1);
     const result = this.commit(run.draft, cs.actor, {
       kind: 'edit',
@@ -1118,6 +1155,20 @@ export class Store {
   ): { ok: boolean; errors: Issue[]; rejected: number[] } {
     const cs = this.requireChangeset(id);
     if (!('ops' in cs)) return { ok: false, errors: [cs], rejected: [] };
+    // Proposers may withdraw their own changes; others under review can't decide on them.
+    if (options.by.id !== cs.actor.id && this.policy.requiresReview?.(options.by)) {
+      return {
+        ok: false,
+        rejected: [],
+        errors: [
+          {
+            code: 'review_required',
+            message: `${options.by.kind} "${options.by.id}" can't reject changes proposed by "${cs.actor.id}".`,
+            hint: 'A person who isn’t under review decides on them (or the proposer withdraws them).',
+          },
+        ],
+      };
+    }
     const rejected: number[] = [];
     const reject = (i: number) => {
       if (cs.status[i] !== 'open') return;
@@ -1132,8 +1183,11 @@ export class Store {
     return { ok: true, errors: [], rejected: rejected.sort((a, b) => a - b) };
   }
 
-  /** Undoes the most recent edit (by `actorId`, if given) that hasn't been undone. */
-  undo(options: { actorId?: string; actor?: Actor } = {}): ApplyResult {
+  /**
+   * Undoes the most recent edit (by `actorId`, if given) that hasn't been undone. `overwrite`
+   * works as for `apply`: an agent may then remove what people edited since (only if they asked).
+   */
+  undo(options: { actorId?: string; actor?: Actor; overwrite?: boolean } = {}): ApplyResult {
     const gate = options.actor && this.reviewGate(options.actor);
     if (gate) return gate;
     const who = options.actorId;
@@ -1143,7 +1197,7 @@ export class Store {
       if (e.kind === 'undo' || e.undone) continue;
       // Undoing an accepted changeset by its approver's id: the approver is the one undoing.
       const actor = options.actor ?? (who && e.approvedBy?.id === who ? e.approvedBy : e.actor);
-      return this.reviewGate(actor) ?? this.revertEntry(e, actor, 'undo');
+      return this.reviewGate(actor) ?? this.revertEntry(e, actor, 'undo', !!options.overwrite);
     }
     return this.nothing(
       who ? `There is nothing to undo for "${who}".` : 'There is nothing to undo.',
@@ -1151,7 +1205,7 @@ export class Store {
   }
 
   /** Redoes the most recent undo (by `actorId`, if given), unless that actor has edited since. */
-  redo(options: { actorId?: string; actor?: Actor } = {}): ApplyResult {
+  redo(options: { actorId?: string; actor?: Actor; overwrite?: boolean } = {}): ApplyResult {
     const gate = options.actor && this.reviewGate(options.actor);
     if (gate) return gate;
     const who = options.actorId;
@@ -1161,7 +1215,7 @@ export class Store {
       if (e.kind === 'edit') break;
       if (e.kind === 'undo' && !e.redone) {
         const actor = options.actor ?? e.actor;
-        return this.reviewGate(actor) ?? this.revertEntry(e, actor, 'redo');
+        return this.reviewGate(actor) ?? this.revertEntry(e, actor, 'redo', !!options.overwrite);
       }
     }
     return this.nothing(
@@ -1201,7 +1255,12 @@ export class Store {
     };
   }
 
-  private revertEntry(entry: HistoryEntry, actor: Actor, kind: 'undo' | 'redo'): ApplyResult {
+  private revertEntry(
+    entry: HistoryEntry,
+    actor: Actor,
+    kind: 'undo' | 'redo',
+    overwrite = false,
+  ): ApplyResult {
     const draft = new Draft(this.current);
     const warnings: Issue[] = [];
     const touched = new Set(entry.changes.map((c) => c.id));
@@ -1328,6 +1387,17 @@ export class Store {
         }
       }
     }
+    // Who set the reverted token values goes back with them (later edits by others stay theirs).
+    if (entry.tokenEdits) {
+      const stamps = revertMap(
+        draft.tokenStamps(),
+        entry.tokenEdits.before,
+        entry.tokenEdits.after,
+        'tokenEdits',
+        [],
+      ) as Record<string, Stamp>;
+      draft.setTokenStamps(Object.keys(stamps).length ? stamps : undefined);
+    }
     // A restored position may share its order key with a node placed there later; move it just after.
     for (const id of repositioned) {
       const n = draft.node(id);
@@ -1386,7 +1456,7 @@ export class Store {
     });
     if (denied) return { ok: false, revision: this.current.revision, errors: [denied] };
     // Undoing can delete what people added or changed since (e.g. text inside a created section).
-    const protectedEdits = this.protect(draft, actor, { allow: false });
+    const protectedEdits = this.protect(draft, actor, { allow: overwrite, undo: true });
     if (protectedEdits.blocked)
       return { ok: false, revision: this.current.revision, errors: protectedEdits.issues };
     warnings.push(...protectedEdits.issues);
@@ -1426,6 +1496,15 @@ export class Store {
         : [...meta.warnings, { code: 'no_change' as const, message: 'Nothing changed.' }];
       return { ok: true, txId: null, revision, summary, dryRun: !!meta.dryRun, warnings };
     }
+    const tokenKeys = changes.some((c) => c.kind === 'tokens' || c.kind === 'themes')
+      ? changedTokenKeys(draft)
+      : [];
+    const tokenEdits = tokenKeys.length
+      ? {
+          before: pickStamps(this.current.tokenEdits, tokenKeys),
+          after: pickStamps(draft.tokenStamps(), tokenKeys),
+        }
+      : undefined;
     const doc = draft.finish(revision + 1);
     const entry: HistoryEntry = {
       txId: `tx-${doc.revision}`,
@@ -1433,6 +1512,7 @@ export class Store {
       actor,
       kind: meta.kind,
       changes,
+      ...(tokenEdits ? { tokenEdits } : {}),
       time: Date.now(),
       ...(meta.label ? { label: meta.label } : {}),
       ...(meta.target ? { target: meta.target } : {}),
@@ -1462,6 +1542,15 @@ export class Store {
       warnings: meta.warnings,
     };
   }
+}
+
+function pickStamps(
+  stamps: Record<string, Stamp> | undefined,
+  keys: string[],
+): Record<string, Stamp> {
+  const out: Record<string, Stamp> = {};
+  for (const k of keys) if (stamps && Object.hasOwn(stamps, k)) out[k] = stamps[k]!;
+  return out;
 }
 
 export function createStore(options: StoreOptions): Store {

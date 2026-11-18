@@ -75,6 +75,10 @@ export default async function setup(project: TestProject) {
   }
   const servers: Server[] = [];
   const urls = {} as Record<keyof typeof APPS, string>;
+  // Vitest sets NODE_ENV=test, which would make Vite build development bundles (Lit dev mode and
+  // its warnings); test what people ship.
+  const env = process.env.NODE_ENV;
+  process.env.NODE_ENV = 'production';
   for (const [name, dir] of Object.entries(APPS) as [keyof typeof APPS, string][]) {
     const root = resolve(ROOT, dir);
     await build({ root, configFile: join(root, 'vite.config.ts'), logLevel: 'warn' });
@@ -82,6 +86,7 @@ export default async function setup(project: TestProject) {
     servers.push(server);
     urls[name] = `http://127.0.0.1:${(server.address() as AddressInfo).port}/`;
   }
+  process.env.NODE_ENV = env;
   project.provide('apps', urls);
   return async () => {
     await Promise.all(servers.map((s) => new Promise((done) => s.close(done))));

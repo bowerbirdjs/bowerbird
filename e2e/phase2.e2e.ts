@@ -26,7 +26,7 @@ describe.skipIf(!apps)('review, previews and linked components', () => {
     const review = editor.getByRole('tab', { name: /Review/ });
     await expect.poll(() => review.getAttribute('aria-selected')).toBe('true');
     const changeset = editor.locator('.changeset');
-    expect(await changeset.locator('.ops li').count()).toBe(6);
+    expect(await changeset.locator('.ops li').count()).toBe(8);
     const tokenValue = () =>
       page
         .locator('[data-bb-canvas]')
@@ -35,15 +35,15 @@ describe.skipIf(!apps)('review, previews and linked components', () => {
 
     await changeset.getByRole('button', { name: 'Preview' }).click();
     await expect.poll(() => banner.textContent()).toMatch(/Preview of Teal brand by Demo agent/);
-    expect(await tokenValue()).toBe('#0d9488');
+    expect(await tokenValue()).toBe('#0f766e');
     await changeset.getByRole('button', { name: 'Hide preview' }).click();
     await expect.poll(tokenValue).toBe(before);
 
-    // Accept two of the six token changes; reject the rest.
+    // Accept two of the eight token changes; reject the rest.
     const boxes = changeset.locator('input[type="checkbox"]');
-    for (let i = 2; i < 6; i++) await boxes.nth(i).uncheck();
+    for (let i = 2; i < 8; i++) await boxes.nth(i).uncheck();
     await changeset.getByRole('button', { name: 'Accept 2' }).click();
-    await expect.poll(() => changeset.locator('.ops li').count()).toBe(4);
+    await expect.poll(() => changeset.locator('.ops li').count()).toBe(6);
     await changeset.getByRole('button', { name: 'Reject' }).click();
     await expect.poll(() => review.count()).toBe(0);
     expect(await tokenValue()).toBe(before);

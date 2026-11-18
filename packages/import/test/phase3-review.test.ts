@@ -1,3 +1,5 @@
+import { createDefaultRegistry, createStarterDoc } from '@bowerbirdjs/blocks';
+import { createStore } from '@bowerbirdjs/core';
 import { importPuck, type PuckData } from '@bowerbirdjs/import';
 import { describe, expect, it } from 'vitest';
 
@@ -25,6 +27,20 @@ describe('Puck import of unusual data', () => {
     for (let i = 0; i < 200; i++) item = { type: 'Wrap', props: { slot: [item] } };
     const { warnings } = importPuck({ content: [item] }, ROOT);
     expect(warnings.join('\n')).toMatch(/nested deeper than 40/);
+  });
+
+  it('the nodes it makes fit in a document, even when text sits under 40 nested boxes', () => {
+    let item: { type: string; props: Record<string, unknown> } = {
+      type: 'Leaf',
+      props: { text: 'deep' },
+    };
+    for (let i = 0; i < 39; i++) item = { type: 'Wrap', props: { title: `L${i}`, slot: [item] } };
+    const { ops, warnings } = importPuck({ content: [item] }, ROOT);
+    const store = createStore({ registry: createDefaultRegistry(), doc: createStarterDoc() });
+    store.apply({ ops: [{ op: 'page.create', path: '/', title: 'Home' }] });
+    const res = store.apply({ ops });
+    expect(res.ok).toBe(true);
+    expect(warnings.join('\n')).toMatch(/1 node\(s\) nested deeper than 40 levels were left out/);
   });
 
   it('never uses prototype members as mappers, and skips items without props', () => {

@@ -39,11 +39,17 @@ const policyFor = (role: Role, askFirst: boolean) =>
     ...(askFirst ? { review: { agent: true } } : {}),
   });
 
+/**
+ * Brand scales. The 600 step is the accent in the default theme (white text on it) and 400 in the
+ * dark theme (dark text on it); both keep WCAG AA contrast, which the layout checks verify.
+ */
 const PALETTES: Record<string, Record<string, string>> = {
   Indigo: {
     50: '#eef2ff',
     100: '#e0e7ff',
     200: '#c7d2fe',
+    300: '#a5b4fc',
+    400: '#818cf8',
     500: '#6366f1',
     600: '#4f46e5',
     700: '#4338ca',
@@ -52,17 +58,21 @@ const PALETTES: Record<string, Record<string, string>> = {
     50: '#f0fdfa',
     100: '#ccfbf1',
     200: '#99f6e4',
+    300: '#5eead4',
+    400: '#2dd4bf',
     500: '#14b8a6',
-    600: '#0d9488',
-    700: '#0f766e',
+    600: '#0f766e',
+    700: '#115e59',
   },
   Sunset: {
     50: '#fff7ed',
     100: '#ffedd5',
     200: '#fed7aa',
+    300: '#fdba74',
+    400: '#fb923c',
     500: '#f97316',
-    600: '#ea580c',
-    700: '#c2410c',
+    600: '#c2410c',
+    700: '#9a3412',
   },
 };
 
@@ -89,7 +99,16 @@ export function App() {
   const [, setRevision] = useState(0);
   const [notice, setNotice] = useState<string | null>(null);
   const [askFirst, setAskFirst] = useState(false);
+  // The product's own light/dark look; the editor chrome follows it (`appearance`). The page
+  // being edited has its own themes (the editor's Theme menu).
+  const [appearance, setAppearance] = useState<'light' | 'dark'>(() =>
+    window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light',
+  );
   const editor = useRef<EditorElement | null>(null);
+
+  useEffect(() => {
+    document.documentElement.dataset.appearance = appearance;
+  }, [appearance]);
 
   useEffect(() => {
     for (const s of stores.values()) s.setPolicy(policyFor(role, askFirst));
@@ -144,7 +163,7 @@ export function App() {
         </span>
         <span className="spacer" />
         <label className="control">
-          Role{' '}
+          <span className="caption">Role</span>{' '}
           <select value={role} onChange={(e) => setRole(e.target.value as Role)}>
             <option value="designer">Designer (everything)</option>
             <option value="editor">Site editor (sections, no styling)</option>
@@ -152,7 +171,7 @@ export function App() {
           </select>
         </label>
         <label className="control">
-          Agent changes{' '}
+          <span className="caption">Agent changes</span>{' '}
           <select
             value={askFirst ? 'review' : 'apply'}
             onChange={(e) => setAskFirst(e.target.value === 'review')}
@@ -162,7 +181,7 @@ export function App() {
           </select>
         </label>
         <label className="control">
-          Brand{' '}
+          <span className="caption">Brand</span>{' '}
           <select value="" onChange={(e) => e.target.value && applyPalette(e.target.value)}>
             <option value="" disabled>
               Palette…
@@ -170,6 +189,16 @@ export function App() {
             {Object.keys(PALETTES).map((p) => (
               <option key={p}>{p}</option>
             ))}
+          </select>
+        </label>
+        <label className="control">
+          <span className="caption">Look</span>{' '}
+          <select
+            value={appearance}
+            onChange={(e) => setAppearance(e.target.value as 'light' | 'dark')}
+          >
+            <option value="light">Light</option>
+            <option value="dark">Dark</option>
           </select>
         </label>
         <button type="button" className="button" onClick={exportHtml}>
@@ -209,6 +238,7 @@ export function App() {
           className="editor"
           store={store}
           actor={USER}
+          appearance={appearance}
           onTransaction={({ entry }) => {
             setLast(entry);
             setRevision(entry.revision);

@@ -95,4 +95,38 @@ describe.skipIf(!hasPlaywright())('rendered layout in Chromium', () => {
       await provider.close();
     }
   });
+
+  it('every starter section and variant passes the layout checks in both themes', async () => {
+    const registry = createDefaultRegistry();
+    const store = createStore({ registry, doc: createStarterDoc() });
+    const ops: unknown[] = [{ op: 'page.create', path: '/', title: 'Home' }];
+    for (const s of registry.listSections()) {
+      const [axis, values] = Object.entries(s.variants ?? {})[0] ?? [];
+      for (const value of values ?? [undefined]) {
+        ops.push({
+          op: 'section.insert',
+          section: s.name,
+          ...(axis && value ? { variant: { [axis]: value } } : {}),
+        });
+      }
+    }
+    expect(store.apply({ ops }).ok).toBe(true);
+    const provider = createPlaywrightLayoutProvider(store);
+    try {
+      const found: string[] = [];
+      for (const theme of [undefined, 'dark'])
+        for (const width of [390, 1280]) {
+          const snapshot = await provider.snapshot({
+            page: 'home',
+            width,
+            ...(theme ? { theme } : {}),
+          });
+          for (const i of lintLayout(snapshot))
+            found.push(`${theme ?? 'default'}@${width} ${i.rule} ${i.nodeId}: ${i.message}`);
+        }
+      expect(found).toEqual([]);
+    } finally {
+      await provider.close();
+    }
+  });
 });

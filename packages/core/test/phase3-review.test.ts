@@ -123,7 +123,8 @@ describe('languages', () => {
     expect(def).toMatch(/^"en" is the default language/);
     expect(def).not.toContain('untranslated');
     const de = outline(store.view, { locale: 'de', registry: store.registry });
-    expect(de).toMatch(/hero-1\/image-1 .*\[untranslated de\]/);
+    // ana wrote the image's alt text herself, so it is also marked as hers.
+    expect(de).toMatch(/hero-1\/image-1 .*\[edited by ana; untranslated de\]/);
     expect(de).not.toMatch(/hero-1\/heading .*untranslated/);
     // Lint and outline agree on what's missing.
     const node = store.view.node('hero-1/image-1')!;

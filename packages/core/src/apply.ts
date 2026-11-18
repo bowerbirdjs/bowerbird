@@ -31,6 +31,7 @@ import {
   cssValueSyntaxError,
   isStyleState,
   parseDeclarations,
+  propertyTypo,
   STATE_PSEUDO,
   type StyleCheckContext,
 } from './styles.js';
@@ -44,6 +45,7 @@ import {
 } from './symbols.js';
 import {
   aliasesIn,
+  aliasToCss,
   flattenTokens,
   getTokenLeaf,
   resolvedTokenValues,
@@ -75,6 +77,20 @@ export interface OpContext {
    * transaction. Instance sync merges definition changes from that point on.
    */
   linkBase?: Map<NodeId, BNode>;
+  /**
+   * Fields the actor set on purpose in this transaction, by node id (`props.text`, `styles`, …):
+   * for nodes it creates, these are stamped as the actor's edits, unlike template placeholders.
+   */
+  explicit?: Map<NodeId, Set<string>>;
+}
+
+/** Records fields the actor set on purpose (see `OpContext.explicit`). */
+export function markExplicit(ctx: OpContext, id: NodeId, fields: string[]): void {
+  if (!fields.length) return;
+  ctx.explicit ??= new Map();
+  const set = ctx.explicit.get(id) ?? new Set<string>();
+  ctx.explicit.set(id, set);
+  for (const f of fields) set.add(f);
 }
 
 export function fail(ctx: OpContext, issue: Omit<Issue, 'opIndex'>): undefined {
@@ -111,7 +127,28 @@ export function allocateCopyId(ctx: OpContext, id: string): string {
 export function idTaken(draft: Draft, id: string): boolean {
   if (draft.has(id)) return true;
   const match = /^(.*)-(\d+)$/.exec(id);
-  return !!match && draft.counter(match[1]!) >= Number(match[2]);
+  // Generated numbers start at 1, so `-0` ids are never handed out (or retired) by the counter.
+  return !!match && Number(match[2]) > 0 && draft.counter(match[1]!) >= Number(match[2]);
+}
+
+/**
+ * Why `id` can't be used for a new node, if it can't: it exists, or it was used before (numbered
+ * ids are never reused, so old references can't land on a new node), or nodes inside its id scope
+ * still exist (`cta-1/heading` would take the place of a future section's part).
+ */
+export function newIdProblem(draft: Draft, id: string): string | undefined {
+  if (draft.has(id)) return `A node "${id}" already exists.`;
+  if (idTaken(draft, id))
+    return `"${id}" was used before and ids are never reused, so references to the old node can't reach a new one.`;
+  const inside = scopeInUse(draft, id);
+  if (inside) return `"${inside}" already uses the id scope "${id}/".`;
+  return undefined;
+}
+
+/** A node whose id is inside `id`'s scope (`id/…`), if any. */
+function scopeInUse(draft: Draft, id: string): string | undefined {
+  const prefix = `${id}/`;
+  return draft.nodeIds().find((n) => n.startsWith(prefix));
 }
 
 /** Marks a removed numbered id as used, so it is never handed out again. */
@@ -259,6 +296,11 @@ function checkDecls(
   sctx: StyleCheckContext,
 ) {
   for (const [prop, value] of decls) {
+    const typo = propertyTypo(prop);
+    if (typo) {
+      fail(ctx, { ...typo, nodeId });
+      continue;
+    }
     for (const i of checkValue(prop, value, sctx)) fail(ctx, { ...i, nodeId });
   }
 }
@@ -479,7 +521,7 @@ function createTree(
   parent: BNode,
   order: string,
   scope: string,
-  opts: { id?: string; section?: SectionRef } = {},
+  opts: { id?: string; section?: SectionRef; explicit?: boolean } = {},
 ): BNode | undefined {
   const { draft, registry } = ctx;
   const def = registry.component(input.type);
@@ -524,9 +566,18 @@ function createTree(
   }
 
   const exists = (id: string) => draft.has(id);
+  // `opts.id` comes from the caller (a section root it already checked); `input.id` from the op.
   const explicit = opts.id ?? input.id;
   let id: string;
-  if (explicit) {
+  if (opts.id) {
+    if (exists(opts.id))
+      return fail(ctx, {
+        code: 'duplicate_id',
+        nodeId: opts.id,
+        message: `A node "${opts.id}" already exists.`,
+      });
+    id = opts.id;
+  } else if (explicit) {
     if (!isValidId(explicit)) {
       return fail(ctx, {
         code: 'invalid_id',
@@ -534,11 +585,26 @@ function createTree(
         hint: 'Ids are lowercase kebab-case segments separated by "/", e.g. "hero-1/heading".',
       });
     }
-    if (exists(explicit))
+    // A scoped id (`cta-1/heading`) must continue the scope it is created in, or it would take
+    // the place of another section's part.
+    if (
+      explicit.includes('/') &&
+      (!explicit.startsWith(scope) || explicit.slice(scope.length).includes('/'))
+    ) {
+      return fail(ctx, {
+        code: 'invalid_id',
+        nodeId: explicit,
+        message: `"${explicit}" doesn't fit under "${parent.id}": ids of nodes created there look like "${scope}<name>".`,
+        hint: 'Leave the id out to get one generated.',
+      });
+    }
+    const problem = newIdProblem(draft, explicit);
+    if (problem)
       return fail(ctx, {
         code: 'duplicate_id',
         nodeId: explicit,
-        message: `A node "${explicit}" already exists.`,
+        message: problem,
+        hint: 'Leave the id out to get a fresh one.',
       });
     id = explicit;
   } else if (input.part) {
@@ -608,13 +674,22 @@ function createTree(
   }
   if (input.name) node.name = input.name;
   draft.setNode(node);
+  // What a node.insert spells out is the actor's own (a section template's copy is not).
+  if (opts.explicit) {
+    markExplicit(ctx, id, [
+      ...Object.keys(input.props ?? {}).map((k) => `props.${k}`),
+      ...(node.styles ? ['styles'] : []),
+      ...(node.vars ? ['vars'] : []),
+    ]);
+  }
 
   const childScope = node.section || node.key ? `${id}/` : scope;
   let prev: string | undefined;
   for (const child of input.children ?? []) {
     const childOrder = keyBetween(prev, undefined);
     prev = childOrder;
-    if (!createTree(ctx, child, node, childOrder, childScope)) return undefined;
+    if (!createTree(ctx, child, node, childOrder, childScope, { explicit: !!opts.explicit }))
+      return undefined;
   }
   return node;
 }
@@ -642,6 +717,11 @@ export function setProps(ctx: OpContext, node: BNode, patch: Record<string, unkn
   }
   const props = validateProps(ctx, def, merged, node.id);
   if (!props) return undefined;
+  markExplicit(
+    ctx,
+    node.id,
+    Object.keys(patch).map((k) => `props.${k}`),
+  );
   const next: BNode = { ...node, props };
   if (node.link && node.l10n) {
     // An instance that now says something else than its definition can't keep the definition's
@@ -688,14 +768,25 @@ function sectionInsert(ctx: OpContext, op: OpOf<'section.insert'>) {
   const { variant, errors } = resolveVariant(def, op.variant);
   for (const message of errors) fail(ctx, { code: 'invalid_variant', message });
   if (errors.length) return;
-  if (op.id && draft.has(op.id)) {
+  if (op.id && (!isValidId(op.id) || op.id.includes('/'))) {
+    return fail(ctx, {
+      code: 'invalid_id',
+      message: `"${op.id}" is not a valid section id.`,
+      hint: 'Section ids are one lowercase kebab-case segment, e.g. "hero-2"; leave it out to get one generated.',
+    });
+  }
+  const problem = op.id ? newIdProblem(draft, op.id) : undefined;
+  if (problem) {
     return fail(ctx, {
       code: 'duplicate_id',
       nodeId: op.id,
-      message: `A node "${op.id}" already exists.`,
+      message: problem,
+      hint: 'Leave the id out to get a fresh one.',
     });
   }
-  const id = op.id ?? allocateId(ctx, def.name);
+  let id = op.id;
+  // A generated id never lands on a scope that stray nodes already use (`cta-1/…` without cta-1).
+  while (!id || scopeInUse(draft, id)) id = allocateId(ctx, def.name);
   const order = positionKey(ctx, parent.id, op.before, op.after);
   if (order === undefined) return;
   let template: NodeInput;
@@ -736,7 +827,7 @@ function nodeInsert(ctx: OpContext, op: OpOf<'node.insert'>) {
   if (!parent || !guardParent(ctx, parent)) return;
   const order = positionKey(ctx, parent.id, op.before, op.after);
   if (order === undefined) return;
-  createTree(ctx, op.node, parent, order, scopeFor(ctx.draft, parent.id));
+  createTree(ctx, op.node, parent, order, scopeFor(ctx.draft, parent.id), { explicit: true });
 }
 
 function nodeMove(ctx: OpContext, op: OpOf<'node.move'>) {
@@ -932,6 +1023,11 @@ function setTranslation(
   const next: BNode = { ...node, l10n };
   if (!Object.keys(l10n).length) delete next.l10n;
   ctx.draft.setNode(next);
+  markExplicit(
+    ctx,
+    node.id,
+    keys.map((k) => `l10n.${locale}.${k}`),
+  );
 }
 
 function localeSet(ctx: OpContext, op: OpOf<'locale.set'>) {
@@ -967,6 +1063,19 @@ function localeSet(ctx: OpContext, op: OpOf<'locale.set'>) {
     });
   }
   const others = new Set(current?.others ?? []);
+  // Language codes are case-insensitive: "pt-BR" and "pt-br" publish to the same /pt-br/ tree.
+  for (const l of op.add ?? []) {
+    const same = [nextDefault, ...others, ...(op.add ?? [])].find(
+      (o) => o !== l && o.toLowerCase() === l.toLowerCase(),
+    );
+    if (same) {
+      return fail(ctx, {
+        code: 'invalid_op',
+        message: `"${l}" is the same language as "${same}" (codes ignore case).`,
+        hint: `Use "${same}".`,
+      });
+    }
+  }
   for (const l of op.add ?? []) if (l !== nextDefault) others.add(l);
   for (const l of op.remove ?? []) {
     if (l === nextDefault) {
@@ -1021,9 +1130,12 @@ function firstSegment(path: string): string {
   return path.split('/')[1]?.toLowerCase() ?? '';
 }
 
-/** Paths that publish to the same URL: "/about" and "/about/" (case-sensitive otherwise). */
+/**
+ * Paths that publish to the same place: "/about" and "/about/", and "/About" (static export writes
+ * folders, which are case-insensitive on macOS and Windows).
+ */
 export function samePagePath(a: string, b: string): boolean {
-  const norm = (p: string) => (p.length > 1 ? p.replace(/\/+$/, '') : p);
+  const norm = (p: string) => (p.length > 1 ? p.replace(/\/+$/, '') : p).toLowerCase();
   return norm(a) === norm(b);
 }
 
@@ -1036,7 +1148,7 @@ function checkPagePath(ctx: OpContext, path: string, pageId?: string): boolean {
       message:
         other.path === path
           ? `Page "${other.id}" already uses the path "${path}".`
-          : `Page "${other.id}" already uses "${other.path}", the same URL as "${path}".`,
+          : `Page "${other.id}" already uses "${other.path}", the same ${other.path.replace(/\/+$/, '') === path.replace(/\/+$/, '') ? 'URL' : 'URL once letter case is ignored (as exported folders are on macOS and Windows)'} as "${path}".`,
     });
     return false;
   }
@@ -1082,6 +1194,7 @@ function styleSet(ctx: OpContext, op: OpOf<'style.set'>) {
   if (pruned) next.styles = pruned;
   else delete next.styles;
   ctx.draft.setNode(next);
+  markExplicit(ctx, node.id, ['styles']);
 }
 
 function varsSet(ctx: OpContext, op: OpOf<'vars.set'>) {
@@ -1105,6 +1218,7 @@ function varsSet(ctx: OpContext, op: OpOf<'vars.set'>) {
   if (Object.keys(vars).length) next.vars = vars;
   else delete next.vars;
   ctx.draft.setNode(next);
+  markExplicit(ctx, node.id, ['vars']);
 }
 
 const PATH_SEGMENT = /^[A-Za-z0-9\-._~]+$/;
@@ -1120,8 +1234,15 @@ export function isValidPagePath(path: string): boolean {
   );
 }
 
+const EMPTY_TITLE = {
+  code: 'invalid_op',
+  message: "A page title can't be empty.",
+  hint: 'Give the page a short title; it shows in browser tabs, search results and page menus.',
+} as const;
+
 function pageCreate(ctx: OpContext, op: OpOf<'page.create'>) {
   const { draft } = ctx;
+  if (!op.title.trim()) return fail(ctx, EMPTY_TITLE);
   if (!isValidPagePath(op.path)) {
     return fail(ctx, {
       code: 'invalid_op',
@@ -1181,6 +1302,7 @@ function pageUpdate(ctx: OpContext, op: OpOf<'page.update'>) {
       return;
     }
   }
+  if (op.title !== undefined && !op.title.trim()) return fail(ctx, EMPTY_TITLE);
   if (op.path !== undefined) {
     if (!isValidPagePath(op.path))
       return fail(ctx, { code: 'invalid_op', message: `Page path "${op.path}" is not valid.` });
@@ -1208,15 +1330,21 @@ function pageRemove(ctx: OpContext, op: OpOf<'page.remove'>) {
   ctx.draft.deletePage(page.id);
 }
 
-/** A token alias chain that loops back to `start`, if any (e.g. a → b → a). */
-function aliasCycle(tokens: TokenTree, startVar: string): string[] | undefined {
+const varRefs = (css: string) => [...css.matchAll(/var\(\s*(--[A-Za-z0-9_-]+)/g)].map((m) => m[1]!);
+
+/**
+ * A token alias chain that loops back to `start`, if any (e.g. a → b → a). With `theme`, the
+ * theme's values replace the base values they override, as they do in CSS.
+ */
+function aliasCycle(
+  tokens: TokenTree,
+  startVar: string,
+  theme?: Record<string, string>,
+): string[] | undefined {
   const refs = new Map<string, string[]>();
-  for (const t of flattenTokens(tokens).tokens) {
-    refs.set(
-      t.cssVar,
-      [...t.value.matchAll(/var\(\s*(--[A-Za-z0-9_-]+)/g)].map((m) => m[1]!),
-    );
-  }
+  for (const t of flattenTokens(tokens).tokens) refs.set(t.cssVar, varRefs(t.value));
+  for (const [path, value] of Object.entries(theme ?? {}))
+    refs.set(tokenVar(path), varRefs(aliasToCss(value)));
   const path: string[] = [];
   const visit = (name: string): boolean => {
     if (path.includes(name)) return name === startVar;
@@ -1252,11 +1380,19 @@ function tokenSet(ctx: OpContext, op: OpOf<'token.set'>) {
     const known = flattenTokens(draft.tokens()).tokens;
     const paths = known.map((t) => t.path);
     for (const alias of aliasesIn(value)) {
-      if (alias === op.path || !paths.includes(alias)) {
+      if (alias === op.path) {
+        return fail(ctx, {
+          code: 'invalid_token',
+          path: op.path,
+          message: `"${op.path}" can't refer to itself ({${alias}}).`,
+          hint: 'Give it a value, or the alias of another token.',
+        });
+      }
+      if (!paths.includes(alias)) {
         return fail(ctx, {
           code: 'unknown_token',
           path: op.path,
-          message: `Alias {${alias}} doesn't refer to another existing token.${didYouMean(alias, paths)}`,
+          message: `Alias {${alias}} doesn't refer to an existing token.${didYouMean(alias, paths)}`,
         });
       }
     }
@@ -1287,6 +1423,14 @@ function tokenSet(ctx: OpContext, op: OpOf<'token.set'>) {
     const theme = ensure(themes, op.theme, () => ({}));
     if (value === null) delete theme[op.path];
     else theme[op.path] = value;
+    const cycle = value === null ? undefined : aliasCycle(draft.tokens(), tokenVar(op.path), theme);
+    if (cycle) {
+      return fail(ctx, {
+        code: 'invalid_token',
+        path: op.path,
+        message: `In theme "${op.theme}", token aliases would form a loop: ${cycle.join(' → ')}.`,
+      });
+    }
     if (!Object.keys(theme).length) delete themes[op.theme];
     draft.setThemes(themes);
     return;
@@ -1356,13 +1500,19 @@ function tokenSet(ctx: OpContext, op: OpOf<'token.set'>) {
     leaf.$value = value;
     if (op.type) leaf.$type = op.type;
     group[last] = leaf;
-    const cycle = aliasCycle(tokens, tokenVar(op.path));
-    if (cycle) {
-      return fail(ctx, {
-        code: 'invalid_token',
-        path: op.path,
-        message: `Token aliases would form a loop: ${cycle.join(' → ')}.`,
-      });
+    // Check the base values, and each theme on top of them (a theme can close a loop too).
+    for (const [name, theme] of [[undefined, undefined], ...Object.entries(draft.themes())] as [
+      string | undefined,
+      Record<string, string> | undefined,
+    ][]) {
+      const cycle = aliasCycle(tokens, tokenVar(op.path), theme);
+      if (cycle) {
+        return fail(ctx, {
+          code: 'invalid_token',
+          path: op.path,
+          message: `${name ? `In theme "${name}", t` : 'T'}oken aliases would form a loop: ${cycle.join(' → ')}.`,
+        });
+      }
     }
   }
   draft.setTokens(tokens);
