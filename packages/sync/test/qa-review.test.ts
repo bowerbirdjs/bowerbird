@@ -201,7 +201,7 @@ describe('socketChannel', () => {
       },
       close: () => {},
       addEventListener: (type: string, l: () => void) => {
-        (listeners[type] ??= []).push(l);
+        listeners[type] = [...(listeners[type] ?? []), l];
       },
     };
     const channel = socketChannel<unknown, { type: string }>(socket as unknown as SocketLike);
