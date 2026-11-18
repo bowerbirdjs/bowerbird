@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import type { ComponentDef } from './registry.js';
+import { RICH_TEXT_TAGS, sanitizeRichText } from './richtext.js';
 
 const BOX_TAGS = [
   'div',
@@ -158,4 +159,34 @@ export const image: ComponentDef = {
   }),
 };
 
-export const PRIMITIVES: ComponentDef[] = [root, box, text, link, button, image];
+const RICH_TAGS = [
+  'p',
+  'h1',
+  'h2',
+  'h3',
+  'h4',
+  'h5',
+  'h6',
+  'blockquote',
+  'li',
+  'figcaption',
+  'div',
+] as const;
+
+export const richText: ComponentDef = {
+  name: 'rich-text',
+  kind: 'primitive',
+  description: `Text with inline formatting. Props: html (only ${RICH_TEXT_TAGS.map((t) => `<${t}>`).join(' ')}; links need href), tag (${RICH_TAGS.join('|')}).`,
+  props: z.strictObject({
+    tag: z.enum(RICH_TAGS).default('p'),
+    html: z.string().max(20_000).default('').transform(sanitizeRichText),
+  }),
+  children: false,
+  contentProps: ['html'],
+  render: (node) => ({
+    tag: pick(node.props.tag, RICH_TAGS, 'p'),
+    html: str(node.props.html) ?? '',
+  }),
+};
+
+export const PRIMITIVES: ComponentDef[] = [root, box, text, richText, link, button, image];

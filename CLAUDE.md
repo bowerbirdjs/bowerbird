@@ -20,6 +20,8 @@ An embeddable, agent-first visual page editor. Read `docs/plan.md` for decisions
 - Ids are readable and stable (`hero-1/heading`). Only section roots, keyed items (`item-2`, `tier-pro`) and symbol roots add an id scope.
 - Transactions run in this order (`Store.run`): ops → human-edit protection (agents) → symbol instance sync (`core/src/symbols.ts`) → provenance stamps (`core/src/provenance.ts`) on commit. Undo/redo replay record changes and are checked with `Policy.checkChanges`.
 - Symbol instances are linked copies (`BNode.link`); their structure only changes through the definition (ops refuse with code `instance`).
+- Translations live in `BNode.l10n[locale]` (content props only); render with `{ locale }`. Rich text (`rich-text`, prop `html`) must go through `sanitizeRichText` when written and rendered.
+- Sync (`packages/sync`) is server-authoritative: clients never change the server's document directly, only send ops. Anything new that changes a document must be an op so it syncs.
 - Styles are CSS declarations validated against design tokens; raw values need policy permission. Never store Tailwind classes.
 - Published HTML is light DOM, escaped and URL-sanitised; no scripts in output.
 - Editor: the canvas is light DOM in the host document (no iframe; nothing editable inside a shadow root). Only the panels use the element's shadow root. Canvas chrome classes start with `bbx-` and are scoped under `.bbx-host`.

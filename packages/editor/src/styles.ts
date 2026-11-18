@@ -97,6 +97,9 @@ export const editorStyles = css`
   .linked-panel h3 { color: #7c3aed; }
   .override { color: #7c3aed; font-size: 10px; }
   .provenance { margin: 6px 0 0; font-size: 12px; }
+  .peers { display: flex; gap: 2px; margin: 0 0 0 8px; padding: 0; list-style: none; }
+  .peers li { display: grid; place-items: center; width: 24px; height: 24px; border-radius: 999px; cursor: pointer;
+    background: var(--peer); color: #fff; font-size: 11px; font-weight: 700; border: 2px solid var(--bg); }
   .upload { display: inline-block; margin-top: 6px; font-size: 12px; color: var(--accent); cursor: pointer; }
   .upload input { position: absolute; width: 1px; height: 1px; opacity: 0; }
   .upload:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }

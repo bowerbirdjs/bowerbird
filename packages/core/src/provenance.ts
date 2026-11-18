@@ -1,5 +1,6 @@
 import type { Draft } from './draft.js';
 import type { Issue } from './errors.js';
+import { flattenL10n } from './l10n.js';
 import type { Actor, BNode, SiteDoc, Stamp, TokenTree } from './types.js';
 import { deepEqual, isPlainObject } from './util.js';
 
@@ -19,6 +20,10 @@ export function changedFields(before: BNode, after: BNode): string[] {
   for (const k of new Set([...Object.keys(before.props), ...Object.keys(after.props)])) {
     if (!deepEqual(before.props[k], after.props[k])) out.push(`props.${k}`);
   }
+  const a = flattenL10n(before.l10n);
+  const b = flattenL10n(after.l10n);
+  for (const k of new Set([...Object.keys(a), ...Object.keys(b)]))
+    if (!deepEqual(a[k], b[k])) out.push(`l10n.${k.replace('|', '.')}`);
   return out;
 }
 

@@ -1,5 +1,6 @@
 import { type DocView, descendants, pageNodes, sectionRootOf } from './doc.js';
 import { type Registry, templateParts } from './registry.js';
+import { richTextToPlain } from './richtext.js';
 import type { BNode, PageId } from './types.js';
 import { isUnsafeUrl } from './url.js';
 
@@ -95,6 +96,14 @@ export function lintPage(view: DocView, registry: Registry, pageId: PageId): Lin
 
   const copy = templateCopy(registry, nodes);
   for (const n of nodes) {
+    if (n.type === 'rich-text' && !richTextToPlain(str(n.props.html)).trim()) {
+      issues.push({
+        rule: 'empty-text',
+        severity: 'warning',
+        nodeId: n.id,
+        message: `"${n.id}" has no text.`,
+      });
+    }
     if ((n.type === 'text' || n.type === 'button') && !str(n.props.text).trim()) {
       issues.push({
         rule: 'empty-text',
@@ -160,6 +169,35 @@ export function lintPage(view: DocView, registry: Registry, pageId: PageId): Lin
         severity: 'info',
         nodeId: n.id,
         message: `"${n.id}" still shows the ${section?.section?.name ?? 'section'} template's example text.`,
+      });
+    }
+  }
+  // Translations: content in the default language that a site language doesn't have yet.
+  const locales = view.locales?.();
+  for (const locale of locales?.others ?? []) {
+    const missing: string[] = [];
+    for (const n of nodes) {
+      const content = registry.component(n.type)?.contentProps ?? [];
+      const has = n.l10n?.[locale] ?? {};
+      if (
+        content.some(
+          (k) =>
+            typeof n.props[k] === 'string' &&
+            (n.props[k] as string).trim() &&
+            k !== 'href' &&
+            k !== 'src' &&
+            !(k in has),
+        )
+      )
+        missing.push(n.id);
+    }
+    if (missing.length) {
+      issues.push({
+        rule: 'missing-translation',
+        severity: 'warning',
+        nodeId: missing[0],
+        message: `${missing.length} text${missing.length === 1 ? ' has' : 's have'} no "${locale}" translation: ${missing.slice(0, 8).join(', ')}${missing.length > 8 ? ', …' : ''}.`,
+        hint: `Set them with props.set and "locale": "${locale}".`,
       });
     }
   }

@@ -3,6 +3,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from 'node:ht
 import type { AddressInfo } from 'node:net';
 import { type Actor, describeOp, formatIssue, type Store } from '@bowerbirdjs/core';
 import { escapeAttr, escapeHtml, renderDocument } from '@bowerbirdjs/html';
+import { type ClientMessage, createSyncServer } from '@bowerbirdjs/sync';
 
 export interface PreviewOptions {
   store: Store;
@@ -10,6 +11,11 @@ export interface PreviewOptions {
   host?: string;
   /** Who accepts or rejects proposals from the preview page. */
   reviewer?: Actor;
+  /**
+   * Serve live sync at `/__bowerbird/sync`, so editors (on localhost pages) can edit the same
+   * site as the agent, with presence. Default true.
+   */
+  sync?: boolean;
 }
 
 export interface PreviewServer {
@@ -53,13 +59,17 @@ function reviewPanel(store: Store, token: string, current: string, shown?: strin
 ${items}</aside>`;
 }
 
-async function readForm(req: IncomingMessage): Promise<URLSearchParams> {
+async function readBody(req: IncomingMessage, limit = 2_000_000): Promise<string> {
   let body = '';
   for await (const chunk of req) {
     body += chunk;
-    if (body.length > 100_000) throw new Error('Form too large.');
+    if (body.length > limit) throw new Error('Request too large.');
   }
-  return new URLSearchParams(body);
+  return body;
+}
+
+async function readForm(req: IncomingMessage): Promise<URLSearchParams> {
+  return new URLSearchParams(await readBody(req, 100_000));
 }
 
 function liveScript(label: string, showBadge: boolean): string {
@@ -83,6 +93,22 @@ export async function startPreview(options: PreviewOptions): Promise<PreviewServ
   const allowedHosts = new Set(['localhost', '127.0.0.1', '::1', host]);
   let lastChange = 'No changes yet';
 
+  // Live sync for editors: server-sent events down, POSTs up. Only pages on this machine may
+  // connect (the Host check below, plus CORS limited to localhost origins).
+  const sync = options.sync === false ? undefined : createSyncServer(store);
+  const connections = new Map<string, (message: ClientMessage) => void>();
+  const localOrigin = (origin: string | undefined) => {
+    if (!origin) return undefined;
+    try {
+      const { hostname, protocol } = new URL(origin);
+      return /^https?:$/.test(protocol) && allowedHosts.has(hostname.replace(/^\[|\]$/g, ''))
+        ? origin
+        : undefined;
+    } catch {
+      return undefined;
+    }
+  };
+
   const unsubscribe = store.subscribe(({ entry }) => {
     lastChange = `rev ${entry.revision} · ${entry.actor.name ?? entry.actor.id}: ${entry.label ?? `${entry.changes.length} changes`}`;
     for (const client of clients) client.write(`data: ${entry.revision}\n\n`);
@@ -100,6 +126,13 @@ export async function startPreview(options: PreviewOptions): Promise<PreviewServ
       res.end('Forbidden host');
       return;
     }
+    if (sync && req.url?.startsWith('/__bowerbird/sync')) {
+      syncRequest(req, res).catch((error) => {
+        if (!res.headersSent) res.writeHead(500);
+        res.end(String(error));
+      });
+      return;
+    }
     const fail = (error: unknown) => {
       if (!res.headersSent) res.writeHead(500, { 'content-type': 'text/plain; charset=utf-8' });
       res.end(`Preview failed: ${error instanceof Error ? error.message : String(error)}`);
@@ -111,6 +144,58 @@ export async function startPreview(options: PreviewOptions): Promise<PreviewServ
       fail(error);
     }
   });
+
+  async function syncRequest(req: IncomingMessage, res: ServerResponse) {
+    const origin = req.headers.origin;
+    const allowed = localOrigin(origin);
+    if (origin && !allowed) {
+      res.writeHead(403).end('Forbidden origin');
+      return;
+    }
+    const cors = allowed ? { 'access-control-allow-origin': allowed, vary: 'Origin' } : {};
+    const url = new URL(req.url ?? '/', 'http://localhost');
+    if (req.method === 'GET' && url.pathname === '/__bowerbird/sync') {
+      const id = randomBytes(12).toString('hex');
+      res.writeHead(200, {
+        'content-type': 'text/event-stream',
+        'cache-control': 'no-cache',
+        connection: 'keep-alive',
+        ...cors,
+      });
+      let onClose = () => {};
+      sync!.connect({
+        send: (message) => res.write(`data: ${JSON.stringify(message)}\n\n`),
+        receive: (handler) => connections.set(id, handler),
+        closed: (handler) => {
+          onClose = handler;
+        },
+        close: () => res.end(),
+      });
+      // The id is the only way to post to this connection, and only this page can read it.
+      res.write(`event: connection\ndata: ${id}\n\n`);
+      req.on('close', () => {
+        connections.delete(id);
+        onClose();
+      });
+      return;
+    }
+    const match = /^\/__bowerbird\/sync\/([0-9a-f]{24})$/.exec(url.pathname);
+    const deliver = match && connections.get(match[1]!);
+    if (req.method !== 'POST' || !deliver) {
+      res.writeHead(404, cors).end();
+      return;
+    }
+    const body = await readBody(req);
+    let message: ClientMessage;
+    try {
+      message = JSON.parse(body) as ClientMessage;
+    } catch {
+      res.writeHead(400, cors).end('Not JSON');
+      return;
+    }
+    deliver(message);
+    res.writeHead(204, cors).end();
+  }
 
   /** POST /__bowerbird/changesets/<id>/(accept|reject) from the review panel. */
   async function review(req: IncomingMessage, res: ServerResponse) {
@@ -216,6 +301,7 @@ export async function startPreview(options: PreviewOptions): Promise<PreviewServ
       new Promise<void>((resolve) => {
         unsubscribe();
         offChangesets();
+        sync?.close();
         for (const client of clients) client.end();
         server.close(() => resolve());
       }),

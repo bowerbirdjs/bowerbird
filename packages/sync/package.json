@@ -1,0 +1,29 @@
+{
+  "name": "@bowerbirdjs/sync",
+  "version": "0.0.0",
+  "description": "Server-authoritative real-time sync and presence for Bowerbird stores (people and agents).",
+  "license": "MIT",
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist",
+    "src",
+    "!dist/.tsbuildinfo"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/bowerbirdjs/bowerbird.git",
+    "directory": "packages/sync"
+  },
+  "dependencies": {
+    "@bowerbirdjs/core": "workspace:*"
+  }
+}

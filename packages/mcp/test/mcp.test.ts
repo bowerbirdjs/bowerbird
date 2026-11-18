@@ -1,6 +1,6 @@
 import { createDefaultRegistry, createStarterDoc } from '@bowerbirdjs/blocks';
 import { createStore } from '@bowerbirdjs/core';
-import { createMcpServer, startPreview } from '@bowerbirdjs/mcp';
+import { createMcpServer, PAGE_VIEW_URI, startPreview } from '@bowerbirdjs/mcp';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { describe, expect, it } from 'vitest';
@@ -78,5 +78,27 @@ describe('MCP server', () => {
     } finally {
       await preview.close();
     }
+  });
+
+  it('shows pages as an MCP Apps view', async () => {
+    const { store, client, call } = await connect();
+    store.apply({
+      ops: [
+        { op: 'section.insert', section: 'hero', content: { heading: { text: 'Shown inline' } } },
+      ],
+    });
+    const { tools } = await client.listTools();
+    const show = tools.find((t) => t.name === 'show_page')!;
+    expect(show._meta).toMatchObject({ ui: { resourceUri: PAGE_VIEW_URI } });
+    expect((await call('show_page', { page: 'home' })).text).toContain('Showing page home');
+    expect((await call('show_page', { page: 'nope' })).isError).toBe(true);
+    const { resources } = await client.listResources();
+    expect(resources).toEqual([
+      expect.objectContaining({ uri: PAGE_VIEW_URI, mimeType: 'text/html;profile=mcp-app' }),
+    ]);
+    const read = await client.readResource({ uri: PAGE_VIEW_URI });
+    const html = (read.contents[0] as { text: string }).text;
+    expect(html).toContain('<h1 class="bb-hero__heading">Shown inline</h1>');
+    expect(html).not.toContain('<script');
   });
 });

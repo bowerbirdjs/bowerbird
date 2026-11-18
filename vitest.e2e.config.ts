@@ -8,7 +8,12 @@ const pkg = (name: string) =>
 // drives them with Playwright. Run with `pnpm test:e2e`; skipped when Playwright isn't installed.
 export default defineConfig({
   resolve: {
-    alias: [{ find: /^@bowerbirdjs\/(core|css|html|blocks)$/, replacement: pkg('$1') }],
+    alias: [
+      {
+        find: /^@bowerbirdjs\/(core|css|html|blocks|agent|import|layout|sync|mcp)$/,
+        replacement: pkg('$1'),
+      },
+    ],
   },
   test: {
     include: ['e2e/**/*.e2e.ts'],

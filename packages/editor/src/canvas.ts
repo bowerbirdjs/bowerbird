@@ -1,3 +1,4 @@
+import { localizedProps, sanitizeRichText } from '@bowerbirdjs/core';
 import { renderPage, renderSubtree } from '@bowerbirdjs/html';
 import type { EditorController, EditorEvent } from './controller.js';
 import {
@@ -48,6 +49,9 @@ export const CANVAS_CSS = `
 .bbx-host .bbx-banner[hidden] { display: none; }
 .bbx-host .bbx-banner.bbx-ghost-banner { background: #b45309; }
 .bbx-host .bbx-banner.bbx-symbol-banner { background: #7c3aed; }
+.bbx-host .bbx-peer { position: absolute; box-sizing: border-box; border: 2px solid var(--peer); border-radius: 3px; pointer-events: none; }
+.bbx-host .bbx-peer-tag { position: absolute; right: -2px; bottom: 100%; padding: 0 6px; border-radius: 4px 4px 0 0; white-space: nowrap;
+  background: var(--peer); color: #fff; font: 600 11px/18px system-ui, sans-serif; }
 .bbx-host .bbx-mark { position: absolute; box-sizing: border-box; border-radius: 3px; pointer-events: none; }
 .bbx-host .bbx-mark.bbx-created { outline: 2px solid #16a34a; background: rgb(22 163 74 / .08); }
 .bbx-host .bbx-mark.bbx-updated { outline: 2px dashed #d97706; background: rgb(217 119 6 / .06); }
@@ -62,7 +66,7 @@ const TOOLBAR: [action: string, label: string, glyph: string][] = [
   ['delete', 'Delete', '✕'],
 ];
 
-const TEXT_TYPES = new Set(['text', 'button', 'link']);
+const TEXT_TYPES = new Set(['text', 'button', 'link', 'rich-text']);
 
 /**
  * The editing canvas. Renders the page into light DOM in the host document (no iframe, no shadow
@@ -85,11 +89,12 @@ export class CanvasView {
   private readonly drop: HTMLElement;
   private readonly banner: HTMLElement;
   private readonly marks: HTMLElement;
+  private readonly peerLayer: HTMLElement;
   private readonly off: () => void;
   private readonly resize: ResizeObserver;
   private frameRequest = 0;
   private needsRender = true;
-  private editing: { id: string; el: HTMLElement; original: string } | null = null;
+  private editing: { id: string; el: HTMLElement; original: string; key: string } | null = null;
   private dropTargetState: DropTarget | null = null;
   private scale = 1;
 
@@ -123,6 +128,7 @@ export class CanvasView {
     this.content = el('div', 'bbx-content', this.viewport);
     this.overlay = el('div', 'bbx-overlay', this.stage);
     this.marks = el('div', 'bbx-marks', this.overlay);
+    this.peerLayer = el('div', 'bbx-peers', this.overlay);
     this.hoverBox = el('div', 'bbx-box bbx-hover', this.overlay);
     this.selectBox = el('div', 'bbx-box bbx-select', this.overlay);
     this.selectLabel = el('div', 'bbx-label', this.selectBox);
@@ -156,7 +162,8 @@ export class CanvasView {
   }
 
   private onEvent(event: EditorEvent): void {
-    if (event.type === 'hover' || event.type === 'selection') this.updateOverlays();
+    if (event.type === 'hover' || event.type === 'selection' || event.type === 'peers')
+      this.updateOverlays();
     else if (event.type !== 'error') {
       // Someone else removed (or the page switched away from) the node being edited.
       if (this.editing && !this.controller.node(this.editing.id)) {
@@ -201,12 +208,14 @@ export class CanvasView {
       ({ html, css } = renderSubtree(doc, c.store.registry, symbol.rootId, {
         mode: 'editor',
         canvasSelector,
+        ...(c.locale ? { locale: c.locale } : {}),
       }));
       empty = false;
     } else if (page && doc.pages[page.id]) {
       ({ html, css } = renderPage(doc, c.store.registry, page.id, {
         mode: 'editor',
         canvasSelector,
+        ...(c.locale ? { locale: c.locale } : {}),
       }));
       empty = !Object.values(doc.nodes).some((n) => n.parent === page.rootId);
     } else {
@@ -312,9 +321,42 @@ export class CanvasView {
     });
   }
 
+  /** Boxes with name tags for what other people and agents have selected on this page. */
+  private updatePeers(): void {
+    const c = this.controller;
+    const doc = this.host.ownerDocument;
+    const visible = c.peers.filter(
+      (p) =>
+        p.selection && (!p.page || p.page === c.page) && !c.symbolView && this.element(p.selection),
+    );
+    const s = this.stage.getBoundingClientRect();
+    while (this.peerLayer.children.length > visible.length)
+      this.peerLayer.lastElementChild!.remove();
+    visible.forEach((peer, i) => {
+      let box = this.peerLayer.children[i] as HTMLElement | undefined;
+      if (!box) {
+        box = doc.createElement('div');
+        box.className = 'bbx-peer';
+        box.append(doc.createElement('span'));
+        box.firstElementChild!.className = 'bbx-peer-tag';
+        this.peerLayer.append(box);
+      }
+      const rect = this.element(peer.selection!)!.getBoundingClientRect();
+      box.style.setProperty('--peer', peer.color);
+      box.style.left = `${rect.left - s.left}px`;
+      box.style.top = `${rect.top - s.top}px`;
+      box.style.width = `${rect.width}px`;
+      box.style.height = `${rect.height}px`;
+      const name = peer.actor.name ?? peer.actor.id;
+      box.firstElementChild!.textContent = `${name}${peer.editing ? ' is typing…' : peer.activity ? ` · ${peer.activity}` : ''}`;
+      box.title = name;
+    });
+  }
+
   updateOverlays(): void {
     const c = this.controller;
     this.updateMarks();
+    this.updatePeers();
     const showChrome = !c.readOnly;
     const hoverEl = showChrome && c.hovered !== c.selected ? this.element(c.hovered) : null;
     this.place(this.hoverBox, hoverEl?.getBoundingClientRect() ?? null);
@@ -436,13 +478,20 @@ export class CanvasView {
     )
       return false;
     if (this.editing) this.finishEditing(true);
-    const original = typeof node.props.text === 'string' ? node.props.text : '';
-    this.editing = { id, el, original };
+    const rich = node.type === 'rich-text';
+    const key = rich ? 'html' : 'text';
+    const value = localizedProps(node, c.locale ?? undefined)[key];
+    const original = typeof value === 'string' ? value : '';
+    this.editing = { id, el, original, key };
     c.select(id);
-    try {
-      el.contentEditable = 'plaintext-only';
-    } catch {
-      el.contentEditable = 'true';
+    c.setEditing(id);
+    if (rich) el.contentEditable = 'true';
+    else {
+      try {
+        el.contentEditable = 'plaintext-only';
+      } catch {
+        el.contentEditable = 'true';
+      }
     }
     el.spellcheck = true;
     el.focus();
@@ -453,6 +502,24 @@ export class CanvasView {
     selection?.addRange(range);
     const onKey = (e: KeyboardEvent) => {
       e.stopPropagation();
+      const doc = el.ownerDocument;
+      if (rich && (e.metaKey || e.ctrlKey) && ['b', 'i', 'k'].includes(e.key.toLowerCase())) {
+        // Inline formatting; the result is sanitized to the rich-text subset when saved.
+        e.preventDefault();
+        const k = e.key.toLowerCase();
+        if (k === 'b') doc.execCommand('bold');
+        else if (k === 'i') doc.execCommand('italic');
+        else {
+          const url = doc.defaultView?.prompt('Link to (URL or /path):', 'https://');
+          if (url) doc.execCommand('createLink', false, url);
+        }
+        return;
+      }
+      if (rich && e.key === 'Enter' && e.shiftKey) {
+        e.preventDefault();
+        doc.execCommand('insertLineBreak');
+        return;
+      }
       if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault();
         this.finishEditing(true);
@@ -478,6 +545,7 @@ export class CanvasView {
     if (!state) return;
     this.editing = null;
     this.cleanupEditing();
+    this.controller.setEditing(null);
     const focused = state.el.contains(state.el.ownerDocument.activeElement);
     // Keep line breaks (Shift+Enter); collapse other runs of whitespace.
     const normalize = (t: string) =>
@@ -486,16 +554,30 @@ export class CanvasView {
         .replace(/[^\S\n]+/g, ' ')
         .replace(/ ?\n ?/g, '\n')
         .trim();
-    // biome-ignore lint/performance/useDomNodeTextContent: innerText keeps the typed line breaks
-    const text = normalize(state.el.innerText ?? state.el.textContent ?? '');
+    const rich = state.key === 'html';
+    const show = (v: string) => {
+      if (rich) state.el.innerHTML = sanitizeRichText(v);
+      else state.el.textContent = v;
+    };
+    const text = rich
+      ? sanitizeRichText(state.el.innerHTML)
+      : // biome-ignore lint/performance/useDomNodeTextContent: innerText keeps the typed line breaks
+        normalize(state.el.innerText ?? state.el.textContent ?? '');
     state.el.removeAttribute('contenteditable');
     // Enter or Escape: keep keyboard focus in the canvas. A blur moved it elsewhere already.
     if (focused) this.frame.focus({ preventScroll: true });
-    const current = this.controller.node(state.id)?.props.text;
-    if (commit && text !== normalize(state.original)) {
-      if (typeof current === 'string' && current !== state.original) {
+    const node = this.controller.node(state.id);
+    const currentValue = node
+      ? localizedProps(node, this.controller.locale ?? undefined)[state.key]
+      : undefined;
+    const current = typeof currentValue === 'string' ? currentValue : undefined;
+    const same = rich
+      ? text === sanitizeRichText(state.original)
+      : text === normalize(state.original);
+    if (commit && !same) {
+      if (current !== undefined && current !== state.original) {
         // Someone else changed this text while it was being edited: don't overwrite it silently.
-        state.el.textContent = current;
+        show(current);
         this.controller.report([
           {
             code: 'conflict',
@@ -505,11 +587,11 @@ export class CanvasView {
           },
         ]);
       } else {
-        const result = this.controller.setProps(state.id, { text }, 'Edit text');
-        if (!result.ok) state.el.textContent = state.original;
+        const result = this.controller.setProps(state.id, { [state.key]: text }, 'Edit text');
+        if (!result.ok) show(state.original);
       }
     } else {
-      state.el.textContent = typeof current === 'string' ? current : state.original;
+      show(current ?? state.original);
     }
     this.needsRender = true;
     this.schedule();

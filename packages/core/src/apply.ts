@@ -813,7 +813,10 @@ function textEdit(ctx: OpContext, op: OpOf<'text.edit'>) {
   const node = requireNode(ctx, op.id);
   if (!node) return;
   const key = op.prop ?? 'text';
-  const current = node.props[key];
+  const locale = translationLocale(ctx, op.locale);
+  if (locale === null) return;
+  // A translation starts from the default text until it has its own.
+  const current = locale ? (node.l10n?.[locale]?.[key] ?? node.props[key]) : node.props[key];
   if (typeof current !== 'string') {
     return fail(ctx, {
       code: 'invalid_op',
@@ -838,7 +841,118 @@ function textEdit(ctx: OpContext, op: OpOf<'text.edit'>) {
       hint: 'Include more surrounding text so the match is unique.',
     });
   }
-  setProps(ctx, node, { [key]: current.replace(op.find, () => op.replace) });
+  const patch = { [key]: current.replace(op.find, () => op.replace) };
+  if (locale) setTranslation(ctx, node, locale, patch);
+  else setProps(ctx, node, patch);
+}
+
+const LOCALE = /^[a-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$/;
+
+/**
+ * The locale an op writes to: `undefined` for the default language, `null` (after reporting an
+ * error) if the locale isn't one of the site's.
+ */
+function translationLocale(ctx: OpContext, locale: string | undefined): string | undefined | null {
+  const settings = ctx.draft.locales();
+  if (!locale || locale === settings?.default) return undefined;
+  if (settings?.others.includes(locale)) return locale;
+  fail(ctx, {
+    code: 'unknown_locale',
+    message: `The site has no language "${locale}".${didYouMean(locale, settings?.others ?? [])}`,
+    hint: settings
+      ? `Languages: ${[settings.default, ...settings.others].join(', ')}.`
+      : 'Add it first with {"op":"locale.set","add":["' + locale + '"]}.',
+  });
+  return null;
+}
+
+/** Writes translated content props (validated like the props themselves; null removes). */
+function setTranslation(
+  ctx: OpContext,
+  node: BNode,
+  locale: string,
+  patch: Record<string, unknown>,
+): void {
+  const def = ctx.registry.component(node.type);
+  if (!def) return;
+  const content = new Set(def.contentProps ?? []);
+  const keys = Object.keys(patch);
+  const other = keys.filter((k) => !content.has(k));
+  if (other.length) {
+    fail(ctx, {
+      code: 'invalid_props',
+      nodeId: node.id,
+      path: other[0],
+      message: `Only content can be translated; ${other.join(', ')} ${other.length === 1 ? 'is' : 'are'} not a content prop of ${def.name}.`,
+      hint: `Translatable props of ${def.name}: ${[...content].join(', ') || '(none)'}. Set others without "locale".`,
+    });
+    return;
+  }
+  // Validate against the component schema by trying the values in place of the defaults.
+  const trial = { ...node.props };
+  for (const [k, v] of Object.entries(patch)) if (v !== null) trial[k] = v as never;
+  const props = validateProps(ctx, def, trial, node.id);
+  if (!props) return;
+  const current = { ...(node.l10n?.[locale] ?? {}) };
+  for (const k of keys) {
+    if (patch[k] === null) delete current[k];
+    else current[k] = props[k]!;
+  }
+  const l10n = { ...(node.l10n ?? {}) };
+  if (Object.keys(current).length) l10n[locale] = current;
+  else delete l10n[locale];
+  const next: BNode = { ...node, l10n };
+  if (!Object.keys(l10n).length) delete next.l10n;
+  ctx.draft.setNode(next);
+}
+
+function localeSet(ctx: OpContext, op: OpOf<'locale.set'>) {
+  const { draft } = ctx;
+  const current = draft.locales();
+  const bad = [op.default, ...(op.add ?? []), ...(op.remove ?? [])].filter(
+    (l): l is string => typeof l === 'string' && !LOCALE.test(l),
+  );
+  if (bad.length) {
+    return fail(ctx, {
+      code: 'invalid_op',
+      message: `Not a language code: ${bad.join(', ')}.`,
+      hint: 'Use codes like "en", "de", "pt-BR".',
+    });
+  }
+  const hasTranslations = draft.nodeIds().some((id) => draft.node(id)?.l10n);
+  const nextDefault = op.default ?? current?.default ?? 'en';
+  if (current && op.default && op.default !== current.default && hasTranslations) {
+    return fail(ctx, {
+      code: 'invalid_op',
+      message: `Can't change the default language from "${current.default}" to "${op.default}" once there are translations.`,
+    });
+  }
+  const others = new Set(current?.others ?? []);
+  for (const l of op.add ?? []) if (l !== nextDefault) others.add(l);
+  for (const l of op.remove ?? []) {
+    if (l === nextDefault) {
+      return fail(ctx, {
+        code: 'invalid_op',
+        message: `"${l}" is the default language and can't be removed.`,
+      });
+    }
+    others.delete(l);
+  }
+  others.delete(nextDefault);
+  // Translations of removed languages go too (undo brings them back).
+  for (const l of op.remove ?? []) {
+    for (const id of draft.nodeIds()) {
+      const n = draft.node(id)!;
+      if (!n.l10n?.[l]) continue;
+      const { [l]: _, ...rest } = n.l10n;
+      const next: BNode = { ...n, l10n: rest };
+      if (!Object.keys(rest).length) delete next.l10n;
+      draft.setNode(next);
+    }
+  }
+  draft.setLocales(
+    others.size || op.default ? { default: nextDefault, others: [...others].sort() } : undefined,
+  );
 }
 
 function styleSet(ctx: OpContext, op: OpOf<'style.set'>) {
@@ -1373,7 +1487,11 @@ function sectionVariant(ctx: OpContext, op: OpOf<'section.variant'>) {
 
 function propsSet(ctx: OpContext, op: OpOf<'props.set'>) {
   const node = requireNode(ctx, op.id);
-  if (node) setProps(ctx, node, op.props);
+  if (!node) return;
+  const locale = translationLocale(ctx, op.locale);
+  if (locale === null) return;
+  if (locale) setTranslation(ctx, node, locale, op.props);
+  else setProps(ctx, node, op.props);
 }
 
 const HANDLERS: { [K in Op['op']]: (ctx: OpContext, op: OpOf<K>) => unknown } = {
@@ -1391,6 +1509,7 @@ const HANDLERS: { [K in Op['op']]: (ctx: OpContext, op: OpOf<K>) => unknown } = 
   'page.update': pageUpdate,
   'page.remove': pageRemove,
   'token.set': tokenSet,
+  'locale.set': localeSet,
   'symbol.create': symbolCreate,
   'symbol.insert': symbolInsert,
   'symbol.detach': symbolDetach,

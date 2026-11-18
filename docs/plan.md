@@ -266,6 +266,8 @@ editor.registry.component({
 
 > **Phase 2 as built:** see [`progress.md`](progress.md). Linked components are stored as linked copies (every instance node points at its definition node) rather than as references expanded at render time, so ids, selection, CSS and every existing op keep working on instances.
 
+> **Phase 3 as built:** see [`progress.md`](progress.md). Sync is server-authoritative with optimistic clients instead of Yjs: every change still goes through the server's store (validation, policy, history, attribution), which a CRDT would bypass. Rich text is a sanitized inline-HTML subset instead of Tiptap/ProseMirror, so it works in the same-document canvas without an editor framework.
+
 Phases 2–3 are unchanged from the landscape document: linked components, draft changesets, provenance protection, screenshots and layout snapshots for agents, Yjs collaboration with agent presence, Tiptap rich text, i18n, data binding, importers (Puck, HTML, Tailwind) and interop (json-render/A2UI catalog export, MCP Apps view, AG-UI).
 
 ---

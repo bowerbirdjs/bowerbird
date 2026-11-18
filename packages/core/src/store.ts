@@ -2,6 +2,7 @@ import { applyOp, idTaken, isValidPagePath, type OpContext, orderNextTo } from '
 import { createEmptyDoc, DocIndex, descendants } from './doc.js';
 import { type Change, Draft } from './draft.js';
 import { type Issue, listPreview } from './errors.js';
+import { flattenL10n, unflattenL10n } from './l10n.js';
 import { type Op, parseOps } from './ops.js';
 import { createPolicy, type Policy } from './policy.js';
 import {
@@ -42,6 +43,8 @@ export interface ChangeSummary {
   pages: PageId[];
   symbols: string[];
   tokens: boolean;
+  /** The site's languages changed. */
+  locales: boolean;
 }
 
 export type ApplyResult =
@@ -127,6 +130,7 @@ export function summarize(changes: Change[]): ChangeSummary {
     pages: [],
     symbols: [],
     tokens: false,
+    locales: false,
   };
   for (const c of changes) {
     if (c.kind === 'node') {
@@ -135,6 +139,7 @@ export function summarize(changes: Change[]): ChangeSummary {
       else s.updated.push(c.id);
     } else if (c.kind === 'page') s.pages.push(c.id);
     else if (c.kind === 'symbol') s.symbols.push(c.id);
+    else if (c.kind === 'locales') s.locales = true;
     else s.tokens = true;
   }
   return s;
@@ -253,6 +258,17 @@ function revertNode(current: BNode, before: BNode, after: BNode, conflicts: stri
     else next[field] = r.value;
   }
   next.props = revertMap(current.props, before.props, after.props, 'props', conflicts);
+  const l10n = unflattenL10n(
+    revertMap(
+      flattenL10n(current.l10n),
+      flattenL10n(before.l10n),
+      flattenL10n(after.l10n),
+      'l10n',
+      conflicts,
+    ),
+  );
+  if (l10n) next.l10n = l10n;
+  else delete next.l10n;
   // Provenance goes back with the values it describes; stamp conflicts aren't worth reporting.
   const edited = revertMap(current.edited, before.edited, after.edited, 'edited', []);
   if (Object.keys(edited).length) next.edited = edited as BNode['edited'];
@@ -463,6 +479,70 @@ export class Store {
     for (const listener of this.loadListeners) {
       try {
         listener(doc);
+      } catch (error) {
+        queueMicrotask(() => {
+          throw error;
+        });
+      }
+    }
+  }
+
+  /**
+   * Replaces the document (and optionally history and changesets) without running ops: for
+   * example with a sync server's state. `reset: true` tells listeners it's a new document (like
+   * `load`); otherwise commit listeners get `entry`, or a placeholder entry if the document changed.
+   */
+  replace(
+    doc: SiteDoc,
+    options: {
+      history?: readonly HistoryEntry[];
+      changesets?: readonly Changeset[];
+      entry?: HistoryEntry;
+      reset?: boolean;
+    } = {},
+  ): void {
+    const changed = doc !== this.current;
+    this.current = doc;
+    this.index = undefined;
+    if (options.history) {
+      this.entries.length = 0;
+      this.entries.push(...options.history.slice(-this.historyLimit));
+    }
+    if (options.changesets) {
+      this.sets.length = 0;
+      this.sets.push(...options.changesets);
+      this.changesetCounter = Math.max(
+        this.changesetCounter,
+        ...this.sets.map((c) => Number(/^cs-(\d+)$/.exec(c.id)?.[1] ?? 0)),
+      );
+      this.emitChangesets();
+    }
+    if (options.reset) {
+      for (const listener of this.loadListeners) {
+        try {
+          listener(doc);
+        } catch (error) {
+          queueMicrotask(() => {
+            throw error;
+          });
+        }
+      }
+      return;
+    }
+    if (!changed && !options.entry) return;
+    const entry: HistoryEntry = options.entry ?? {
+      txId: `sync-${doc.revision}`,
+      revision: doc.revision,
+      actor: { kind: 'system', id: 'sync' },
+      kind: 'edit',
+      label: 'Sync',
+      changes: [],
+      time: Date.now(),
+    };
+    const summary = summarize(entry.changes);
+    for (const listener of this.listeners) {
+      try {
+        listener({ entry, doc, summary });
       } catch (error) {
         queueMicrotask(() => {
           throw error;
@@ -1055,7 +1135,15 @@ export class Store {
     }
     for (const change of [...entry.changes].reverse()) {
       if (change.kind === 'node') continue;
-      if (change.kind === 'symbol') {
+      if (change.kind === 'locales') {
+        const r = revertValue(draft.locales(), change.before, change.after);
+        if (r.conflict)
+          warnings.push({
+            code: 'conflict',
+            message: 'The site languages were changed later; kept them.',
+          });
+        else draft.setLocales(r.value as typeof change.before);
+      } else if (change.kind === 'symbol') {
         const cur = draft.symbol(change.id);
         const r = revertValue(cur, change.before, change.after);
         if (r.conflict)

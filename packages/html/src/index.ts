@@ -3,9 +3,11 @@ import {
   DocIndex,
   type DocView,
   type ElementSpec,
+  localizedProps,
   type Page,
   type Registry,
   type SiteDoc,
+  sanitizeRichText,
   sanitizeUrl,
 } from '@bowerbirdjs/core';
 import { type CompileCssOptions, type CssMode, compileCss } from '@bowerbirdjs/css';
@@ -19,6 +21,8 @@ export interface RenderOptions {
   nodeIds?: 'all' | 'styled' | 'none';
   /** Passed to the CSS compiler in editor mode. */
   canvasSelector?: CompileCssOptions['canvasSelector'];
+  /** Render this language's translations (falling back to the default content). */
+  locale?: string;
 }
 
 export interface RenderedPage {
@@ -97,16 +101,18 @@ interface Ctx {
   registry: Registry;
   mode: CssMode;
   nodeIds: NonNullable<RenderOptions['nodeIds']>;
+  locale?: string;
 }
 
 function renderNode(ctx: Ctx, node: BNode, sectionName: string | undefined, depth = 0): string {
   // Validated documents are at most MAX_DEPTH deep; this guards documents loaded from elsewhere.
   if (depth > 200) return '';
   const def = ctx.registry.component(node.type);
+  const props = localizedProps(node, ctx.locale);
   let spec: ElementSpec;
-  if (def?.render) spec = def.render(node);
+  if (def?.render) spec = def.render(props === node.props ? node : { ...node, props });
   else if (def?.kind === 'code' && def.tag)
-    spec = { tag: def.tag, attrs: codeComponentAttrs(node.props) };
+    spec = { tag: def.tag, attrs: codeComponentAttrs(props) };
   else spec = { tag: 'div', attrs: { 'data-bb-missing': node.type } };
   const tag = TAG_RE.test(spec.tag) && !DENIED_TAGS.has(spec.tag) ? spec.tag : 'div';
 
@@ -138,7 +144,9 @@ function renderNode(ctx: Ctx, node: BNode, sectionName: string | undefined, dept
     ? children
         .map((c) => renderNode(ctx, c, scope, depth + 1))
         .join(node.parent === null ? '\n' : '')
-    : escapeHtml(spec.text ?? '');
+    : spec.html !== undefined
+      ? sanitizeRichText(spec.html)
+      : escapeHtml(spec.text ?? '');
   return node.parent === null ? `${open}\n${inner}\n</${tag}>` : `${open}${inner}</${tag}>`;
 }
 
@@ -160,6 +168,7 @@ export function renderPage(
     registry,
     mode,
     nodeIds: options.nodeIds ?? (mode === 'editor' ? 'all' : 'styled'),
+    ...(options.locale ? { locale: options.locale } : {}),
   };
   const html = renderNode(ctx, root, undefined);
   const css = compileCss(doc, registry, {
@@ -189,6 +198,7 @@ export function renderSubtree(
     registry,
     mode,
     nodeIds: options.nodeIds ?? (mode === 'editor' ? 'all' : 'styled'),
+    ...(options.locale ? { locale: options.locale } : {}),
   };
   const html = `<div class="bb-page">\n${renderNode(ctx, root, undefined)}\n</div>`;
   const css = compileCss(doc, registry, {
@@ -219,7 +229,7 @@ export function renderDocument(
   const { page, html, css } = renderPage(doc, registry, pageId, options);
   return [
     '<!doctype html>',
-    `<html lang="${escapeAttr(options.lang ?? 'en')}"${options.theme ? ` data-theme="${escapeAttr(options.theme)}"` : ''}>`,
+    `<html lang="${escapeAttr(options.lang ?? options.locale ?? doc.locales?.default ?? 'en')}"${options.theme ? ` data-theme="${escapeAttr(options.theme)}"` : ''}>`,
     '<head>',
     '<meta charset="utf-8">',
     '<meta name="viewport" content="width=device-width, initial-scale=1">',

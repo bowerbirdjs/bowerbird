@@ -75,6 +75,10 @@ export const OpSchema = z.discriminatedUnion('op', [
       op: z.literal('props.set'),
       id: Id,
       props: Json.describe('Props to merge; null removes a prop.'),
+      locale: z
+        .string()
+        .optional()
+        .describe('Write a translation (content props only); omit for the default language.'),
     })
     .describe('Merge props into a node.'),
   z
@@ -84,6 +88,7 @@ export const OpSchema = z.discriminatedUnion('op', [
       find: z.string().min(1),
       replace: z.string(),
       prop: z.string().optional().describe('Defaults to "text".'),
+      locale: z.string().optional().describe('Edit a translation instead of the default text.'),
     })
     .describe('Replace one exact occurrence of text inside a text prop.'),
   z
@@ -137,6 +142,20 @@ export const OpSchema = z.discriminatedUnion('op', [
     })
     .describe('Update page settings.'),
   z.object({ op: z.literal('page.remove'), id: z.string() }).describe('Remove a page.'),
+  z
+    .object({
+      op: z.literal('locale.set'),
+      default: z
+        .string()
+        .optional()
+        .describe('Default language (only before any translations exist).'),
+      add: z.array(z.string()).optional().describe('Languages to add, e.g. ["de", "fr"].'),
+      remove: z
+        .array(z.string())
+        .optional()
+        .describe('Languages to remove (their translations are deleted).'),
+    })
+    .describe('Set the languages the site is published in.'),
   z
     .object({
       op: z.literal('symbol.create'),
@@ -272,7 +291,7 @@ export function describeOp(op: Op): string {
     case 'node.duplicate':
       return `duplicate ${op.id}`;
     case 'props.set':
-      return `${op.id}: ${Object.entries(op.props)
+      return `${op.id}${op.locale ? ` (${op.locale})` : ''}: ${Object.entries(op.props)
         .map(([k, v]) => `${k}=${short(v)}`)
         .join(', ')}`;
     case 'text.edit':
@@ -291,6 +310,14 @@ export function describeOp(op: Op): string {
       return `page ${op.id}: ${[op.title && `title ${short(op.title)}`, op.path && `path ${op.path}`, op.description !== undefined && 'description'].filter(Boolean).join(', ')}`;
     case 'page.remove':
       return `remove page ${op.id}`;
+    case 'locale.set':
+      return `languages: ${[
+        op.default && `default ${op.default}`,
+        op.add?.length && `add ${op.add.join(', ')}`,
+        op.remove?.length && `remove ${op.remove.join(', ')}`,
+      ]
+        .filter(Boolean)
+        .join('; ')}`;
     case 'symbol.create':
       return `make ${op.id} a linked component ${short(op.name)}`;
     case 'symbol.insert':

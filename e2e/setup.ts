@@ -10,7 +10,13 @@ import type { TestProject } from 'vitest/node';
 declare module 'vitest' {
   export interface ProvidedContext {
     /** Base URLs of the built apps, or null when Playwright isn't installed (tests skip). */
-    apps: { vanilla: string; vue: string; showcase: string; hostile: string } | null;
+    apps: {
+      vanilla: string;
+      vue: string;
+      showcase: string;
+      hostile: string;
+      collab: string;
+    } | null;
   }
 }
 
@@ -20,6 +26,8 @@ const APPS = {
   vue: 'examples/vue',
   showcase: 'apps/showcase',
   hostile: 'examples/hostile-css',
+  collab: 'examples/collab',
+  mcpEditor: 'examples/mcp-editor',
 } as const;
 const TYPES: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',

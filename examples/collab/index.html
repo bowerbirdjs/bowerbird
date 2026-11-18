@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Bowerbird: collaboration</title>
+    <style>
+      html, body { margin: 0; height: 100%; font-family: system-ui, sans-serif; }
+      body { display: grid; grid-template-rows: auto 1fr; }
+      header { padding: 10px 16px; border-bottom: 1px solid #e5e7eb; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+      header button { font: inherit; padding: 4px 10px; border-radius: 6px; border: 1px solid #d1d5db; background: #fff; cursor: pointer; }
+      main { display: grid; grid-template-columns: 1fr 1fr; min-height: 0; }
+      main > section { display: grid; grid-template-rows: auto 1fr; min-height: 0; border-right: 1px solid #e5e7eb; }
+      main h2 { margin: 0; padding: 6px 12px; font-size: 13px; background: #f8fafc; border-bottom: 1px solid #e5e7eb; }
+      bowerbird-editor { display: grid; min-height: 0; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <strong>Two people and an agent, one page</strong>
+      <span>Each editor syncs through a server (in this page). Edits, selections and the agent show up on both sides.</span>
+      <button id="agent" type="button">Let the agent edit</button>
+      <code id="revision">revision 0</code>
+    </header>
+    <main>
+      <section><h2>Sam’s screen</h2><bowerbird-editor id="sam"></bowerbird-editor></section>
+      <section><h2>Ana’s screen</h2><bowerbird-editor id="ana"></bowerbird-editor></section>
+    </main>
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>

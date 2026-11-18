@@ -1,0 +1,45 @@
+{
+  "name": "@bowerbirdjs/export",
+  "version": "0.0.0",
+  "description": "Exports Bowerbird sites as static HTML sites or React components.",
+  "license": "MIT",
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "bin": {
+    "bowerbird-export": "./dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "src",
+    "!dist/.tsbuildinfo"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/bowerbirdjs/bowerbird.git",
+    "directory": "packages/export"
+  },
+  "dependencies": {
+    "@bowerbirdjs/blocks": "workspace:*",
+    "@bowerbirdjs/core": "workspace:*",
+    "@bowerbirdjs/css": "workspace:*",
+    "@bowerbirdjs/html": "workspace:*",
+    "domhandler": "^6.0.1",
+    "htmlparser2": "^12.0.0",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "vite": "^8.3.8"
+  }
+}

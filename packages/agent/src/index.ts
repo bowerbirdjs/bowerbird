@@ -526,6 +526,11 @@ export function createAgentTools(options: AgentToolsOptions): AgentTool[] {
             .join(', ')}`,
           `Tokens: ${[...families].map(([f, n]) => `${f} (${n})`).join(', ')} (list_tokens to see them)`,
           `Themes: ${Object.keys(doc.themes).join(', ') || 'none'}`,
+          ...(doc.locales
+            ? [
+                `Languages: ${doc.locales.default} (default, in props), ${doc.locales.others.join(', ')}. Translate content with props.set/text.edit plus "locale"; get_outline with locale shows what is untranslated.`,
+              ]
+            : []),
           `Symbols (linked components): ${
             symbols
               .map(
@@ -567,6 +572,7 @@ export function createAgentTools(options: AgentToolsOptions): AgentTool[] {
         page: z.string().optional().describe('Page id; omit for all pages.'),
         root: z.string().optional().describe('Show only this node and its subtree.'),
         depth: z.number().int().min(1).max(12).optional().describe('Levels to show (default 3).'),
+        locale: z.string().optional().describe('Show this language’s translations.'),
       }),
       annotations: { readOnlyHint: true },
       run: (input) => ({
@@ -574,6 +580,7 @@ export function createAgentTools(options: AgentToolsOptions): AgentTool[] {
           ...(input.page ? { page: input.page } : {}),
           ...(input.root ? { root: input.root } : {}),
           ...(input.depth ? { depth: input.depth } : {}),
+          ...(input.locale ? { locale: input.locale } : {}),
         })}`,
       }),
     }),

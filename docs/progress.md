@@ -36,11 +36,11 @@ The working log for building Bowerbird phase by phase. Each phase ends with a re
 
 ## Phase 3: collaboration and reach
 
-- [ ] Server-authoritative sync with presence (people and agents)
-- [ ] Rich text
-- [ ] Localised content
-- [ ] Code export (static site, JSX)
-- [ ] Importers (Puck) and interop (A2UI / json-render catalog export, MCP Apps view)
+- [x] Server-authoritative sync with presence (`@bowerbirdjs/sync`): optimistic clients that replay pending changes on the server's state, undo/review on the server, presence for people and for agents working on the server store; in-memory, WebSocket and HTTP/SSE transports; the MCP preview serves sync so an editor can work alongside an MCP agent (`examples/mcp-editor`); two-person example (`examples/collab`)
+- [x] Rich text: `rich-text` primitive with a sanitized inline subset (sanitized on write and on render); inline Ctrl+B / Ctrl+I / Ctrl+K in the editor
+- [x] Localised content: `locale.set`, translations of content props per node (`props.set`/`text.edit` with `locale`), rendering, outline and lint per language, editor language switcher, per-language static export with `hreflang`
+- [x] Code export (`@bowerbirdjs/export`): static multi-page site (one stylesheet, clean URLs, sitemap) and React components; `bowerbird-export` CLI
+- [x] Interop: Puck importer (`importPuck` with mappers, slots and legacy zones), JSON Schema catalog export (`exportCatalog`) for A2UI/json-render-style generators, MCP Apps view (`show_page` with a `ui://bowerbird/page` resource)
 - [ ] Review pass and fixes
 
 ## Notes
@@ -53,5 +53,6 @@ The working log for building Bowerbird phase by phase. Each phase ends with a re
 
 - Phase 2 review fixes: undo/redo/revert are gated by review and protect people's edits (including nodes an undo would delete); instance sync runs after every op, uses an index (linear in instances), respects locks, protection and the depth limit, and also runs on undo; dangling links are dropped; definition roots and retired ids are never reused; partial changeset accepts keep later ops pointing at rebased ids; rebasing and dependencies only look at id fields; agents can't approve; dry runs work under review; token and theme edits are stamped and protected; `symbol.reset` needs design access; layout lint ignores intended overflow, reports left overflow, handles inline links, opacity and images behind text; screenshots load lazy images, crop tall images (and say so) and explain hidden nodes; the browser restarts after a crash; proposals persist in the MCP site file; the preview can show proposed pages.
 - Phase 2 notes: symbols can't contain other symbols yet (create and insert refuse nesting). Ops that create nodes without an explicit id (`node.duplicate`) may refer to different ids after a changeset is rebased. Only fields a person changed are protected, not everything they created (inserting a template section doesn't make its placeholder copy theirs). Deferred to Phase 3: host code components rendered by the wrappers, an extension API for custom fields and panels, section thumbnails, and a Svelte example.
+- Phase 3 notes: sync is server-authoritative rather than CRDT-based (the store already validates and merges by record); clients keep only their own pending changes, which are replayed on each server commit. Hosts must authenticate sync clients (`createSyncServer({ authenticate })`); the default only checks the claimed actor's shape. Translations cover content props only; changing the default language is refused once translations exist. Rich text stays inline (no lists or headings inside one node; use separate nodes). The catalog is a neutral JSON Schema format, not a specific A2UI or json-render schema version. Still deferred: host code components rendered by the wrappers, an extension API for custom fields and panels, section thumbnails, a Svelte example.
 - No GitHub remote yet: `bowerbirdjs/bowerbird` must be created before pushing.
 - No model API key in this environment: the benchmark runner is tested with a scripted agent.

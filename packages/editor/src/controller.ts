@@ -23,7 +23,34 @@ export type EditorEvent =
   | { type: 'commit'; event: CommitEvent }
   | { type: 'store' }
   | { type: 'changesets'; changesets: readonly Changeset[] }
+  | { type: 'peers'; peers: readonly PeerPresence[] }
   | { type: 'error'; errors: Issue[]; label?: string };
+
+/** Someone else in the document (a person or an agent), e.g. from `@bowerbirdjs/sync`. */
+export interface PeerPresence {
+  clientId: string;
+  actor: Actor;
+  color: string;
+  page?: string | null;
+  selection?: string | null;
+  editing?: string | null;
+  activity?: string | null;
+}
+
+/** A store that shares presence (duck-typed, so the editor doesn't depend on a sync package). */
+interface PresenceStore {
+  onPeers(listener: (peers: PeerPresence[]) => void): () => void;
+  setPresence(state: {
+    page?: string | null;
+    selection?: string | null;
+    editing?: string | null;
+  }): void;
+  peers?: PeerPresence[];
+}
+
+const sharesPresence = (store: unknown): store is PresenceStore =>
+  typeof (store as PresenceStore).onPeers === 'function' &&
+  typeof (store as PresenceStore).setPresence === 'function';
 
 /**
  * Changes shown on the canvas without being applied: an agent's ops while they stream in, or a
@@ -71,6 +98,10 @@ export class EditorController {
   symbolView: string | null = null;
   /** Unapplied changes shown on the canvas (read-only while shown). */
   ghost: GhostPreview | null = null;
+  /** Language being edited; `null` is the default language (the props themselves). */
+  locale: string | null = null;
+  /** Other people and agents in the document (when the store shares presence). */
+  peers: readonly PeerPresence[] = [];
   private readonly listeners = new Set<(event: EditorEvent) => void>();
   private unsubscribe: () => void;
 
@@ -88,10 +119,19 @@ export class EditorController {
     const offChangesets = store.onChangesets((changesets) =>
       this.emit({ type: 'changesets', changesets }),
     );
+    let offPeers = () => {};
+    if (sharesPresence(store)) {
+      this.peers = store.peers ?? [];
+      offPeers = store.onPeers((peers) => {
+        this.peers = peers;
+        this.emit({ type: 'peers', peers });
+      });
+    }
     return () => {
       offCommit();
       offLoad();
       offChangesets();
+      offPeers();
     };
   }
 
@@ -107,6 +147,23 @@ export class EditorController {
 
   private emit(event: EditorEvent): void {
     for (const l of this.listeners) l(event);
+    // Share where this person is, when the store syncs with others.
+    if ((event.type === 'selection' || event.type === 'view') && sharesPresence(this.store)) {
+      const state = { page: this.symbolView ? null : this.page, selection: this.selected };
+      const key = JSON.stringify(state);
+      if (key !== this.lastPresence) {
+        this.lastPresence = key;
+        this.store.setPresence(state);
+      }
+    }
+  }
+
+  private lastPresence = '';
+
+  /** Tells others which node this person is editing inline (or `null`). */
+  setEditing(id: string | null): void {
+    if (sharesPresence(this.store))
+      this.store.setPresence({ page: this.page, selection: this.selected, editing: id });
   }
 
   private firstPage(): string {
@@ -118,6 +175,7 @@ export class EditorController {
     const pageGone = !this.store.doc.pages[this.page];
     if (pageGone) this.page = this.firstPage();
     if (this.symbolView && !this.store.doc.symbols?.[this.symbolView]) this.symbolView = null;
+    if (this.locale && !this.store.doc.locales?.others.includes(this.locale)) this.locale = null;
     if (this.ghost) this.ghost = this.ghost.refresh();
     const lostSelection = !!this.selected && !this.store.doc.nodes[this.selected];
     if (lostSelection) this.selected = null;
@@ -502,8 +560,34 @@ export class EditorController {
     if (parent && !this.isRoot(parent)) this.select(parent);
   }
 
+  /**
+   * Sets props. In another language, content props are written as translations and the rest
+   * (tags, sizes…) to the node itself, in one transaction.
+   */
   setProps(id: string, props: Record<string, unknown>, label = 'Edit') {
-    return this.apply([{ op: 'props.set', id, props }], label);
+    const node = this.node(id);
+    if (!this.locale || !node) return this.apply([{ op: 'props.set', id, props }], label);
+    const content = new Set(this.store.registry.component(node.type)?.contentProps ?? []);
+    const translated = Object.fromEntries(Object.entries(props).filter(([k]) => content.has(k)));
+    const shared = Object.fromEntries(Object.entries(props).filter(([k]) => !content.has(k)));
+    return this.apply(
+      [
+        ...(Object.keys(translated).length
+          ? [{ op: 'props.set', id, locale: this.locale, props: translated }]
+          : []),
+        ...(Object.keys(shared).length ? [{ op: 'props.set', id, props: shared }] : []),
+      ],
+      label,
+    );
+  }
+
+  /** Switches the language being viewed and edited (`null` for the default). */
+  setLocale(locale: string | null): void {
+    const others = this.store.doc.locales?.others ?? [];
+    const next = locale && others.includes(locale) ? locale : null;
+    if (next === this.locale) return;
+    this.locale = next;
+    this.emit({ type: 'view' });
   }
 
   setStyle(

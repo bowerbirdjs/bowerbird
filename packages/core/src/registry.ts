@@ -8,6 +8,8 @@ export interface ElementSpec {
   tag: string;
   attrs?: Record<string, string | number | boolean | null | undefined>;
   text?: string;
+  /** Inner rich text (the safe inline subset); the renderer sanitizes it again. */
+  html?: string;
   /** Void elements (e.g. `img`) never have children. */
   void?: boolean;
 }

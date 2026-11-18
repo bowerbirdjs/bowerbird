@@ -9,6 +9,7 @@ import {
   formatIssue,
   type Issue,
   instanceRootOf,
+  localizedProps,
   type NodeInput,
   overridesOf,
   type SectionDef,
@@ -28,6 +29,10 @@ const ELEMENTS: [string, NodeInput][] = [
   ['Box', { type: 'box' }],
   ['Text', { type: 'text', props: { text: 'New text' } }],
   ['Heading', { type: 'text', props: { tag: 'h2', text: 'New heading' } }],
+  [
+    'Rich text',
+    { type: 'rich-text', props: { html: 'Text with <strong>bold</strong> and <em>italic</em>.' } },
+  ],
   ['Link', { type: 'link', props: { text: 'Link', href: '#' } }],
   ['Button', { type: 'button', props: { text: 'Button' } }],
   ['Image', { type: 'image', props: { src: PLACEHOLDER_IMAGE, alt: '' } }],
@@ -506,6 +511,21 @@ export class BowerbirdEditor extends LitElement {
             </select>`
           : html`<strong>${c.currentPage?.title ?? ''}</strong>`
       }
+      ${
+        c.peers.length
+          ? html`<ul class="peers" aria-label="Also here">
+            ${c.peers.map(
+              (p) => html`<li
+                style=${`--peer: ${p.color}`}
+                title=${`${p.actor.name ?? p.actor.id}${p.actor.kind === 'agent' ? ' (agent)' : ''}${p.activity ? `: ${p.activity}` : ''}`}
+                @click=${() => p.selection && c.select(p.selection)}
+              >
+                ${(p.actor.name ?? p.actor.id).slice(0, 1).toUpperCase()}
+              </li>`,
+            )}
+          </ul>`
+          : nothing
+      }
       <span class="spacer"></span>
       <div class="group" role="group" aria-label="Screen size">
         ${doc.breakpoints.map(
@@ -536,6 +556,18 @@ export class BowerbirdEditor extends LitElement {
             html`<option value=${v!} .selected=${live(String(c.zoom) === v)}>${l}</option>`,
         )}
       </select>
+      ${
+        doc.locales
+          ? html`<select
+              class="compact"
+              aria-label="Language"
+              @change=${(e: Event) => c.setLocale((e.target as HTMLSelectElement).value || null)}
+            >
+              <option value="" .selected=${live(!c.locale)}>${doc.locales.default} (default)</option>
+              ${doc.locales.others.map((l) => html`<option value=${l} .selected=${live(c.locale === l)}>${l}</option>`)}
+            </select>`
+          : nothing
+      }
       <span class="spacer"></span>
       <button class="icon-btn" title="Undo your last change (Ctrl+Z)" ?disabled=${!this.canUndo(c)} @click=${() => c.undo()}>↶ Undo</button>
       <button class="icon-btn" title="Redo (Ctrl+Shift+Z)" aria-label="Redo" ?disabled=${!this.canRedo(c)} @click=${() => c.redo()}>↷</button>
@@ -1162,7 +1194,7 @@ export class BowerbirdEditor extends LitElement {
 
   private renderField(c: EditorController, node: BNode, field: Field): TemplateResult {
     const id = `f-${field.key}`;
-    const value = node.props[field.key];
+    const value = localizedProps(node, c.locale ?? undefined)[field.key];
     const onChange = (e: Event) => {
       const input = e.target as HTMLInputElement;
       let value: unknown;

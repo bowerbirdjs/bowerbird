@@ -29,6 +29,7 @@ import {
 } from './doc.js';
 import { didYouMean, listPreview } from './errors.js';
 import { isValidId, PAGE_ID_PATTERN, slugify } from './ids.js';
+import { flattenL10n, unflattenL10n } from './l10n.js';
 import { keyBetween } from './order.js';
 import type { BNode, NodeId, SymbolDef } from './types.js';
 import { clone, deepEqual } from './util.js';
@@ -82,6 +83,10 @@ export function overridesOf(view: DocView, node: BNode): string[] {
   for (const k of keys) if (!deepEqual(def.props[k], node.props[k])) out.push(`props.${k}`);
   if (!deepEqual(def.styles, node.styles)) out.push('styles');
   if (!deepEqual(def.vars, node.vars)) out.push('vars');
+  const a = flattenL10n(def.l10n);
+  const b = flattenL10n(node.l10n);
+  for (const k of new Set([...Object.keys(a), ...Object.keys(b)]))
+    if (!deepEqual(a[k], b[k])) out.push(`l10n.${k.replace('|', '.')}`);
   return out;
 }
 
@@ -310,6 +315,8 @@ export function symbolReset(ctx: OpContext, op: OpOf<'symbol.reset'>) {
     else delete next.styles;
     if (def.vars) next.vars = { ...def.vars };
     else delete next.vars;
+    if (def.l10n) next.l10n = clone(def.l10n);
+    else delete next.l10n;
     draft.setNode(next);
   }
 }
@@ -422,6 +429,11 @@ function followNode(inst: BNode, before: BNode, after: BNode): BNode {
   const styles = followStyles(inst.styles, before.styles, after.styles);
   if (styles) next.styles = styles;
   else delete next.styles;
+  const l10n = unflattenL10n(
+    followMap(flattenL10n(inst.l10n), flattenL10n(before.l10n), flattenL10n(after.l10n)),
+  );
+  if (l10n) next.l10n = l10n;
+  else delete next.l10n;
   return next;
 }
 

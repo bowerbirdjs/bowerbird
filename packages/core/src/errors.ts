@@ -33,7 +33,8 @@ export type IssueCode =
   | 'instance'
   | 'human_edit'
   | 'review_required'
-  | 'unknown_changeset';
+  | 'unknown_changeset'
+  | 'unknown_locale';
 
 /**
  * A structured problem report. Messages are written for both humans and agents: they say what is

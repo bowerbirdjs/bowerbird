@@ -1,5 +1,24 @@
 import { type DocView, descendants, isInstanceRoot } from './doc.js';
+import { localizedProps } from './l10n.js';
+import { richTextToPlain } from './richtext.js';
 import { instancesOf, overridesOf } from './symbols.js';
+
+/** Whether a text-bearing node lacks a translation for `locale`. */
+function untranslated(n: BNode, locale: string): boolean {
+  const key =
+    n.type === 'rich-text'
+      ? 'html'
+      : n.type === 'text' || n.type === 'button' || n.type === 'link'
+        ? 'text'
+        : undefined;
+  return (
+    !!key &&
+    typeof n.props[key] === 'string' &&
+    (n.props[key] as string).trim() !== '' &&
+    !(n.l10n?.[locale] && key in n.l10n[locale])
+  );
+}
+
 import type { BNode, NodeId, PageId } from './types.js';
 
 export interface OutlineOptions {
@@ -10,6 +29,8 @@ export interface OutlineOptions {
   depth?: number;
   /** Maximum characters of text shown per node. Default 60. */
   maxText?: number;
+  /** Show this language's translations; untranslated text is marked. */
+  locale?: string;
 }
 
 /** Symbol and provenance notes for one node: instance roots, overrides, people's edits. */
@@ -36,7 +57,8 @@ const quote = (value: unknown, max: number) => {
 };
 
 /** One line describing a node, e.g. `hero-1/heading  text<h1>  "Ship faster"`. */
-export function describeNode(n: BNode, maxText = 60): string {
+export function describeNode(node: BNode, maxText = 60, locale?: string): string {
+  const n = locale ? { ...node, props: localizedProps(node, locale) } : node;
   const parts: string[] = [n.id];
   if (n.section) {
     const variant = Object.entries(n.section.variant)
@@ -47,6 +69,10 @@ export function describeNode(n: BNode, maxText = 60): string {
     parts.push(typeof n.props.tag === 'string' ? `${n.type}<${n.props.tag}>` : n.type);
   }
   if (n.type === 'text' || n.type === 'button') parts.push(quote(n.props.text, maxText));
+  if (n.type === 'rich-text')
+    parts.push(
+      quote(richTextToPlain(typeof n.props.html === 'string' ? n.props.html : ''), maxText),
+    );
   if (n.type === 'link') {
     parts.push(
       `${n.props.text ? `${quote(n.props.text, maxText)} ` : ''}→ ${String(n.props.href)}`,
@@ -68,8 +94,10 @@ export function outline(view: DocView, options: OutlineOptions = {}): string {
   const lines: string[] = [];
   const walk = (node: BNode, level: number) => {
     const notes = nodeNotes(view, node);
+    if (options.locale && untranslated(node, options.locale))
+      notes.push(`untranslated ${options.locale}`);
     lines.push(
-      `${'  '.repeat(level)}${describeNode(node, maxText)}${notes.length ? `  [${notes.join('; ')}]` : ''}`,
+      `${'  '.repeat(level)}${describeNode(node, maxText, options.locale)}${notes.length ? `  [${notes.join('; ')}]` : ''}`,
     );
     const children = view.children(node.id);
     if (!children.length) return;

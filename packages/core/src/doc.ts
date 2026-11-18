@@ -24,6 +24,7 @@ export interface DocView {
   themes(): Record<string, Record<string, string>>;
   symbol(id: string): SymbolDef | undefined;
   symbols(): SymbolDef[];
+  locales?(): SiteDoc['locales'];
 }
 
 export const DEFAULT_BREAKPOINTS: Breakpoint[] = [
@@ -107,6 +108,10 @@ export class DocIndex implements DocView {
 
   symbols() {
     return Object.values(this.doc.symbols ?? {});
+  }
+
+  locales() {
+    return this.doc.locales;
   }
 }
 

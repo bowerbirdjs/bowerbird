@@ -24,14 +24,15 @@
     "directory": "packages/mcp"
   },
   "dependencies": {
+    "@bowerbirdjs/agent": "workspace:*",
+    "@bowerbirdjs/blocks": "workspace:*",
     "@bowerbirdjs/core": "workspace:*",
     "@bowerbirdjs/css": "workspace:*",
     "@bowerbirdjs/html": "workspace:*",
-    "@bowerbirdjs/blocks": "workspace:*",
-    "@bowerbirdjs/agent": "workspace:*",
+    "@bowerbirdjs/layout": "workspace:*",
+    "@bowerbirdjs/sync": "workspace:*",
     "@modelcontextprotocol/sdk": "^1.32.2",
-    "zod": "^4.6.7",
-    "@bowerbirdjs/layout": "workspace:*"
+    "zod": "^4.6.7"
   },
   "bin": {
     "bowerbird-mcp": "./dist/cli.js"

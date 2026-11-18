@@ -56,6 +56,7 @@ export function fieldsFor(def: ComponentDef): Field[] {
     else if (type === 'array' || type === 'object' || (!type && !prop.enum)) kind = 'json';
     else if (key === 'href') kind = 'url';
     else if (key === 'src') kind = 'image';
+    else if (key === 'html') kind = 'textarea';
     else if (key === 'text' && typeof prop.maxLength === 'number' && prop.maxLength > 500)
       kind = 'textarea';
     fields.push({

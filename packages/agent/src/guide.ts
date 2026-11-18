@@ -15,6 +15,10 @@ export const AGENT_GUIDE = `## How to edit this site
 - symbol.create turns a section into a symbol (it becomes the first instance); symbol.insert adds instances.
 - Outline marks "[edited by <name>]" where a person changed something. Don't overwrite their words or styling unless they asked; propose: true lets them review the change.
 
+## Text
+- text nodes hold plain text. For inline formatting use a rich-text node: props.html with <strong> <em> <a href> <code> <br> only; anything else is stripped.
+- Other languages: {"op":"locale.set","add":["de"]}, then props.set with "locale":"de" on content props (text, html, href, alt…). Untranslated content falls back to the default language.
+
 ## Styling
 - Use design tokens, not raw values: var(--space-lg), var(--color-accent), var(--text-2xl). Call list_tokens to see them.
 - To rebrand, change the whole palette scale (e.g. color.brand.50…700): themes such as dark reference other steps of it.
@@ -36,5 +40,7 @@ export const AGENT_GUIDE = `## How to edit this site
 {"op":"node.insert","parent":"hero-1/actions","node":{"type":"link","props":{"text":"Docs","href":"/docs"}}}
 {"op":"token.set","path":"color.brand.600","value":"#0d9488"}
 {"op":"page.create","path":"/about","title":"About us"}
+{"op":"props.set","id":"hero-1/heading","locale":"de","props":{"text":"Planen Sie gemeinsam"}}
+{"op":"node.insert","parent":"features-1/header","node":{"type":"rich-text","props":{"html":"Free for <strong>small teams</strong>. <a href="/pricing">See pricing</a>."}}}
 {"op":"symbol.create","id":"footer-1","name":"Site footer"}
 {"op":"symbol.insert","symbol":"site-footer","page":"about"}`;

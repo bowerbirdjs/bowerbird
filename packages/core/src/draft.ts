@@ -1,6 +1,15 @@
 import { buildChildIndex, type DocView } from './doc.js';
 import { compareOrder } from './order.js';
-import type { BNode, NodeId, Page, PageId, SiteDoc, SymbolDef, TokenTree } from './types.js';
+import type {
+  BNode,
+  Locales,
+  NodeId,
+  Page,
+  PageId,
+  SiteDoc,
+  SymbolDef,
+  TokenTree,
+} from './types.js';
 import { deepEqual, ensureIn, own } from './util.js';
 
 /** A record-level change: `before` absent = created, `after` absent = removed. */
@@ -8,6 +17,7 @@ export type Change =
   | { kind: 'node'; id: NodeId; before?: BNode; after?: BNode }
   | { kind: 'page'; id: PageId; before?: Page; after?: Page }
   | { kind: 'symbol'; id: string; before?: SymbolDef; after?: SymbolDef }
+  | { kind: 'locales'; id: 'locales'; before?: Locales; after?: Locales }
   | { kind: 'tokens'; id: 'tokens'; before: TokenTree; after: TokenTree }
   | { kind: 'themes'; id: 'themes'; before: SiteDoc['themes']; after: SiteDoc['themes'] };
 
@@ -26,6 +36,7 @@ export class Draft implements DocView {
   private tokenTree: TokenTree;
   private themeMap: SiteDoc['themes'];
   private tokenStampMap: SiteDoc['tokenEdits'];
+  private localeSettings: Locales | undefined;
   /** Bumped whenever tokens or nodes change, so callers can invalidate caches. */
   version = 0;
 
@@ -34,6 +45,7 @@ export class Draft implements DocView {
     this.tokenTree = base.tokens;
     this.themeMap = base.themes;
     this.tokenStampMap = base.tokenEdits;
+    this.localeSettings = base.locales;
   }
 
   /** Provenance of tokens and theme values (not part of undo). */
@@ -43,6 +55,14 @@ export class Draft implements DocView {
 
   setTokenStamps(stamps: SiteDoc['tokenEdits']): void {
     this.tokenStampMap = stamps;
+  }
+
+  locales(): Locales | undefined {
+    return this.localeSettings;
+  }
+
+  setLocales(locales: Locales | undefined): void {
+    this.localeSettings = locales;
   }
 
   node(id: NodeId): BNode | undefined {
@@ -171,6 +191,14 @@ export class Draft implements DocView {
       if (deepEqual(before, after ?? undefined)) continue;
       out.push({ kind: 'symbol', id, ...(before ? { before } : {}), ...(after ? { after } : {}) });
     }
+    if (!deepEqual(this.base.locales, this.localeSettings)) {
+      out.push({
+        kind: 'locales',
+        id: 'locales',
+        ...(this.base.locales ? { before: this.base.locales } : {}),
+        ...(this.localeSettings ? { after: this.localeSettings } : {}),
+      });
+    }
     if (!deepEqual(this.base.tokens, this.tokenTree)) {
       out.push({ kind: 'tokens', id: 'tokens', before: this.base.tokens, after: this.tokenTree });
     }
@@ -201,6 +229,8 @@ export class Draft implements DocView {
       themes: this.themeMap,
     };
     if (this.tokenStampMap) next.tokenEdits = this.tokenStampMap;
+    if (this.localeSettings) next.locales = this.localeSettings;
+    else delete next.locales;
     if (this.symbolOverlay.size) {
       const symbols = { ...(this.base.symbols ?? {}) };
       for (const [id, sym] of this.symbolOverlay) {

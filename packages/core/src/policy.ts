@@ -196,7 +196,7 @@ export function requiredLevelForChanges(changes: Change[], registry: Registry): 
   };
   for (const c of changes) {
     if (c.kind === 'tokens' || c.kind === 'themes' || c.kind === 'symbol') raise('design');
-    else if (c.kind === 'page') raise('layout');
+    else if (c.kind === 'page' || c.kind === 'locales') raise('layout');
     else {
       const node = c.after ?? c.before!;
       if (!c.before || !c.after) {

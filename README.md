@@ -4,7 +4,7 @@
 
 Bowerbird is a page engine you embed in your own product. Pages are built from large, prebuilt sections (hero, pricing, footer …) that stay fully editable inside. People edit on a visual canvas; AI agents edit through a typed API and MCP. Both go through the same validated, attributed and undoable operations. Styles use CSS custom properties and design tokens, so the output is plain HTML and CSS and stays on-brand.
 
-> **Status: early (Phase 2).** The headless engine, starter sections, HTML/CSS renderer, agent tools, MCP server and the visual editor (`<bowerbird-editor>`, with React and Vue wrappers) work, plus linked components, reviewable agent proposals, protection of people's edits and rendered-layout checks for agents. Real-time collaboration, rich text and code export come next. See [`docs/plan.md`](docs/plan.md) and [`docs/progress.md`](docs/progress.md).
+> **Status: early (Phase 3 of the plan done).** The engine, starter sections, HTML/CSS renderer, agent tools, MCP server and the visual editor (`<bowerbird-editor>`, with React and Vue wrappers) work, with linked components, reviewable agent proposals, protection of people's edits, rendered-layout checks for agents, real-time sync with presence, rich text, translations, static-site and React export, and interop (catalog export, Puck import, MCP Apps). Nothing is published to npm yet. See [`docs/plan.md`](docs/plan.md) and [`docs/progress.md`](docs/progress.md).
 
 ## See it
 
@@ -40,6 +40,25 @@ To run the scripted end-to-end check (a real MCP client building a page over std
 ```bash
 node packages/mcp/scripts/smoke.mjs --screenshots ./shots
 ```
+
+### Edit alongside your agent
+
+While the MCP server runs, open an editor on the same site: your edits and the agent's sync live, and you see each other's selections.
+
+```bash
+pnpm --filter @bowerbirdjs/example-mcp-editor dev
+```
+
+Then open the printed URL with `?server=http://localhost:4321&name=Sam`.
+
+### Export
+
+```bash
+node packages/export/dist/cli.js --file my-site.site.json --out dist --base-url https://example.com
+node packages/export/dist/cli.js --file my-site.site.json --out src/site --react
+```
+
+Static export writes one HTML file per page and language (clean URLs, `hreflang` links, sitemap) and one stylesheet; `--react` writes a component per page.
 
 ## Embed the editor
 
@@ -115,6 +134,8 @@ const html = renderDocument(store.doc, store.registry, 'home');
 | [`@bowerbirdjs/editor`](packages/editor) | `<bowerbird-editor>` (Lit): same-document canvas, overlays, inline editing, drag and drop, layers, insert, inspector, history                               |
 | [`@bowerbirdjs/react`](packages/react)   | React wrapper                                                                                                                                               |
 | [`@bowerbirdjs/vue`](packages/vue)       | Vue wrapper                                                                                                                                                 |
+| [`@bowerbirdjs/sync`](packages/sync)     | Server-authoritative real-time sync with presence for people and agents (WebSocket, HTTP/SSE or in-memory transports)                                       |
+| [`@bowerbirdjs/export`](packages/export) | Static site and React export, plus a JSON Schema catalog of sections and components for other generative-UI tools                                           |
 | [`bench`](bench)                         | PageBench: page-editing tasks for agents, with a Claude runner and a scripted offline mode                                                                  |
 | [`apps/showcase`](apps/showcase)         | Demo product embedding the editor with an assistant panel                                                                                                   |
 

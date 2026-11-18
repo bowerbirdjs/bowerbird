@@ -47,10 +47,22 @@ export interface BNode {
    */
   link?: { symbol: string; node: NodeId };
   /**
+   * Translations of content props, by locale (`{ de: { text: 'Hallo' } }`). The props themselves
+   * hold the default locale's content.
+   */
+  l10n?: Record<string, Record<string, PropValue>>;
+  /**
    * Who last changed each field, for provenance and protecting people's edits from agents. Keys:
    * `node` (created), `position`, `variant`, `styles`, `vars`, `props.<name>`.
    */
   edited?: Record<string, Stamp>;
+}
+
+export interface Locales {
+  /** Locale the props hold, e.g. `en`. */
+  default: string;
+  /** Other locales, with translations in `BNode.l10n`. */
+  others: string[];
 }
 
 /** Who made a change, and in which revision. */
@@ -100,6 +112,8 @@ export interface SiteDoc {
   symbols?: Record<string, SymbolDef>;
   /** Who last changed each token (`token:<path>`) and theme value (`theme:<name>:<path>`). */
   tokenEdits?: Record<string, Stamp>;
+  /** Languages the site is published in. Absent means one language. */
+  locales?: Locales;
   /**
    * Highest number handed out per id prefix (`hero` → 3 means hero-1…hero-3 were used). Ids are
    * never reused, so undo and references can't land on a different node with an old id.
