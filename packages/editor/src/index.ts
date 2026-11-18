@@ -20,5 +20,17 @@ export {
   createDefaultStore,
   type EditorChangeDetail,
 } from './element.js';
+export {
+  EDITOR_ELEMENTS,
+  EDITOR_FEATURES,
+  EDITOR_PRESETS,
+  type EditorElementName,
+  type EditorFeature,
+  EditorFeatures,
+  type EditorPreset,
+  type EditorUI,
+  type FeatureSettings,
+  presetForLevel,
+} from './features.js';
 export { type Field, type FieldKind, fieldsFor, fieldValue } from './schema-form.js';
 export { editorStyles } from './styles.js';

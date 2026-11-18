@@ -152,6 +152,6 @@ export function performDrop(controller: EditorController, payload: DragPayload, 
   if (payload.kind === 'node')
     return controller.insertNode(payload.input, position as Position & { parent: string });
   const result = controller.move(payload.id, position);
-  if (result.ok) controller.select(payload.id);
+  if (result?.ok) controller.select(payload.id);
   return result;
 }

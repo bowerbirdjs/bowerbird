@@ -532,6 +532,7 @@ export class Store {
   private readonly listeners = new Set<(event: CommitEvent) => void>();
   private readonly loadListeners = new Set<(doc: SiteDoc) => void>();
   private readonly changesetListeners = new Set<(changesets: readonly Changeset[]) => void>();
+  private readonly policyListeners = new Set<(policy: Policy) => void>();
   private readonly sets: Changeset[];
   private changesetCounter: number;
   private readonly historyLimit: number;
@@ -554,7 +555,23 @@ export class Store {
 
   /** Replaces the policy (e.g. when the person's role changes). Applies to later transactions. */
   setPolicy(policy: Policy): void {
+    if (policy === this.currentPolicy) return;
     this.currentPolicy = policy;
+    for (const listener of this.policyListeners) {
+      try {
+        listener(policy);
+      } catch (error) {
+        queueMicrotask(() => {
+          throw error;
+        });
+      }
+    }
+  }
+
+  /** Called after `setPolicy` (editors adjust what they offer). */
+  onPolicy(listener: (policy: Policy) => void): () => void {
+    this.policyListeners.add(listener);
+    return () => this.policyListeners.delete(listener);
   }
 
   get doc(): SiteDoc {

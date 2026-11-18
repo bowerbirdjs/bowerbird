@@ -87,7 +87,45 @@ import { BowerbirdEditor } from '@bowerbirdjs/react';
 />;
 ```
 
-The editor is themed with `--bb-editor-*` CSS variables. Everything it does goes through the same operations as agents, so people's changes are validated, attributed and undoable too.
+Everything the editor does goes through the same operations as agents, so people's changes are validated, attributed and undoable too.
+
+### Choose what the editor offers
+
+Not every product wants the full editor. By default it offers what the store's policy lets the person change: someone with `content` access sees text, links and images only, `layout` access adds arranging sections but no styling, and everyone else gets everything. Pick a preset yourself, then turn single parts on or off and limit what can be added and styled:
+
+```js
+editor.ui = {
+  preset: 'layout', // 'full' | 'layout' | 'content' | 'auto' (default: follows the policy)
+  features: { 'toolbar.zoom': false, 'structure.history': false, delete: false },
+  sections: ['hero', 'features', 'cta'], // section templates offered in Insert
+  elements: ['text', 'image', 'button'], // single elements offered in Insert
+  styleProperties: ['color', 'background', 'padding'], // what the style editor offers
+};
+```
+
+`<bowerbird-editor preset="content">` is the HTML shorthand; the React and Vue wrappers take `ui` and `preset` props. Turning off a feature also turns off what belongs to it (`inspector` hides every inspector section), and an action like `delete` disappears everywhere: buttons, the canvas toolbar and the Delete key. Panels with nothing left in them give their space to the page.
+
+| Feature                                          | What it is                                                                                                                                                                                                                                                                                 |
+| ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `toolbar`                                        | The top bar: `.panels` (panel toggles), `.pages` (page switcher), `.peers` (avatars), `.breakpoints`, `.zoom`, `.language`, `.theme`, `.preview`                                                                                                                                           |
+| `structure`                                      | The left panel: `.layers`, `.history`, `.review` tabs                                                                                                                                                                                                                                      |
+| `inspector`                                      | The right panel: `.page` (page title, path, description), `.info` (name, type, id), `.provenance` (who changed it last), `.content` (fields; `.content.advanced` for non-content fields like heading level), `.section` (variants; `.section.settings` for colours and spacing), `.styles` |
+| `canvas.toolbar`, `canvas.label`, `canvas.peers` | Toolbar and label on the selected element, other people's selections                                                                                                                                                                                                                       |
+| `insert`                                         | Adding content: `.sections`, `.elements`, `.components`                                                                                                                                                                                                                                    |
+| `move`, `duplicate`, `delete`                    | Drag and drop and ↑/↓, duplicating, deleting (buttons and shortcuts)                                                                                                                                                                                                                       |
+| `text`                                           | Editing text on the page; `.formatting` for bold, italic and links in rich text                                                                                                                                                                                                            |
+| `components`                                     | Linked components: `.create` (make linked), `.reset` (reset an instance)                                                                                                                                                                                                                   |
+| `undo`                                           | Undo and redo, including undoing someone else's work                                                                                                                                                                                                                                       |
+
+`EDITOR_FEATURES` in `@bowerbirdjs/editor` lists every key with a description. Hiding is not a permission: the store's policy decides what may change, for people and agents alike, so set both.
+
+For the look, set `--bb-editor-*` variables (accent, fg, muted, bg, panel, border, hover, danger, font, left, right, canvas-bg) or style parts with `::part()`: `toolbar`, `structure`, `inspector`, `tabs`, `tab`, `panel-section`, `card`, `button`, `field`, `toast`. Your own controls go in the `toolbar-start` and `toolbar-end` slots:
+
+```html
+<bowerbird-editor>
+  <button slot="toolbar-end" onclick="publish()">Publish</button>
+</bowerbird-editor>
+```
 
 ## Use the engine in code
 

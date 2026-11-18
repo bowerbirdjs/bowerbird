@@ -16,6 +16,7 @@ import {
   type SymbolDef,
   sectionRootOf,
 } from '@bowerbirdjs/core';
+import { type EditorFeature, EditorFeatures, type EditorUI } from './features.js';
 
 export type EditorEvent =
   | { type: 'selection'; id: string | null }
@@ -111,12 +112,18 @@ export class EditorController {
   locale: string | null = null;
   /** Other people and agents in the document (when the store shares presence). */
   peers: readonly PeerPresence[] = [];
+  /** What the editor offers (see `EditorUI`). Change it with `setUI`. */
+  ui: EditorUI = {};
+  private resolved:
+    | { ui: EditorUI; policy: Store['policy']; actor: Actor; features: EditorFeatures }
+    | undefined;
   private readonly listeners = new Set<(event: EditorEvent) => void>();
   private unsubscribe: () => void;
 
-  constructor(store: Store, options: { actor?: Actor; page?: string } = {}) {
+  constructor(store: Store, options: { actor?: Actor; page?: string; ui?: EditorUI } = {}) {
     this.store = store;
     this.actor = options.actor ?? LOCAL_USER;
+    if (options.ui) this.ui = options.ui;
     this.page = options.page && store.doc.pages[options.page] ? options.page : this.firstPage();
     this.breakpoint = store.doc.breakpoints.at(-1)?.id ?? 'base';
     this.unsubscribe = this.listen(store);
@@ -128,6 +135,8 @@ export class EditorController {
     const offChangesets = store.onChangesets((changesets) =>
       this.emit({ type: 'changesets', changesets }),
     );
+    // A new policy (e.g. another role) can change what the editor offers.
+    const offPolicy = store.onPolicy(() => this.emit({ type: 'view' }));
     let offPeers = () => {};
     if (sharesPresence(store)) {
       this.peers = store.peers ?? [];
@@ -160,6 +169,7 @@ export class EditorController {
       offPeers();
       offSyncErrors();
       offRenamed();
+      offPolicy();
     };
   }
 
@@ -171,6 +181,30 @@ export class EditorController {
   destroy(): void {
     this.unsubscribe();
     this.listeners.clear();
+  }
+
+  /**
+   * What the editor offers now: `ui` resolved against the store policy's level for the actor.
+   * Gestures (insert, move, duplicate, delete, components, undo) do nothing when theirs is off.
+   */
+  get features(): EditorFeatures {
+    const policy = this.store.policy;
+    const r = this.resolved;
+    if (r && r.ui === this.ui && r.policy === policy && r.actor === this.actor) return r.features;
+    const features = new EditorFeatures(this.ui, policy.level?.(this.actor));
+    this.resolved = { ui: this.ui, policy, actor: this.actor, features };
+    return features;
+  }
+
+  /** Changes what the editor offers. */
+  setUI(ui: EditorUI): void {
+    this.ui = ui;
+    this.emit({ type: 'view' });
+  }
+
+  /** Shorthand for `features.on(feature)`. */
+  can(feature: EditorFeature): boolean {
+    return this.features.on(feature);
   }
 
   /**
@@ -355,7 +389,7 @@ export class EditorController {
 
   /** Shows a symbol's definition on the canvas; edits there update every instance. */
   editSymbol(id: string): void {
-    if (!this.store.doc.symbols?.[id] || id === this.symbolView) return;
+    if (!this.store.doc.symbols?.[id] || id === this.symbolView || !this.can('components')) return;
     this.symbolView = id;
     this.selected = null;
     this.emit({ type: 'view' });
@@ -470,20 +504,23 @@ export class EditorController {
   }
 
   /** Undoes the latest change by another actor (e.g. an agent), as this editor's actor. */
-  undoBy(actorId: string): ApplyResult {
+  undoBy(actorId: string): ApplyResult | undefined {
+    if (!this.can('undo')) return undefined;
     const result = this.store.undo({ actorId, actor: this.actor });
     if (!result.ok) this.emit({ type: 'error', errors: result.errors, label: 'Undo' });
     return result;
   }
 
-  undo(): ApplyResult {
+  undo(): ApplyResult | undefined {
+    if (!this.can('undo')) return undefined;
     const result = this.store.undo({ actorId: this.identity.id, actor: this.actor });
     if (!result.ok && result.errors[0]?.code !== 'nothing_to_undo')
       this.emit({ type: 'error', errors: result.errors });
     return result;
   }
 
-  redo(): ApplyResult {
+  redo(): ApplyResult | undefined {
+    if (!this.can('undo')) return undefined;
     const result = this.store.redo({ actorId: this.identity.id, actor: this.actor });
     if (!result.ok && result.errors[0]?.code !== 'nothing_to_undo')
       this.emit({ type: 'error', errors: result.errors });
@@ -503,7 +540,8 @@ export class EditorController {
     variant?: Record<string, string>,
   ) {
     const page = this.currentPage;
-    if (!page || (this.symbolView && !position.parent)) return undefined;
+    if (!page || (this.symbolView && !position.parent) || !this.features.section(name))
+      return undefined;
     const result = this.apply(
       [
         {
@@ -526,6 +564,7 @@ export class EditorController {
 
   /** Inserts a node into the selected container (or after the selected node). */
   insertNode(input: NodeInput, position?: Position) {
+    if (!this.can('insert.elements')) return undefined;
     const target = position ?? this.defaultNodePosition(input.type);
     if (!target) {
       this.emit({
@@ -559,6 +598,7 @@ export class EditorController {
   }
 
   move(id: string, position: Position) {
+    if (!this.can('move')) return undefined;
     return this.apply([{ op: 'node.move', id, ...position }], 'Move');
   }
 
@@ -575,7 +615,7 @@ export class EditorController {
 
   removeSelected() {
     const node = this.selectedNode;
-    if (!node) return undefined;
+    if (!node || !this.can('delete')) return undefined;
     const parent = node.parent;
     const result = this.apply([{ op: 'node.remove', id: node.id }], 'Delete');
     if (result.ok && parent && !this.isRoot(parent)) this.select(parent);
@@ -584,7 +624,7 @@ export class EditorController {
 
   duplicateSelected() {
     const node = this.selectedNode;
-    if (!node) return undefined;
+    if (!node || !this.can('duplicate')) return undefined;
     const result = this.apply([{ op: 'node.duplicate', id: node.id }], 'Duplicate');
     if (result.ok) {
       const copy = result.summary.created.find((id) => this.node(id)?.parent === node.parent);
@@ -655,7 +695,7 @@ export class EditorController {
   /** Inserts an instance of a symbol where a section would go. */
   insertSymbol(symbol: string, position: Position = this.defaultSectionPosition()) {
     const page = this.currentPage;
-    if (!page || this.symbolView) return undefined;
+    if (!page || this.symbolView || !this.can('insert.components')) return undefined;
     const result = this.apply(
       [
         {
@@ -678,14 +718,17 @@ export class EditorController {
   }
 
   createSymbol(id: string, name: string) {
+    if (!this.can('components.create')) return undefined;
     return this.apply([{ op: 'symbol.create', id, name }], `Make "${name}" a linked component`);
   }
 
   detachInstance(id: string) {
+    if (!this.can('components')) return undefined;
     return this.apply([{ op: 'symbol.detach', id }], 'Detach instance');
   }
 
   resetOverrides(id: string) {
+    if (!this.can('components.reset')) return undefined;
     return this.apply([{ op: 'symbol.reset', id }], 'Reset overrides');
   }
 

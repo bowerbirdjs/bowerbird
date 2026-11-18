@@ -37,6 +37,7 @@ export const CANVAS_CSS = `
 .bbx-host .bbx-toolbar button { all: unset; display: grid; place-items: center; width: 24px; height: 24px; border-radius: 4px; color: #e5e7eb;
   cursor: pointer; font: 13px/1 system-ui, sans-serif; }
 .bbx-host .bbx-toolbar button:hover, .bbx-host .bbx-toolbar button:focus-visible { background: #374151; color: #fff; }
+.bbx-host .bbx-toolbar button[hidden], .bbx-host .bbx-label[hidden] { display: none; }
 .bbx-host .bbx-toolbar [draggable="true"] { cursor: grab; }
 .bbx-host .bbx-drop { position: absolute; background: var(--bb-editor-accent, #4f46e5); border-radius: 2px; }
 .bbx-host .bbx-drop.bbx-inside { background: color-mix(in srgb, var(--bb-editor-accent, #4f46e5) 10%, transparent);
@@ -56,6 +57,15 @@ export const CANVAS_CSS = `
 .bbx-host .bbx-mark.bbx-created { outline: 2px solid #16a34a; background: rgb(22 163 74 / .08); }
 .bbx-host .bbx-mark.bbx-updated { outline: 2px dashed #d97706; background: rgb(217 119 6 / .06); }
 `;
+
+/** The feature each toolbar action needs (`parent` only needs the toolbar). */
+const TOOLBAR_FEATURE = {
+  drag: 'move',
+  up: 'move',
+  down: 'move',
+  duplicate: 'duplicate',
+  delete: 'delete',
+} as const;
 
 const TOOLBAR: [action: string, label: string, glyph: string][] = [
   ['drag', 'Drag to move', '⠿'],
@@ -318,7 +328,7 @@ export class CanvasView {
     }
     this.pageStyle.textContent = css;
     this.content.innerHTML = empty
-      ? `${html}<div class="bbx-empty">This page is empty. Add a section from the Insert panel, or drag one here.</div>`
+      ? `${html}<div class="bbx-empty">${c.can('insert') ? 'This page is empty. Add a section from the Insert panel, or drag one here.' : 'This page is empty.'}</div>`
       : html;
     if (c.theme) this.frame.setAttribute('data-theme', c.theme);
     else this.frame.removeAttribute('data-theme');
@@ -420,14 +430,15 @@ export class CanvasView {
     const doc = this.host.ownerDocument;
     // Preview mode hides all overlays. Showing a component definition, peers on its nodes show
     // (agents editing a definition have no page).
-    const visible = c.preview
-      ? []
-      : c.peers.filter(
-          (p) =>
-            p.selection &&
-            (c.symbolView || !p.page || p.page === c.page) &&
-            this.element(p.selection),
-        );
+    const visible =
+      c.preview || !c.can('canvas.peers')
+        ? []
+        : c.peers.filter(
+            (p) =>
+              p.selection &&
+              (c.symbolView || !p.page || p.page === c.page) &&
+              this.element(p.selection),
+          );
     const s = this.stage.getBoundingClientRect();
     while (this.peerLayer.children.length > visible.length)
       this.peerLayer.lastElementChild!.remove();
@@ -462,15 +473,26 @@ export class CanvasView {
     const selEl = showChrome ? this.element(c.selected) : null;
     const rect = selEl?.getBoundingClientRect() ?? null;
     this.place(this.selectBox, rect);
+    // What the host turned off disappears from the selection's label and toolbar.
+    let actions = 0;
+    for (const b of this.toolbar.querySelectorAll<HTMLElement>('button')) {
+      const needs = TOOLBAR_FEATURE[b.dataset.action as keyof typeof TOOLBAR_FEATURE];
+      b.hidden = !!needs && !c.can(needs);
+      if (!b.hidden && b.dataset.action !== 'parent') actions++;
+    }
+    const showToolbar = c.can('canvas.toolbar') && actions > 0;
+    this.selectLabel.hidden = !c.can('canvas.label');
     if (rect && c.selected) {
       const node = c.node(c.selected);
       this.selectLabel.textContent = node?.section
         ? `${c.selected} · ${node.section.name}`
         : `${c.selected} · ${node?.type}`;
+    }
+    if (rect && c.selected && showToolbar) {
       const s = this.stage.getBoundingClientRect();
       this.toolbar.hidden = false;
       const tw = this.toolbar.offsetWidth || 160;
-      const lw = this.selectLabel.offsetWidth || 120;
+      const lw = this.selectLabel.hidden ? 0 : this.selectLabel.offsetWidth || 120;
       const left = Math.max(0, Math.min(rect.right - s.left - tw, this.stage.clientWidth - tw));
       const above = rect.top - s.top - 32;
       // Above the element on the right, unless that would cover the label or leave the stage.
@@ -536,6 +558,13 @@ export class CanvasView {
     this.frame.addEventListener('dragover', (e) => {
       const payload = currentDrag(e, c);
       if (!payload || c.readOnly) return;
+      const allowed =
+        payload.kind === 'move'
+          ? c.can('move')
+          : payload.kind === 'section'
+            ? c.features.section(payload.name)
+            : c.can('insert.elements');
+      if (!allowed) return;
       const target = dropTarget(c, payload, e.target as Element, e.clientX, e.clientY, content);
       this.dropTargetState = target;
       if (target) {
@@ -570,6 +599,7 @@ export class CanvasView {
     const el = this.element(id);
     if (
       c.readOnly ||
+      !c.can('text') ||
       !node ||
       !el ||
       !TEXT_TYPES.has(node.type) ||
@@ -602,9 +632,11 @@ export class CanvasView {
     const onKey = (e: KeyboardEvent) => {
       e.stopPropagation();
       const doc = el.ownerDocument;
-      if (rich && (e.metaKey || e.ctrlKey) && ['b', 'i', 'k'].includes(e.key.toLowerCase())) {
-        // Inline formatting; the result is sanitized to the rich-text subset when saved.
+      if ((e.metaKey || e.ctrlKey) && ['b', 'i', 'k'].includes(e.key.toLowerCase())) {
+        // Inline formatting; the result is sanitized to the rich-text subset when saved. Without
+        // rich text (or with formatting turned off) the browser's own formatting is blocked too.
         e.preventDefault();
+        if (!rich || !c.can('text.formatting')) return;
         const k = e.key.toLowerCase();
         // Our own toggle: execCommand('bold') un-bolds headings with <span style>, which the
         // rich-text subset can't keep.
@@ -635,7 +667,8 @@ export class CanvasView {
     const onPaste = (e: ClipboardEvent) => {
       if (!rich || !e.clipboardData) return;
       e.preventDefault();
-      const html = e.clipboardData.getData('text/html');
+      // Without formatting, pasted markup comes in as plain text.
+      const html = c.can('text.formatting') ? e.clipboardData.getData('text/html') : '';
       const plain = e.clipboardData.getData('text/plain');
       const clean = html
         ? sanitizeRichText(html)

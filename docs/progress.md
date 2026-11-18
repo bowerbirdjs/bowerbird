@@ -43,6 +43,11 @@ The working log for building Bowerbird phase by phase. Each phase ends with a re
 - [x] Interop: Puck importer (`importPuck` with mappers, slots and legacy zones), JSON Schema catalog export (`exportCatalog`) for A2UI/json-render-style generators, MCP Apps view (`show_page` with a `ui://bowerbird/page` resource)
 - [x] Review pass and fixes: two independent reviews, 34 findings (all reproduced or traced), fixed with regression tests
 
+## After Phase 3
+
+- [x] Windows: build scripts without shell globs (`tsconfig.build.json`)
+- [x] Editor UI customization: every part of the editor can be turned off (`ui.features`, keys in `EDITOR_FEATURES`); presets `full` / `layout` / `content`, and by default the editor offers what the store policy allows its actor (`Policy.level`, `Store.onPolicy`); allowlists for insertable sections and elements and for style properties; `toolbar-start`/`toolbar-end` slots and `::part()` styling; React/Vue `ui` and `preset` props; showcase roles show the three levels
+
 ## Notes
 
 - Phase 0 review fixes: prototype-safe lookups, CSS-injection hardening (property names, balanced value syntax, token/theme values, compile-time re-checks), lock checks on whole subtrees and pages, design-level checks for styling inside inserts, depth limit, ids never reused (per-prefix counters), undo that can't get stuck and merges tokens/themes per path, unique order keys after undo, section.variant rebuilt as a merge, shared URL sanitiser, importer hardening, preview host check, benchmark accounting.

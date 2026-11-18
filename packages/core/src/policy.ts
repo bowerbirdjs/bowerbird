@@ -52,6 +52,11 @@ export interface Policy {
   protectHumanEdits?(actor: Actor): HumanEditProtection;
   /** Whether this actor's changes must be proposed as changesets and accepted by someone. */
   requiresReview?(actor: Actor): boolean;
+  /**
+   * How much this actor may change overall. Editors use it to offer only what the actor may do
+   * (`check` still decides each op).
+   */
+  level?(actor: Actor): FreedomLevel;
 }
 
 export interface PolicyOptions {
@@ -244,6 +249,7 @@ export function createPolicy(options: PolicyOptions = {}): Policy {
     options.levels?.[actor.kind] ??
     'code';
   return {
+    level: levelOf,
     check({ actor, op, view, registry }) {
       const needed = requiredLevel(op, view, registry);
       const has = levelOf(actor);

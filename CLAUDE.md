@@ -27,6 +27,7 @@ An embeddable, agent-first visual page editor. Read `docs/plan.md` for decisions
 - Editor: the canvas is light DOM in the host document (no iframe; nothing editable inside a shadow root). Only the panels use the element's shadow root. Canvas chrome classes start with `bbx-` and are scoped under `.bbx-host`.
 - What the editor shows must match published output: `e2e/hostile-css.e2e.ts` compares computed styles of the canvas with the published page. Run it after changing CSS generation or canvas styles.
 - Editor UI changes go through `EditorController` (`packages/editor/src/controller.ts`), which calls `Store.apply` as the editor's actor. Keep the controller DOM-free so it stays unit-testable.
+- Every piece of editor UI can be turned off by the host: give new UI a key in `EDITOR_FEATURES` (`packages/editor/src/features.ts`, documented in the README table) and check `controller.can(key)` where it renders. Actions (insert, move, duplicate, delete, components, undo) are also gated in the controller, so buttons, drag and drop and shortcuts all follow. Presets map onto policy levels; hiding is never a permission, the policy is.
 - Keep dependencies MIT/BSD/Apache. No AGPL/GPL. Section content must be original (Tailwind Plus and Relume licences forbid builder use).
 
 ## Conventions

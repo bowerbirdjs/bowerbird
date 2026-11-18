@@ -1,6 +1,11 @@
 import type { Actor, ChangeSummary, HistoryEntry, Issue, SiteDoc, Store } from '@bowerbirdjs/core';
 import '@bowerbirdjs/editor/define';
-import type { AssetAdapter, BowerbirdEditor as EditorElement } from '@bowerbirdjs/editor';
+import type {
+  AssetAdapter,
+  BowerbirdEditor as EditorElement,
+  EditorPreset,
+  EditorUI,
+} from '@bowerbirdjs/editor';
 import {
   type CSSProperties,
   createElement,
@@ -12,7 +17,12 @@ import {
   useState,
 } from 'react';
 
-export { createDefaultStore } from '@bowerbirdjs/editor';
+export {
+  createDefaultStore,
+  type EditorFeature,
+  type EditorPreset,
+  type EditorUI,
+} from '@bowerbirdjs/editor';
 
 export interface BowerbirdEditorProps {
   /** The document store. If omitted, the editor creates one with the default sections. */
@@ -23,6 +33,13 @@ export interface BowerbirdEditorProps {
   page?: string;
   /** Where uploaded images go (enables "Upload image" on image fields). */
   assets?: AssetAdapter;
+  /**
+   * What the editor offers (preset, features, allowlists). Keep the object stable (e.g. `useMemo`):
+   * a new object re-applies it.
+   */
+  ui?: EditorUI;
+  /** Shorthand for `ui.preset`. */
+  preset?: EditorPreset | 'auto';
   className?: string;
   style?: CSSProperties;
   onChange?: (detail: { doc: SiteDoc }) => void;
@@ -75,6 +92,12 @@ export const BowerbirdEditor = forwardRef<EditorElement | null, BowerbirdEditorP
     useIsomorphicLayoutEffect(() => {
       if (element.current) element.current.assets = props.assets;
     }, [mounted, props.assets]);
+    useIsomorphicLayoutEffect(() => {
+      if (element.current) element.current.ui = props.ui;
+    }, [mounted, props.ui]);
+    useIsomorphicLayoutEffect(() => {
+      if (element.current) element.current.preset = props.preset;
+    }, [mounted, props.preset]);
 
     useIsomorphicLayoutEffect(() => {
       const el = element.current;

@@ -1,9 +1,19 @@
 import type { Actor, Store } from '@bowerbirdjs/core';
 import '@bowerbirdjs/editor/define';
-import type { AssetAdapter, BowerbirdEditor as EditorElement } from '@bowerbirdjs/editor';
+import type {
+  AssetAdapter,
+  BowerbirdEditor as EditorElement,
+  EditorPreset,
+  EditorUI,
+} from '@bowerbirdjs/editor';
 import { defineComponent, h, onBeforeUnmount, onMounted, type PropType, ref } from 'vue';
 
-export { createDefaultStore } from '@bowerbirdjs/editor';
+export {
+  createDefaultStore,
+  type EditorFeature,
+  type EditorPreset,
+  type EditorUI,
+} from '@bowerbirdjs/editor';
 
 const EVENTS = {
   'bb-change': 'change',
@@ -25,6 +35,10 @@ export const BowerbirdEditor = defineComponent({
     actor: { type: Object as PropType<Actor>, default: undefined },
     page: { type: String, default: undefined },
     assets: { type: Object as PropType<AssetAdapter>, default: undefined },
+    /** What the editor offers (preset, features, allowlists). */
+    ui: { type: Object as PropType<EditorUI>, default: undefined },
+    /** Shorthand for `ui.preset`. */
+    preset: { type: String as PropType<EditorPreset | 'auto'>, default: undefined },
   },
   emits: ['change', 'transaction', 'selection', 'page-change', 'error'],
   setup(props, { emit, expose }) {
@@ -47,6 +61,8 @@ export const BowerbirdEditor = defineComponent({
         ...(props.actor ? { actor: props.actor } : {}),
         ...(props.page ? { page: props.page } : {}),
         ...(props.assets ? { assets: props.assets } : {}),
+        ...(props.ui ? { ui: props.ui } : {}),
+        ...(props.preset ? { preset: props.preset } : {}),
       });
   },
 });

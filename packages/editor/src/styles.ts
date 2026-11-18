@@ -1,6 +1,10 @@
 import { css } from 'lit';
 
-/** Editor chrome. Themable through `--bb-editor-*` custom properties on the host. */
+/**
+ * Editor chrome. Themable through `--bb-editor-*` custom properties on the host (accent, fg, muted,
+ * bg, panel, border, hover, danger, font, left, right, canvas-bg) and `::part()` (see the element).
+ * Panels the host turned off (`no-structure`, `no-inspector`) give their space to the canvas.
+ */
 export const editorStyles = css`
   :host {
     --accent: var(--bb-editor-accent, #4f46e5);
@@ -11,8 +15,10 @@ export const editorStyles = css`
     --border: var(--bb-editor-border, #e5e7eb);
     --hover: var(--bb-editor-hover, #f3f4f6);
     --danger: var(--bb-editor-danger, #b91c1c);
+    --_left: var(--bb-editor-left, 264px);
+    --_right: var(--bb-editor-right, 300px);
     display: grid;
-    grid-template-columns: var(--bb-editor-left, 264px) minmax(0, 1fr) var(--bb-editor-right, 300px);
+    grid-template-columns: var(--_left) minmax(0, 1fr) var(--_right);
     grid-template-rows: auto minmax(0, 1fr);
     height: 100%;
     min-height: 480px;
@@ -23,16 +29,15 @@ export const editorStyles = css`
     background: var(--bg);
     font: 13px/1.45 var(--bb-editor-font, ui-sans-serif, system-ui, sans-serif);
   }
-  :host([left-hidden]) { grid-template-columns: 0 minmax(0, 1fr) var(--bb-editor-right, 300px); }
-  :host([right-hidden]) { grid-template-columns: var(--bb-editor-left, 264px) minmax(0, 1fr) 0; }
-  :host([left-hidden][right-hidden]) { grid-template-columns: 0 minmax(0, 1fr) 0; }
+  :host([left-hidden]), :host([no-structure]) { --_left: 0px; }
+  :host([right-hidden]), :host([no-inspector]) { --_right: 0px; }
   * { box-sizing: border-box; }
   button, input, select, textarea { font: inherit; color: inherit; }
   button { cursor: pointer; }
   :focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 
   .toolbar {
-    grid-column: 1 / -1; display: flex; align-items: center; gap: 6px; padding: 6px 10px;
+    grid-row: 1; grid-column: 1 / -1; display: flex; align-items: center; gap: 6px; padding: 6px 10px;
     border-bottom: 1px solid var(--border); background: var(--bg); min-width: 0; overflow-x: auto;
   }
   .toolbar .spacer { flex: 1; }
@@ -46,10 +51,10 @@ export const editorStyles = css`
   select.compact { border: 1px solid var(--border); border-radius: 8px; padding: 4px 6px; background: var(--bg); max-width: 180px; }
 
   .panel { background: var(--panel); min-height: 0; overflow: auto; }
-  .left { border-right: 1px solid var(--border); }
-  .right { border-left: 1px solid var(--border); }
+  .left { grid-row: 2; grid-column: 1; border-right: 1px solid var(--border); }
+  .right { grid-row: 2; grid-column: 3; border-left: 1px solid var(--border); }
   :host([left-hidden]) .left, :host([right-hidden]) .right { visibility: hidden; }
-  .center { position: relative; min-width: 0; min-height: 0; }
+  .center { grid-row: 2; grid-column: 2; position: relative; min-width: 0; min-height: 0; }
   ::slotted([slot='canvas']) { position: absolute; inset: 0; }
 
   .tabs { display: flex; position: sticky; top: 0; z-index: 1; background: var(--panel); border-bottom: 1px solid var(--border); }
@@ -135,7 +140,7 @@ export const editorStyles = css`
 
   @media (max-width: 760px) {
     :host { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); }
-    .left, .right { position: absolute; top: 45px; bottom: 0; width: min(300px, 85%); z-index: 3; box-shadow: 0 8px 24px rgb(0 0 0 / 0.15); }
+    .left, .right { grid-row: auto; grid-column: auto; position: absolute; top: 45px; bottom: 0; width: min(300px, 85%); z-index: 3; box-shadow: 0 8px 24px rgb(0 0 0 / 0.15); }
     .left { left: 0; }
     .right { right: 0; }
     .center { grid-column: 1; grid-row: 2; }

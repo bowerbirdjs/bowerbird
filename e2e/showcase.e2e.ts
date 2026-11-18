@@ -49,14 +49,29 @@ describe.skipIf(!apps)('showcase', () => {
     await expect.poll(() => speakers.count()).toBe(0);
     expect(await heading.textContent()).toBe('Edited by Sam');
 
-    // A marketer may not insert sections: the editor explains why.
+    // The editor offers what the role may do. A site editor arranges sections but doesn't style.
+    const tabNames = async () =>
+      (await editor.getByRole('tab').allTextContents()).map((t) => t.trim());
+    await page.getByLabel('Role').selectOption('editor');
+    await heading.click();
+    await expect.poll(tabNames).toContain('Insert');
+    expect(await editor.getByRole('heading', { name: /^Style/ }).count()).toBe(0);
+    expect(await editor.getByRole('heading', { name: 'Content' }).count()).toBe(1);
+
+    // A marketer only changes text, links and images: no structure panel, no element toolbar,
+    // no deleting, but text still edits in place.
     await page.getByLabel('Role').selectOption('marketer');
-    await editor.getByRole('tab', { name: 'Insert' }).click();
-    await editor.getByRole('button', { name: /Pricing tiers/ }).click();
-    await expect
-      .poll(() => editor.locator('.toast').textContent())
-      .toMatch(/content|permission|level/i);
-    expect(await page.locator('[data-bb-node="pricing-1"]').count()).toBe(0);
+    await expect.poll(tabNames).toEqual([]);
+    await heading.click();
+    expect(await page.locator('.bbx-toolbar').isHidden()).toBe(true);
+    expect(await editor.getByRole('button', { name: 'Delete' }).count()).toBe(0);
+    await page.keyboard.press('Delete');
+    expect(await heading.count()).toBe(1);
+    await heading.dblclick();
+    await page.keyboard.press('Control+A');
+    await page.keyboard.type('Marketer copy');
+    await page.keyboard.press('Enter');
+    await expect.poll(() => heading.textContent()).toBe('Marketer copy');
 
     // As a marketer the palette is refused, and the page says why.
     await page.getByLabel('Brand').selectOption('Teal');

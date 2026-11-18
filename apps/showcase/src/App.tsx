@@ -21,13 +21,17 @@ import { createEventStore, EVENTS, type EventInfo } from './events.js';
 
 const USER = { kind: 'user' as const, id: 'sam', name: 'Sam (you)' };
 
-type Role = 'designer' | 'marketer';
+type Role = 'designer' | 'editor' | 'marketer';
 const ROLE_LEVELS = {
   designer: { user: 'code', agent: 'design' },
+  editor: { user: 'layout', agent: 'design' },
   marketer: { user: 'content', agent: 'design' },
 } as const;
 
-/** Role decides what people may change; agents never overwrite people's edits without asking. */
+/**
+ * Role decides what people may change, and the editor offers only that (its `ui.preset` defaults
+ * to following the policy). Agents never overwrite people's edits without asking.
+ */
 const policyFor = (role: Role, askFirst: boolean) =>
   createPolicy({
     levels: ROLE_LEVELS[role],
@@ -143,6 +147,7 @@ export function App() {
           Role{' '}
           <select value={role} onChange={(e) => setRole(e.target.value as Role)}>
             <option value="designer">Designer (everything)</option>
+            <option value="editor">Site editor (sections, no styling)</option>
             <option value="marketer">Marketer (text and images only)</option>
           </select>
         </label>

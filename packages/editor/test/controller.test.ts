@@ -93,10 +93,10 @@ describe('EditorController', () => {
       ops: [{ op: 'props.set', id: 'hero-1/heading', props: { text: 'From the bot' } }],
     });
     c.setProps('hero-1/subheading', { text: 'From Sam' });
-    expect(c.undo().ok).toBe(true);
+    expect(c.undo()?.ok).toBe(true);
     expect(store.view.node('hero-1/heading')?.props.text).toBe('From the bot');
     expect(store.view.node('hero-1/subheading')?.props.text).not.toBe('From Sam');
-    expect(c.redo().ok).toBe(true);
+    expect(c.redo()?.ok).toBe(true);
     expect(store.view.node('hero-1/subheading')?.props.text).toBe('From Sam');
   });
 
@@ -104,6 +104,8 @@ describe('EditorController', () => {
     c.undo();
     expect(events.some((e) => e.type === 'error')).toBe(false);
     store.setPolicy(createPolicy({ levels: { user: 'content' } }));
+    // The editor offers everything anyway: the policy refuses, and says why.
+    c.setUI({ preset: 'full' });
     const result = c.insertSection('hero');
     expect(result?.ok).toBe(false);
     expect(events.at(-1)).toMatchObject({ type: 'error', label: 'Add hero section' });
@@ -202,7 +204,7 @@ describe('EditorController (review regressions)', () => {
     const { store, controller: c, events } = setup();
     store.apply({ actor: BOT, ops: [{ op: 'section.insert', section: 'hero', page: c.page }] });
     store.setPolicy(createPolicy({ levels: { user: 'content' } }));
-    expect(c.undoBy(BOT.id).ok).toBe(false);
+    expect(c.undoBy(BOT.id)?.ok).toBe(false);
     expect(events.at(-1)).toMatchObject({ type: 'error', label: 'Undo' });
   });
 
