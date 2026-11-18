@@ -6,7 +6,7 @@
  * prefixed and scoped like the rest of the canvas chrome.
  */
 
-import { iconMarkup } from './icons.js';
+import { type IconName, iconMarkup } from './icons.js';
 
 export interface PanelField {
   label: string;
@@ -38,7 +38,8 @@ export const FIELD_PANEL_CSS = `
   padding: 0 calc(var(--bbe-space) * 2); font: 400 var(--bbe-font-size)/1.4 var(--bbe-font);
   border: 1px solid var(--bbe-border-strong); border-radius: var(--bbe-radius); background: var(--bbe-surface); color: var(--bbe-fg); }
 .bbx-host .bbx-fields input[type="color"] { padding: 2px; }
-.bbx-host .bbx-fields textarea { height: auto; min-height: 72px; padding: calc(var(--bbe-space) * 2); resize: vertical; }
+.bbx-host .bbx-fields textarea { height: auto; min-height: 72px; padding: calc(var(--bbe-space) * 2); resize: vertical;
+  border-radius: min(var(--bbe-radius), var(--bbe-radius-lg)); }
 .bbx-host .bbx-fields :is(input, select, textarea):focus { outline: none; border-color: var(--bbe-focus);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--bbe-focus) 28%, transparent); }
 .bbx-host .bbx-fields [aria-invalid="true"] { border-color: var(--bbe-danger); }
@@ -57,6 +58,8 @@ export class FieldPanel {
   anchor: string | null = null;
   /** Opened on purpose (double-click): focus goes in, Escape returns it to the canvas. */
   modal = false;
+  /** Icon markup (the canvas passes the host's icon set). */
+  icon: (name: IconName) => string = (name) => iconMarkup(name, 'bbx-icon');
 
   constructor(
     parent: HTMLElement,
@@ -101,7 +104,7 @@ export class FieldPanel {
         label.textContent = field.label;
         const button = doc.createElement('button');
         button.type = 'button';
-        button.innerHTML = `${iconMarkup('upload', 'bbx-icon')}<span>Replace photo…</span>`;
+        button.innerHTML = `${this.icon('upload')}<span>Replace photo…</span>`;
         const file = doc.createElement('input');
         file.type = 'file';
         file.accept = 'image/*';

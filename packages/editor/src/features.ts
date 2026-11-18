@@ -1,4 +1,5 @@
 import type { FreedomLevel } from '@bowerbirdjs/core';
+import type { EditorIcons } from './icons.js';
 import type { EditorAppearance, EditorDensity, EditorTokens } from './theme.js';
 
 /**
@@ -134,6 +135,12 @@ export interface EditorUI {
    * The same as setting `--bb-editor-accent` and so on in CSS; set here, they win over CSS.
    */
   tokens?: EditorTokens;
+  /**
+   * Your own icons in place of the built-in ones, as SVG markup by name (`ICON_NAMES`), e.g. from
+   * your icon package. Trusted markup only: plain drawings, no scripts or handlers (others are
+   * ignored with a warning). Icons follow the text colour (`currentColor`).
+   */
+  icons?: EditorIcons;
 }
 
 /** The resolved settings: which features are on, and the allowlists. */

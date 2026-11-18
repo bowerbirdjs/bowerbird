@@ -36,12 +36,13 @@ let counter = 0;
  * Page content has its own reset in the page CSS.
  */
 export const CANVAS_CSS = `
-.bbx-host.bbx-host, .bbx-host.bbx-host :where(:not(.bb-page, .bb-page *, svg *)) { all: revert; }
+.bbx-host.bbx-host, .bbx-host.bbx-host :where(:not(.bb-page, .bb-page *, svg, svg *)) { all: revert; }
 ${CANVAS_TOKEN_CSS}
 .bbx-host.bbx-host { position: absolute; inset: 0; display: block; font: 400 var(--bbe-font-size)/1.4 var(--bbe-font); color: var(--bbe-fg);
   text-transform: none; letter-spacing: normal; word-spacing: normal; text-align: start; text-indent: 0; text-shadow: none;
   white-space: normal; cursor: auto; }
-.bbx-host .bbx-icon { display: block; flex: none; width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.75px;
+.bbx-host .bbx-icon { display: block; flex: none; width: 16px; height: 16px; }
+.bbx-host .bbx-icon:not(.bbx-icon-custom) { fill: none; stroke: currentColor; stroke-width: 1.75px;
   stroke-linecap: round; stroke-linejoin: round; overflow: visible; }
 .bbx-host .bbx-frame { position: relative; height: 100%; overflow: auto; background: var(--bbe-canvas-bg); outline: none;
   scrollbar-width: thin; scrollbar-color: var(--bbe-border-strong) transparent; }
@@ -246,6 +247,8 @@ export class CanvasView {
   private activeField: string | null = null;
   /** The list item from site data last clicked. */
   private activeItem: { path: string; unique?: string[] } | null = null;
+  private painted = false;
+  private paintedIcons: unknown;
   /** Data just added: once it's on the page, its field is edited. */
   private pendingEdit: string | null = null;
   private dropTargetState: DropTarget | null = null;
@@ -293,7 +296,7 @@ export class CanvasView {
       b.dataset.action = action;
       b.title = label;
       b.setAttribute('aria-label', label);
-      b.innerHTML = iconMarkup(name, 'bbx-icon');
+      b.dataset.icon = name;
       if (action === 'drag') b.draggable = true;
     }
     this.drop = el('div', 'bbx-drop', this.overlay);
@@ -311,12 +314,13 @@ export class CanvasView {
       b.dataset.action = action;
       b.title = label;
       b.setAttribute('aria-label', label);
-      // Static markup from icons.ts.
-      b.innerHTML = iconMarkup(name, 'bbx-icon');
+      b.dataset.icon = name;
     }
     this.panel = new FieldPanel(this.overlay, (refocus) => {
       if (refocus) this.frame.focus({ preventScroll: true });
     });
+    this.panel.icon = (name) => this.iconMarkup(name);
+    this.paintIcons();
     for (const e of [
       this.hoverBox,
       this.selectBox,
@@ -375,7 +379,24 @@ export class CanvasView {
   }
 
   /** Renders the current page synchronously (normally batched to the next frame). */
+  /** An icon: the host's (`ui.icons`) or the built-in one. */
+  private iconMarkup(name: IconName): string {
+    return iconMarkup(name, 'bbx-icon', this.controller.features.ui.icons);
+  }
+
+  /** Draws the toolbar icons, again whenever the host's icon set changes. */
+  private paintIcons(): void {
+    const icons = this.controller.features.ui.icons;
+    if (this.painted && icons === this.paintedIcons) return;
+    this.painted = true;
+    this.paintedIcons = icons;
+    // Built-in markup is static (icons.ts); a host's passes isIconMarkup.
+    for (const b of this.overlay.querySelectorAll<HTMLElement>('button[data-icon]'))
+      b.innerHTML = this.iconMarkup(b.dataset.icon as IconName);
+  }
+
   render(): void {
+    this.paintIcons();
     this.needsRender = false;
     const c = this.controller;
     const doc = c.viewDoc;

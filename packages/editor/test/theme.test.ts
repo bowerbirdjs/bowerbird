@@ -1,7 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import { describe, expect, test } from 'vitest';
 import { CANVAS_CSS } from '../src/canvas.js';
-import { iconForType, iconMarkup } from '../src/icons.js';
+import { ICON_NAMES, iconForType, iconMarkup, isIconMarkup } from '../src/icons.js';
 import { EDITOR_TOKENS, isEditorToken, TOKEN_CSS } from '../src/theme.js';
 
 const source = (file: string) => readFile(new URL(`../src/${file}`, import.meta.url), 'utf8');
@@ -54,6 +54,26 @@ describe('editor tokens', () => {
     expect(iconForType('text', { tag: 'h2' })).toBe('heading');
     expect(iconForType('my-widget')).toBe('blocks');
     expect(iconForType('box', { section: true })).toBe('section');
+  });
+
+  test("a host's icons replace the built-in ones; only plain SVG is taken", () => {
+    const own = '<svg viewBox="0 0 256 256" fill="currentColor"><path d="M0 0h256v256z"/></svg>';
+    const svg = iconMarkup('trash', 'bbx-icon', { trash: own });
+    // Our class comes first (the parser keeps the first), so the canvas sizes it and keeps its fill.
+    expect(svg).toMatch(/^<svg class="bbx-icon bbx-icon-custom" aria-hidden="true"/);
+    expect(svg).toContain('fill="currentColor"');
+    expect(iconMarkup('copy', 'bbx-icon', { trash: own })).not.toContain('256');
+    for (const bad of [
+      '<svg onload="alert(1)"></svg>',
+      '<svg><script>alert(1)</script></svg>',
+      '<svg><foreignObject><div/></foreignObject></svg>',
+      '<img src=x>',
+      '<svg><a href="javascript:alert(1)"/></svg>',
+    ]) {
+      expect(isIconMarkup(bad)).toBe(false);
+      expect(iconMarkup('trash', 'bb-icon', { trash: bad })).toContain('viewBox="0 0 24 24"');
+    }
+    expect(ICON_NAMES).toContain('panel-left');
   });
 
   test('the README documents every token', async () => {

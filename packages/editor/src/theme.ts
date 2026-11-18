@@ -83,7 +83,12 @@ export const EDITOR_TOKENS = {
     { dark: '#3f3f46' },
   ),
   'floating-fg': tok('colour', '#fafafa', 'Text and icons on `floating-bg`.'),
-  'canvas-bg': tok('colour', '#ececf0', 'Around the page.', { dark: '#0e0e10' }),
+  'canvas-bg': tok(
+    'colour',
+    '#ececf0',
+    'Around the page: a colour, or any CSS background (a dot grid, a gradient).',
+    { dark: '#0e0e10' },
+  ),
   selection: tok(
     'colour',
     'var(--bbe-accent)',
@@ -112,6 +117,9 @@ export const EDITOR_TOKENS = {
     'Shadow of floating things: toolbars on the page, the field panel, messages.',
     { dark: '0 1px 2px rgb(0 0 0 / .5), 0 8px 24px rgb(0 0 0 / .45)' },
   ),
+  'shadow-card': tok('shape', '0 1px 2px rgb(0 0 0 / .04)', 'Resting shadow of cards (Insert).', {
+    dark: 'none',
+  }),
   // Density
   space: tok('density', '4px', 'Spacing unit: paddings and gaps are multiples of it.', {
     compact: '3px',

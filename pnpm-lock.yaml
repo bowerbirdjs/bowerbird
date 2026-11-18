@@ -84,6 +84,9 @@ importers:
       '@bowerbirdjs/react':
         specifier: workspace:*
         version: link:../../packages/react
+      '@phosphor-icons/core':
+        specifier: 2.1.1
+        version: 2.1.1
       react:
         specifier: ^19.3.1
         version: 19.3.1
@@ -630,6 +633,9 @@ packages:
 
   '@oxc-project/types@0.156.0':
     resolution: {integrity: sha512-1Duyg48TdJNdyhEB8Xn1L36bT9Pv6GUtlKjHxOys8xkaF/rQq3XJE+bAurSK/AgIz5mGFsb77cn9Pb20+WCScw==}
+
+  '@phosphor-icons/core@2.1.1':
+    resolution: {integrity: sha512-v4ARvrip4qBCImOE5rmPUylOEK4iiED9ZyKjcvzuezqMaiRASCHKcRIuvvxL/twvLpkfnEODCOJp5dM4eZilxQ==}
 
   '@pnpm/deps.graph-sequencer@1100.0.1':
     resolution: {integrity: sha512-pOr5+q1fLYKwFN3LAJuGZEnfXDcQ73zqgDHMtGy+K+uIoUqyY+6MeDCWFwfu+4EFuq76I5EPFofoNAI+Bmmq4A==}
@@ -1930,6 +1936,8 @@ snapshots:
   '@opentelemetry/api@1.10.0': {}
 
   '@oxc-project/types@0.156.0': {}
+
+  '@phosphor-icons/core@2.1.1': {}
 
   '@pnpm/deps.graph-sequencer@1100.0.1': {}
 

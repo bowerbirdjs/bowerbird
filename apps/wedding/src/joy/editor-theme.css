@@ -1,0 +1,179 @@
+/*
+ * Joy Phone theme for the Bowerbird editor, after the Joy Phone brand book (November 2026):
+ * cream canvas, ink for words, raspberry only where something should happen. Manrope carries the
+ * interface, Bricolage Grotesque the title, a monospace in small capitals labels the panels.
+ * Everything is round; the Joy corner (a pill with one sharp corner, bottom left) marks the
+ * primary button and nothing else. There is no red and no second warning colour.
+ *
+ * Put `joy-editor` on <bowerbird-editor> and its icons in `ui.icons` (./icons.ts). The fonts are
+ * the app's own: load Manrope and Bricolage Grotesque on the page (system fonts stand in).
+ * Light by default; the dashboard may go dark with `appearance="dark"` or `"auto"`.
+ */
+
+.joy-editor {
+  /* Brand values the parts below share. */
+  --joy-pink: #e82c68;
+  --joy-pink-deep: #c91d5b;
+  --joy-pink-press: #c91d5b;
+  --joy-ink-soft: #4a443c;
+  --joy-ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --joy-display: "Bricolage Grotesque", ui-sans-serif, system-ui, sans-serif;
+
+  /* Colour: cream, ink, raspberry; pink text is always pink-deep. */
+  --bb-editor-accent: var(--joy-pink);
+  --bb-editor-accent-fg: #ffffff;
+  --bb-editor-accent-text: var(--joy-pink-deep);
+  --bb-editor-fg: #1a1a1a;
+  --bb-editor-muted: #756d61;
+  --bb-editor-bg: #faf4ec;
+  --bb-editor-panel: #faf4ec;
+  --bb-editor-surface: #ffffff;
+  /* line: hairlines only. field: borders of controls (3:1). */
+  --bb-editor-border: #ece5da;
+  --bb-editor-border-strong: #908677;
+  --bb-editor-selected: #fbe3ec;
+  --bb-editor-focus: var(--joy-pink);
+  --bb-editor-danger: var(--joy-pink-deep);
+  --bb-editor-warning: var(--joy-pink-deep);
+  /* Guest tones for what isn't the host's own: agents, their additions, linked components. */
+  --bb-editor-success: #4a7358;
+  --bb-editor-agent: #4a7358;
+  --bb-editor-linked: #4a5a8c;
+  /* The ink band. */
+  --bb-editor-floating-bg: #1a1a1a;
+  --bb-editor-floating-fg: #faf4ec;
+  /* The dot grid of the marketing hero, around the page. */
+  --bb-editor-canvas-bg:
+    radial-gradient(rgb(26 26 26 / 0.07) 1.1px, transparent 1.1px) 0 0 / 22px 22px, #f2ebe1;
+  --bb-editor-selection: var(--joy-pink);
+
+  /* Type: Manrope for everything people read and click. */
+  --bb-editor-font: "Manrope", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --bb-editor-font-mono:
+    ui-monospace, "Cascadia Mono", "Segoe UI Mono", "SF Mono", Menlo, monospace;
+  --bb-editor-font-size: 14px;
+
+  /* Shape: round, cards at 20 px; elevations card and float. */
+  --bb-editor-radius: 999px;
+  --bb-editor-radius-lg: 20px;
+  --bb-editor-shadow:
+    0 0 0 1px rgb(26 26 26 / 0.12), 0 2px 6px rgb(26 26 26 / 0.08),
+    0 14px 36px -6px rgb(26 26 26 / 0.24);
+  --bb-editor-shadow-card: 0 10px 30px -12px rgb(26 26 26 / 0.12);
+  --bb-editor-control-height: 34px;
+}
+
+/* Dark, for the dashboard only (guest sites and marketing stay light). */
+.joy-editor[appearance="dark"] {
+  --joy-pink-deep: #ff7aa3;
+  --joy-ink-soft: #cdc2b3;
+  --bb-editor-fg: #f2ebe1;
+  --bb-editor-muted: #a1978a;
+  --bb-editor-bg: #141210;
+  --bb-editor-panel: #141210;
+  --bb-editor-surface: #1d1a17;
+  --bb-editor-border: #2c2824;
+  --bb-editor-border-strong: #7d7366;
+  --bb-editor-selected: #40192a;
+  --bb-editor-success: color-mix(in srgb, #4a7358 55%, #f2ebe1);
+  --bb-editor-agent: color-mix(in srgb, #4a7358 55%, #f2ebe1);
+  --bb-editor-linked: color-mix(in srgb, #4a5a8c 55%, #f2ebe1);
+  --bb-editor-floating-bg: #26221e;
+  --bb-editor-floating-fg: #f2ebe1;
+  --bb-editor-canvas-bg:
+    radial-gradient(rgb(242 235 225 / 0.06) 1.1px, transparent 1.1px) 0 0 / 22px 22px, #0c0b0a;
+  --bb-editor-shadow:
+    0 0 0 1px rgb(242 235 225 / 0.16), 0 2px 6px rgb(0 0 0 / 0.45),
+    0 14px 36px -6px rgb(0 0 0 / 0.75);
+  --bb-editor-shadow-card: 0 10px 30px -12px rgb(0 0 0 / 0.5);
+}
+@media (prefers-color-scheme: dark) {
+  .joy-editor[appearance="auto"] {
+    --joy-pink-deep: #ff7aa3;
+    --joy-ink-soft: #cdc2b3;
+    --bb-editor-fg: #f2ebe1;
+    --bb-editor-muted: #a1978a;
+    --bb-editor-bg: #141210;
+    --bb-editor-panel: #141210;
+    --bb-editor-surface: #1d1a17;
+    --bb-editor-border: #2c2824;
+    --bb-editor-border-strong: #7d7366;
+    --bb-editor-selected: #40192a;
+    --bb-editor-success: color-mix(in srgb, #4a7358 55%, #f2ebe1);
+    --bb-editor-agent: color-mix(in srgb, #4a7358 55%, #f2ebe1);
+    --bb-editor-linked: color-mix(in srgb, #4a5a8c 55%, #f2ebe1);
+    --bb-editor-floating-bg: #26221e;
+    --bb-editor-floating-fg: #f2ebe1;
+    --bb-editor-canvas-bg:
+      radial-gradient(rgb(242 235 225 / 0.06) 1.1px, transparent 1.1px) 0 0 / 22px 22px, #0c0b0a;
+    --bb-editor-shadow:
+      0 0 0 1px rgb(242 235 225 / 0.16), 0 2px 6px rgb(0 0 0 / 0.45),
+      0 14px 36px -6px rgb(0 0 0 / 0.75);
+    --bb-editor-shadow-card: 0 10px 30px -12px rgb(0 0 0 / 0.5);
+  }
+}
+
+/* Interface type: 600 for labels and navigation, 700 for buttons. */
+.joy-editor::part(tab),
+.joy-editor::part(label) {
+  font-weight: 600;
+}
+.joy-editor::part(label) {
+  color: var(--joy-ink-soft);
+}
+.joy-editor::part(button) {
+  font-weight: 700;
+  transition:
+    background-color 280ms var(--joy-ease),
+    color 280ms var(--joy-ease),
+    border-color 280ms var(--joy-ease),
+    scale 140ms var(--joy-ease);
+}
+/* Press: a control dips to 0.96 while held. */
+.joy-editor::part(button):active {
+  scale: 0.96;
+}
+
+/* The page title in Bricolage, like the card titles of the dashboard. */
+.joy-editor::part(title) {
+  font-family: var(--joy-display);
+  font-weight: 700;
+  font-size: 16px;
+  letter-spacing: -0.01em;
+}
+
+/* Micro labels: monospace small capitals for panel headings. */
+.joy-editor::part(heading) {
+  font-family: var(--bb-editor-font-mono);
+  font-size: 10.5px;
+  font-weight: 400;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--bb-editor-muted);
+}
+
+/* The Joy corner, on the primary button only, which wears the card elevation. */
+.joy-editor::part(primary) {
+  border-radius: 999px 999px 999px 4px;
+  box-shadow: var(--bb-editor-shadow-card);
+}
+.joy-editor::part(primary):hover {
+  background: var(--joy-pink-press);
+  border-color: var(--joy-pink-press);
+}
+
+/* Destructive: outlined, pink border, pink-deep label, surface fill (a filled one would shout). */
+.joy-editor::part(danger) {
+  border-color: var(--joy-pink);
+  color: var(--joy-pink-deep);
+  background: var(--bb-editor-surface);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .joy-editor::part(button) {
+    transition: none;
+  }
+  .joy-editor::part(button):active {
+    scale: none;
+  }
+}

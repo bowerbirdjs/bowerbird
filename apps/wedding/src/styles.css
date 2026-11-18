@@ -1,16 +1,25 @@
 :root {
-  --ink: #2a2326;
-  --muted: #6f6468;
-  --line: #e8dfe2;
-  --bg: #fbf8f6;
-  --panel: #ffffff;
-  --brand: #8a4b5f;
-  --brand-soft: #f6ecef;
-  --danger: #a3282f;
+  /* Joy Phone's platform palette (brand book): cream canvas, ink words, raspberry voice. */
+  --ink: #1a1a1a;
+  --ink-soft: #4a443c;
+  --muted: #756d61;
+  --line: #ece5da;
+  --field: #908677;
+  --bg: #faf4ec;
+  --panel: #faf4ec;
+  --surface: #ffffff;
+  --brand: #e82c68;
+  /* Pink as text is always the deeper pink (contrast). */
+  --brand-text: #c91d5b;
+  --brand-soft: #fbe3ec;
+  --danger: #c91d5b;
+  --shadow-card: 0 10px 30px -12px rgb(26 26 26 / 0.12);
+  --display: "Bricolage Grotesque", ui-sans-serif, system-ui, sans-serif;
   color: var(--ink);
   background: var(--bg);
   font:
-    14px / 1.5 ui-sans-serif,
+    14px / 1.5 "Manrope",
+    ui-sans-serif,
     system-ui,
     -apple-system,
     "Segoe UI",
@@ -54,16 +63,20 @@ textarea {
 .brand {
   display: flex;
   align-items: center;
-  gap: 6px;
-  font-weight: 700;
+  gap: 8px;
+  font-family: var(--display);
+  font-size: 17px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
   white-space: nowrap;
 }
 .logo {
   color: var(--brand);
 }
 .event-title {
-  font-family: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
-  font-size: 16px;
+  color: var(--ink-soft);
+  font-weight: 600;
+  font-size: 15px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -80,23 +93,37 @@ textarea {
   flex: 1;
 }
 .button {
-  border: 1px solid var(--line);
-  background: var(--panel);
-  border-radius: 8px;
-  padding: 6px 12px;
+  border: 1px solid var(--field);
+  background: var(--surface);
+  border-radius: 999px;
+  padding: 7px 16px;
+  font-weight: 700;
   cursor: pointer;
   white-space: nowrap;
+  transition:
+    background-color 280ms cubic-bezier(0.22, 1, 0.36, 1),
+    scale 140ms cubic-bezier(0.22, 1, 0.36, 1);
 }
+.button:active {
+  scale: 0.96;
+}
+/* The Joy corner: the primary button, and nothing else. */
 .button.primary {
   background: var(--brand);
   border-color: var(--brand);
   color: #fff;
+  border-radius: 999px 999px 999px 4px;
+  box-shadow: var(--shadow-card);
+}
+.button.primary:hover {
+  background: var(--brand-text);
+  border-color: var(--brand-text);
 }
 .link {
   border: 0;
   background: none;
   padding: 0;
-  color: var(--brand);
+  color: var(--brand-text);
   text-decoration: underline;
   cursor: pointer;
 }
@@ -145,16 +172,7 @@ textarea {
   display: grid;
   min-height: 0;
   height: 100%;
-  /* The editor takes the planner's look through its design tokens. */
-  --bb-editor-accent: var(--brand);
-  --bb-editor-fg: var(--ink);
-  --bb-editor-muted: var(--muted);
-  --bb-editor-panel: var(--bg);
-  --bb-editor-border: var(--line);
-  --bb-editor-border-strong: #ddd2d6;
-  --bb-editor-canvas-bg: #eee6e2;
-  --bb-editor-radius: 8px;
-  --bb-editor-radius-lg: 12px;
+  /* The editor wears the Joy Phone theme (./joy/editor-theme.css); only the panel widths here. */
   --bb-editor-left: 220px;
   --bb-editor-right: 270px;
 }
@@ -202,13 +220,18 @@ textarea {
 .field select,
 .field textarea {
   width: 100%;
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  padding: 6px 8px;
-  background: #fff;
+  border: 1px solid var(--field);
+  border-radius: 999px;
+  padding: 6px 12px;
+  background: var(--surface);
 }
 .field textarea {
   resize: vertical;
+  border-radius: 16px;
+}
+.field :is(input, select, textarea):focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
 }
 .field.invalid input,
 .field.invalid textarea,
@@ -252,9 +275,9 @@ textarea {
   display: grid;
   gap: 8px;
   padding: 10px;
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  background: var(--bg);
+  border-radius: 20px;
+  background: var(--surface);
+  box-shadow: var(--shadow-card);
 }
 .item-head {
   display: flex;
@@ -302,9 +325,10 @@ textarea {
 .add {
   justify-self: start;
   border: 1px dashed var(--brand);
-  color: var(--brand);
+  color: var(--brand-text);
   background: none;
-  border-radius: 8px;
+  border-radius: 999px;
+  font-weight: 700;
   padding: 6px 12px;
   cursor: pointer;
 }

@@ -80,7 +80,7 @@ export const editorStyles = [
   .btn.ghost[aria-pressed='false'] { color: var(--bbe-muted); }
   .btn.primary { background: var(--bbe-accent); border-color: var(--bbe-accent); color: var(--bbe-accent-fg); }
   .btn.primary:hover:not(:disabled) { box-shadow: inset 0 0 0 100vmax rgb(0 0 0 / .12); }
-  .btn.danger { color: var(--bbe-danger); }
+  .btn.danger { color: var(--bbe-danger); border-color: color-mix(in srgb, var(--bbe-danger) 40%, var(--bbe-border-strong)); }
   .btn.danger:hover:not(:disabled) {
     box-shadow: none; background: color-mix(in srgb, var(--bbe-danger) 10%, var(--bbe-surface));
     border-color: color-mix(in srgb, var(--bbe-danger) 45%, var(--bbe-border-strong));
@@ -95,7 +95,8 @@ export const editorStyles = [
     background: var(--bbe-surface); color: var(--bbe-fg);
     transition: border-color .12s, box-shadow .12s;
   }
-  textarea { height: auto; min-height: 64px; padding: var(--_s2); resize: vertical; line-height: 1.45; }
+  /* Several lines never take a pill radius: at most the card radius. */
+  textarea { height: auto; min-height: 64px; padding: var(--_s2); resize: vertical; line-height: 1.45; border-radius: min(var(--bbe-radius), var(--bbe-radius-lg)); }
   textarea.code { font-size: var(--_fs-sm); }
   :is(input, select, textarea):hover:not(:disabled, :focus) { border-color: color-mix(in srgb, var(--bbe-fg) 30%, var(--bbe-border-strong)); }
   :is(input, select, textarea):focus-visible { outline: none; border-color: var(--bbe-focus); box-shadow: var(--_ring); }
@@ -148,7 +149,7 @@ export const editorStyles = [
   .tabs button {
     flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: var(--_s1);
     height: var(--_h); margin-bottom: -1px; padding: 0 var(--_s1); border: 0; border-bottom: 2px solid transparent;
-    border-radius: var(--bbe-radius) var(--bbe-radius) 0 0; background: none; color: var(--bbe-muted); font-weight: 600;
+    border-radius: min(var(--bbe-radius), 8px) min(var(--bbe-radius), 8px) 0 0; background: none; color: var(--bbe-muted); font-weight: 600;
     white-space: nowrap;
   }
   .tabs button:hover { color: var(--bbe-fg); background: var(--bbe-hover); }
@@ -202,17 +203,17 @@ export const editorStyles = [
   .cards { display: grid; gap: var(--_s2); padding: 0 var(--_s3) var(--_s4); }
   .card {
     position: relative; display: grid; gap: var(--_s1); padding: var(--_s3); text-align: left;
-    border: 1px solid var(--bbe-border-strong); border-radius: var(--bbe-radius-lg);
+    border: 1px solid var(--bbe-border); border-radius: var(--bbe-radius-lg); box-shadow: var(--bbe-shadow-card);
     background: var(--bbe-surface); color: var(--bbe-fg); transition: border-color .12s, box-shadow .12s;
   }
-  .card:hover:not(:disabled) { border-color: var(--bbe-accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--bbe-accent) 12%, transparent); }
+  .card:hover:not(:disabled) { border-color: var(--bbe-accent); box-shadow: var(--bbe-shadow-card), 0 0 0 3px color-mix(in srgb, var(--bbe-accent) 12%, transparent); }
   .card:disabled, .elements button:disabled { opacity: .5; cursor: default; }
   .card strong { font-weight: 600; padding-right: calc(var(--_icon) + var(--_s2)); }
   .card .desc { color: var(--bbe-muted); font-size: var(--_fs-sm); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
   .card .add { position: absolute; top: var(--_s3); right: var(--_s3); color: var(--bbe-accent-text); opacity: 0; transition: opacity .12s; }
   .card:hover .add, .card:focus-visible .add { opacity: 1; }
   .card.linked strong { color: var(--bbe-linked); }
-  .card.linked:hover { border-color: var(--bbe-linked); box-shadow: 0 0 0 3px color-mix(in srgb, var(--bbe-linked) 14%, transparent); }
+  .card.linked:hover { border-color: var(--bbe-linked); box-shadow: var(--bbe-shadow-card), 0 0 0 3px color-mix(in srgb, var(--bbe-linked) 14%, transparent); }
   .chips { display: flex; flex-wrap: wrap; gap: var(--_s1); margin-top: var(--_s1); }
   .badge {
     display: inline-flex; align-items: center; gap: 4px; height: 18px; padding: 0 7px; border-radius: 999px; white-space: nowrap;
@@ -224,12 +225,12 @@ export const editorStyles = [
   .elements { display: grid; grid-template-columns: repeat(auto-fill, minmax(76px, 1fr)); gap: var(--_s2); padding: 0 var(--_s3) var(--_s4); }
   .elements button {
     display: grid; justify-items: center; gap: var(--_s2); padding: var(--_s3) var(--_s1);
-    border: 1px solid var(--bbe-border-strong); border-radius: var(--bbe-radius-lg);
+    border: 1px solid var(--bbe-border); border-radius: var(--bbe-radius-lg); box-shadow: var(--bbe-shadow-card);
     background: var(--bbe-surface); color: var(--bbe-fg); font-size: var(--_fs-sm); font-weight: 500;
     transition: border-color .12s, box-shadow .12s;
   }
   .elements .bb-icon { width: calc(var(--_icon) + 4px); height: calc(var(--_icon) + 4px); color: var(--bbe-muted); }
-  .elements button:hover:not(:disabled) { border-color: var(--bbe-accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--bbe-accent) 12%, transparent); }
+  .elements button:hover:not(:disabled) { border-color: var(--bbe-accent); box-shadow: var(--bbe-shadow-card), 0 0 0 3px color-mix(in srgb, var(--bbe-accent) 12%, transparent); }
   .elements button:hover .bb-icon { color: var(--bbe-accent-text); }
 
   /* ---- Inspector ------------------------------------------------------------------------ */
@@ -278,7 +279,7 @@ export const editorStyles = [
 
   .undo-others { display: grid; gap: var(--_s2); justify-items: start; }
   .history { list-style: none; margin: 0; padding: var(--_s2); display: grid; gap: 2px; }
-  .entry { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: var(--_s3); align-items: center; padding: var(--_s2); border-radius: var(--bbe-radius); }
+  .entry { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: var(--_s3); align-items: center; padding: var(--_s2); border-radius: min(var(--bbe-radius), var(--bbe-radius-lg)); }
   .entry:hover { background: var(--bbe-hover); }
   .avatar { display: grid; place-items: center; width: 24px; height: 24px; border-radius: 999px; font-size: var(--_fs-xs); font-weight: 700;
     background: color-mix(in srgb, var(--bbe-fg) 10%, transparent); color: var(--bbe-fg); }
