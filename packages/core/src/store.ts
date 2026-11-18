@@ -34,6 +34,17 @@ export interface TransactionInput {
    * (`protectHumanEdits: 'confirm'`). Set it only when the person asked for that change.
    */
   overwrite?: boolean;
+  /**
+   * Return the ops with the ids they created written in (`result.pinned`), so replaying them on
+   * another copy of the document (e.g. a sync server) creates the same ids.
+   */
+  pinIds?: boolean;
+  /**
+   * When an op names an id to create that is already taken, use a fresh one instead of failing.
+   * Later ops in the transaction are rewritten to match; `result.renamed` lists what changed.
+   * For replaying pinned ops on a document that has moved on (sync).
+   */
+  renameTaken?: boolean;
 }
 
 export interface ChangeSummary {
@@ -56,6 +67,10 @@ export type ApplyResult =
       summary: ChangeSummary;
       dryRun: boolean;
       warnings: Issue[];
+      /** With `pinIds`: the ops as applied, with the ids they created written in. */
+      pinned?: Op[];
+      /** With `renameTaken`: ids that were taken, and the ids used instead. */
+      renamed?: Record<string, string>;
     }
   | {
       ok: false;
@@ -86,6 +101,11 @@ export interface CommitEvent {
   entry: HistoryEntry;
   doc: SiteDoc;
   summary: ChangeSummary;
+  /**
+   * Set when a synced store swaps its optimistic copy of a change for the server's version:
+   * listeners already saw this change once. Hosts that save or log changes can skip these.
+   */
+  echo?: boolean;
 }
 
 /**
@@ -395,7 +415,7 @@ function unpinTaken(op: Op, draft: Draft): Pinned {
 }
 
 /** Maps an id (or an id nested under a renamed one) through `map`. */
-function renameId(id: string, map: Map<string, string>): string {
+export function renameId(id: string, map: Map<string, string>): string {
   const direct = map.get(id);
   if (direct) return direct;
   for (const [from, to] of map) if (id.startsWith(`${from}/`)) return to + id.slice(from.length);
@@ -403,7 +423,7 @@ function renameId(id: string, map: Map<string, string>): string {
 }
 
 /** Rewrites the id fields of an op (and ids inside node inputs) using `map`. Text is untouched. */
-function substitute(op: Op, map: Map<string, string>): Op {
+export function substitute(op: Op, map: Map<string, string>): Op {
   if (!map.size) return op;
   const out = clone(op) as Record<string, unknown>;
   for (const f of ID_FIELDS)
@@ -416,6 +436,44 @@ function substitute(op: Op, map: Map<string, string>): Op {
     walk(out.node as { id?: string });
   }
   return out as Op;
+}
+
+/** The record changes between two versions of a document (records compared by value). */
+export function diffDocs(before: SiteDoc, after: SiteDoc): Change[] {
+  const out: Change[] = [];
+  const records = <T>(
+    kind: 'node' | 'page' | 'symbol',
+    a: Record<string, T> | undefined,
+    b: Record<string, T> | undefined,
+  ) => {
+    for (const id of new Set([...Object.keys(a ?? {}), ...Object.keys(b ?? {})])) {
+      const x = a && Object.hasOwn(a, id) ? a[id] : undefined;
+      const y = b && Object.hasOwn(b, id) ? b[id] : undefined;
+      if (x === y || deepEqual(x, y)) continue;
+      out.push({
+        kind,
+        id,
+        ...(x !== undefined ? { before: x } : {}),
+        ...(y !== undefined ? { after: y } : {}),
+      } as Change);
+    }
+  };
+  records('node', before.nodes, after.nodes);
+  records('page', before.pages, after.pages);
+  records('symbol', before.symbols, after.symbols);
+  if (!deepEqual(before.locales, after.locales)) {
+    out.push({
+      kind: 'locales',
+      id: 'locales',
+      ...(before.locales ? { before: before.locales } : {}),
+      ...(after.locales ? { after: after.locales } : {}),
+    });
+  }
+  if (!deepEqual(before.tokens, after.tokens))
+    out.push({ kind: 'tokens', id: 'tokens', before: before.tokens, after: after.tokens });
+  if (!deepEqual(before.themes, after.themes))
+    out.push({ kind: 'themes', id: 'themes', before: before.themes, after: after.themes });
+  return out;
 }
 
 export class Store {
@@ -499,9 +557,12 @@ export class Store {
       changesets?: readonly Changeset[];
       entry?: HistoryEntry;
       reset?: boolean;
+      /** Listeners already saw `entry` (see `CommitEvent.echo`). */
+      echo?: boolean;
     } = {},
   ): void {
-    const changed = doc !== this.current;
+    const previous = this.current;
+    const changed = doc !== previous;
     this.current = doc;
     this.index = undefined;
     if (options.history) {
@@ -536,13 +597,13 @@ export class Store {
       actor: { kind: 'system', id: 'sync' },
       kind: 'edit',
       label: 'Sync',
-      changes: [],
+      changes: diffDocs(previous, doc),
       time: Date.now(),
     };
     const summary = summarize(entry.changes);
     for (const listener of this.listeners) {
       try {
-        listener({ entry, doc, summary });
+        listener({ entry, doc, summary, ...(options.echo ? { echo: true } : {}) });
       } catch (error) {
         queueMicrotask(() => {
           throw error;
@@ -564,19 +625,31 @@ export class Store {
 
   /** Applies a transaction atomically: all ops succeed, or nothing changes. */
   apply(input: TransactionInput): ApplyResult {
-    const run = this.run(input);
+    const run = this.run(input, input.renameTaken ? { rebase: true } : {});
     if (!run.ok) return run.result;
     const actor = input.actor ?? LOCAL_USER;
     if (!input.dryRun) {
       stampChanges(run.draft, actor, this.current.revision + 1);
       stampTokens(run.draft, actor, this.current.revision + 1);
     }
-    return this.commit(run.draft, actor, {
+    const result = this.commit(run.draft, actor, {
       kind: 'edit',
       warnings: run.ctx.warnings,
       ...(input.label ? { label: input.label } : {}),
       ...(input.dryRun ? { dryRun: true } : {}),
     });
+    if (!result.ok) return result;
+    return {
+      ...result,
+      ...(input.pinIds
+        ? {
+            pinned: run.ops.map((op, i) =>
+              pinIds(op, run.createdBy[i] ?? { nodes: [], pages: [], symbols: [] }),
+            ),
+          }
+        : {}),
+      ...(run.renamed.size ? { renamed: Object.fromEntries(run.renamed) } : {}),
+    };
   }
 
   /**
@@ -670,7 +743,7 @@ export class Store {
         return failed(ctx.issues, i);
       }
       const before =
-        options.propose || pinned
+        options.propose || pinned || input.pinIds
           ? {
               nodes: draft.created.length,
               pages: new Set(draft.pages().map((p) => p.id)),
@@ -1260,19 +1333,17 @@ export class Store {
       return { ok: false, revision: this.current.revision, errors: protectedEdits.issues };
     warnings.push(...protectedEdits.issues);
 
-    const result = this.commit(draft, actor, {
+    // Mark the entry resolved even when every change conflicted (nothing left to revert), so the
+    // next undo moves on to earlier work instead of getting stuck here. Marked before committing,
+    // so commit listeners (the editor, sync clients) see the flag.
+    if (kind === 'undo') entry.undone = true;
+    else entry.redone = true;
+    return this.commit(draft, actor, {
       kind,
       target: entry.txId,
       label: `${kind === 'undo' ? 'Undo' : 'Redo'}: ${entry.label ?? entry.txId}`,
       warnings,
     });
-    // Mark the entry resolved even when every change conflicted (nothing left to revert), so the
-    // next undo moves on to earlier work instead of getting stuck here.
-    if (result.ok) {
-      if (kind === 'undo') entry.undone = true;
-      else entry.redone = true;
-    }
-    return result;
   }
 
   private commit(

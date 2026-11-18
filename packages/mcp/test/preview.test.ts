@@ -121,3 +121,79 @@ describe('preview review panel', () => {
     expect(await none.text()).toMatch(/Nothing was selected/);
   });
 });
+
+/** Opens the sync event stream and returns its events as they arrive. */
+async function openStream(url: string, headers: Record<string, string> = {}) {
+  const controller = new AbortController();
+  const res = await fetch(url, { headers, signal: controller.signal });
+  const events: { event: string; data: string }[] = [];
+  if (res.ok && res.body) {
+    const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();
+    let buffer = '';
+    (async () => {
+      try {
+        for (;;) {
+          const { value, done } = await reader.read();
+          if (done) return;
+          buffer += value;
+          let end = buffer.indexOf('\n\n');
+          while (end >= 0) {
+            const block = buffer.slice(0, end);
+            buffer = buffer.slice(end + 2);
+            const event = /^event: (.*)$/m.exec(block)?.[1] ?? 'message';
+            const data = /^data: (.*)$/m.exec(block)?.[1] ?? '';
+            events.push({ event, data });
+            end = buffer.indexOf('\n\n');
+          }
+        }
+      } catch {
+        // Aborted.
+      }
+    })();
+  }
+  return { res, events, close: () => controller.abort() };
+}
+
+const until = async (check: () => boolean) => {
+  for (let i = 0; i < 100 && !check(); i++) await new Promise((r) => setTimeout(r, 10));
+};
+
+describe('preview sync endpoint', () => {
+  it('needs the key from syncUrl, and attributes edits to the connected person', async () => {
+    const { store, url } = await setup();
+    const preview = await startPreview({ store, port: 0, maxSyncConnections: 1 });
+    try {
+      expect(preview.syncUrl).toMatch(/\/__bowerbird\/sync\?key=[0-9a-f]{32}$/);
+      expect((await fetch(`${preview.url}/__bowerbird/sync`)).status).toBe(403);
+      expect((await fetch(`${preview.url}/__bowerbird/sync?key=nope`)).status).toBe(403);
+      const stream = await openStream(preview.syncUrl!);
+      expect(stream.res.status).toBe(200);
+      await until(() => stream.events.length > 0);
+      const id = stream.events[0]!.data;
+      expect(stream.events[0]!.event).toBe('connection');
+      // One connection allowed in this test.
+      expect((await fetch(preview.syncUrl!)).status).toBe(503);
+      const post = (message: unknown) =>
+        fetch(`${preview.url}/__bowerbird/sync/${id}`, {
+          method: 'POST',
+          body: JSON.stringify(message),
+        });
+      // Messages before hello are refused with a reason.
+      await post({ type: 'presence', state: {} });
+      await until(() => stream.events.some((e) => e.data.includes('Say hello first')));
+      await post({ type: 'hello', actor: { kind: 'user', id: 'sam' } });
+      await until(() => stream.events.some((e) => e.data.includes('"welcome"')));
+      await post({
+        type: 'tx',
+        id: 'c-1',
+        input: { ops: [{ op: 'page.update', id: 'home', title: 'Synced' }] },
+      });
+      await until(() => store.doc.pages.home?.title === 'Synced');
+      expect(store.history.at(-1)?.actor.id).toBe('sam');
+      stream.close();
+    } finally {
+      await preview.close();
+    }
+    expect(url).toBeTruthy();
+  });
+});

@@ -19,6 +19,8 @@ export interface McpServerOptions {
   previewUrl?: () => string | undefined;
   /** Enables get_layout (and screenshot) for agents, e.g. `createPlaywrightLayoutProvider`. */
   layout?: LayoutProvider;
+  /** Called before each tool call, e.g. to show the agent as present in synced editors. */
+  onToolCall?: (actor: Actor, tool: string) => void;
 }
 
 /** MCP Apps view of a page (rendered inline by hosts that support MCP Apps). */
@@ -127,6 +129,11 @@ export function createMcpServer(options: McpServerOptions): Server {
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: [...listed, pageTool] }));
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
+    try {
+      options.onToolCall?.(actor(), request.params.name);
+    } catch {
+      // A failing observer must not break the tool call.
+    }
     if (request.params.name === SHOW_PAGE.name) {
       const args = (request.params.arguments ?? {}) as { page?: unknown; theme?: unknown };
       const pages = Object.values(store.doc.pages);

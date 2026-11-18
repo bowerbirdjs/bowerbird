@@ -30,6 +30,10 @@ Options:
       --no-browser        Don't offer get_layout/screenshot (they need Playwright)
   -h, --help              Show this help
 
+Environment:
+  BOWERBIRD_SYNC_KEY      Key editors use to sync (default: new each run; set it so editor
+                          links keep working after a restart)
+
 Example (Claude Code):
   claude mcp add bowerbird -- node packages/mcp/dist/cli.js --file site.site.json`;
 
@@ -132,15 +136,22 @@ async function main() {
   }
 
   let preview: PreviewServer | undefined;
+  // A fixed key keeps editor links working across restarts.
+  const syncKey = process.env.BOWERBIRD_SYNC_KEY ? { syncKey: process.env.BOWERBIRD_SYNC_KEY } : {};
   if (!values['no-preview']) {
     const port = Number(values.port);
     try {
-      preview = await startPreview({ store, port, host: values.host });
+      preview = await startPreview({ store, port, host: values.host, ...syncKey });
     } catch (error) {
       log(`port ${port} unavailable (${(error as Error).message}); using a free port`);
-      preview = await startPreview({ store, port: 0, host: values.host });
+      preview = await startPreview({ store, port: 0, host: values.host, ...syncKey });
     }
     log(`live preview at ${preview.url}`);
+    if (preview.syncUrl) log(`editors can sync at ${preview.syncUrl} (keep this link private)`);
+    if (!/^(127\.|localhost$|::1$)/.test(values.host ?? '127.0.0.1'))
+      log(
+        `the preview is reachable from other machines on ${values.host}; only this machine can accept or reject proposals`,
+      );
   }
 
   const layout =
@@ -148,9 +159,22 @@ async function main() {
   if (!layout && !values['no-browser'])
     log('Playwright not found: get_layout and screenshot are off (npm i -D playwright to enable)');
 
+  // What people see an agent doing in synced editors while it reads or checks the page.
+  const activity: Record<string, string> = {
+    get_context: 'Reading the site',
+    get_outline: 'Reading the page',
+    get_nodes: 'Reading the page',
+    get_layout: 'Checking the layout',
+    screenshot: 'Looking at the page',
+    lint: 'Checking the page',
+  };
   const server = createMcpServer({
     store,
     previewUrl: () => preview?.url,
+    onToolCall: (actor, tool) => {
+      const label = activity[tool];
+      if (label) preview?.touch(actor, { activity: label });
+    },
     ...(layout ? { layout } : {}),
   });
   await server.connect(new StdioServerTransport());

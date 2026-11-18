@@ -325,10 +325,16 @@ export class CanvasView {
   private updatePeers(): void {
     const c = this.controller;
     const doc = this.host.ownerDocument;
-    const visible = c.peers.filter(
-      (p) =>
-        p.selection && (!p.page || p.page === c.page) && !c.symbolView && this.element(p.selection),
-    );
+    // Preview mode hides all overlays. Showing a component definition, peers on its nodes show
+    // (agents editing a definition have no page).
+    const visible = c.preview
+      ? []
+      : c.peers.filter(
+          (p) =>
+            p.selection &&
+            (c.symbolView || !p.page || p.page === c.page) &&
+            this.element(p.selection),
+        );
     const s = this.stage.getBoundingClientRect();
     while (this.peerLayer.children.length > visible.length)
       this.peerLayer.lastElementChild!.remove();

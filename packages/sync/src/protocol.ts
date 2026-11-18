@@ -1,6 +1,5 @@
 import type {
   Actor,
-  Change,
   Changeset,
   HistoryEntry,
   Issue,
@@ -31,36 +30,59 @@ export interface Peer extends PresenceState {
 /** A history entry as sent over the wire. */
 export type WireEntry = HistoryEntry;
 
+/** A client's transaction, as sent to the server (actor and revision come from the server). */
+export type WireInput = Omit<
+  TransactionInput,
+  'actor' | 'baseRevision' | 'dryRun' | 'pinIds' | 'renameTaken'
+>;
+
+/**
+ * `id`s are chosen by the client and unique per client session; the server echoes them so the
+ * client can match results (and, after a reconnect, knows which changes it already applied).
+ */
 export type ClientMessage =
-  | { type: 'hello'; actor: Actor }
-  | { type: 'tx'; id: string; input: Omit<TransactionInput, 'actor' | 'baseRevision' | 'dryRun'> }
-  | { type: 'undo' | 'redo' }
-  | { type: 'undo-by'; actorId: string }
   | {
-      type: 'propose';
-      id: string;
-      input: Omit<TransactionInput, 'actor' | 'baseRevision' | 'dryRun'>;
+      type: 'hello';
+      actor: Actor;
+      /** Ids of changes this client sent before and hasn't seen confirmed (after a reconnect). */
+      pending?: string[];
     }
-  | { type: 'accept' | 'reject'; changeset: string; ops?: number[] }
+  | { type: 'tx'; id: string; input: WireInput }
+  | { type: 'undo' | 'redo'; id?: string }
+  | { type: 'undo-by'; actorId: string; id?: string }
+  | { type: 'propose'; id: string; input: WireInput }
+  | { type: 'accept' | 'reject'; changeset: string; ops?: number[]; id?: string }
   | { type: 'presence'; state: PresenceState };
 
 export type ServerMessage =
   | {
       type: 'welcome';
       clientId: string;
+      /** Who the server says this client is (it may differ from the actor the client claimed). */
+      actor: Actor;
       doc: SiteDoc;
       history: WireEntry[];
+      /** Open changesets. */
       changesets: readonly Changeset[];
       peers: Peer[];
+      /** Of the `pending` ids in `hello`: those the server already handled, with any errors. */
+      settled?: { id: string; errors: Issue[] }[];
     }
   | {
       type: 'commit';
       revision: number;
-      changes: Change[];
       counters: Record<string, number>;
       entry: WireEntry;
-      /** Set when the commit is the result of a client's `tx`. */
-      source?: { clientId: string; id: string };
+      /** Provenance of design tokens, when it changed. */
+      tokenEdits?: SiteDoc['tokenEdits'] | null;
+      /** Only sent to the client whose message caused the commit. */
+      source?: {
+        clientId: string;
+        id: string;
+        /** Ids the client's change created that were taken on the server, and what was used. */
+        renamed?: Record<string, string>;
+        warnings?: Issue[];
+      };
     }
   | { type: 'reset'; doc: SiteDoc; history: WireEntry[]; changesets: readonly Changeset[] }
   | { type: 'rejected'; id?: string; errors: Issue[] }
@@ -72,7 +94,13 @@ export interface Channel<In, Out> {
   send(message: Out): void;
   /** Registers the message handler. */
   receive(handler: (message: In) => void): void;
-  /** Registers a handler for when the other side goes away. */
+  /**
+   * For channels that reconnect by themselves (e.g. `httpChannel`): registers a handler called
+   * each time the connection is (re)established. Channels without it are open at once, and
+   * closing them is final.
+   */
+  opened?(handler: () => void): void;
+  /** Registers a handler for when the other side goes away (for now, with `opened`). */
   closed?(handler: () => void): void;
   close?(): void;
 }

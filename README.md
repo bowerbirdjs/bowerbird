@@ -49,7 +49,7 @@ While the MCP server runs, open an editor on the same site: your edits and the a
 pnpm --filter @bowerbirdjs/example-mcp-editor dev
 ```
 
-Then open the printed URL with `?server=http://localhost:4321&name=Sam`.
+Then open the printed URL with `?sync=<sync URL>&name=Sam`, where the sync URL is the one the MCP server logs (`editors can sync at http://localhost:4321/__bowerbird/sync?key=…`). The key is made per run; set `BOWERBIRD_SYNC_KEY` to keep links working across restarts. Editors reconnect by themselves and send edits made while the server was away once it's back.
 
 ### Export
 

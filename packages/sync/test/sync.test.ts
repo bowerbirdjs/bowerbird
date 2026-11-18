@@ -26,7 +26,7 @@ function setup(policy?: Parameters<typeof createPolicy>[0]) {
       { op: 'section.insert', section: 'hero' },
     ],
   });
-  const sync = createSyncServer(server);
+  const sync = createSyncServer(server, { presenceThrottleMs: 0 });
   const client = (actor: Actor) => {
     const store = new SyncedStore({
       registry,
@@ -142,7 +142,9 @@ describe('sync', () => {
     await settle();
     expect(server.view.node('cta-1')).toBeDefined();
     expect(a.store.view.node('cta-1')).toBeDefined();
-    expect(a.store.changesets[0]?.status).toEqual(['accepted']);
+    // Clients only hold open changesets.
+    expect(a.store.changesets).toEqual([]);
+    expect(server.changesets[0]?.status).toEqual(['accepted']);
     expect(server.history.at(-1)).toMatchObject({
       actor: { id: 'bot' },
       approvedBy: { id: 'sam' },

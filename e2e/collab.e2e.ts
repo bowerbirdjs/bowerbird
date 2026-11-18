@@ -51,6 +51,15 @@ describe.skipIf(!apps)('collaboration', () => {
     await page.keyboard.press('Control+z');
     await expect.poll(() => anaHeading.textContent()).toBe('Edit me from either side');
     expect(await ana.locator('[data-bb-node="hero-1/subheading"]').textContent()).toMatch(/agent/);
+    // Sam's undo reached his copy of history: Undo is now disabled (nothing left of his).
+    await expect
+      .poll(() => sam.getByRole('button', { name: /Undo/ }).first().isDisabled())
+      .toBe(true);
+
+    // Preview mode hides everyone's boxes, like the rest of the editing chrome.
+    expect(await ana.locator('.bbx-peer').count()).toBeGreaterThan(0);
+    await ana.getByRole('button', { name: 'Preview' }).click();
+    await expect.poll(() => ana.locator('.bbx-peer').count()).toBe(0);
     expect(errors).toEqual([]);
   });
 });

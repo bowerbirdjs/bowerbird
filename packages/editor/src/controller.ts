@@ -10,6 +10,7 @@ import {
   type NodeInput,
   type Page,
   pageOf,
+  renameId,
   type SiteDoc,
   type Store,
   type SymbolDef,
@@ -51,6 +52,14 @@ interface PresenceStore {
 const sharesPresence = (store: unknown): store is PresenceStore =>
   typeof (store as PresenceStore).onPeers === 'function' &&
   typeof (store as PresenceStore).setPresence === 'function';
+
+/** A store that syncs with a server (duck-typed, like presence). */
+interface SyncingStore {
+  /** Who the server says this editor is, once connected. */
+  readonly actor?: Actor;
+  onSyncError?(listener: (errors: Issue[]) => void): () => void;
+  onRenamed?(listener: (renamed: Record<string, string>) => void): () => void;
+}
 
 /**
  * Changes shown on the canvas without being applied: an agent's ops while they stream in, or a
@@ -127,11 +136,30 @@ export class EditorController {
         this.emit({ type: 'peers', peers });
       });
     }
+    const syncing = store as Store & SyncingStore;
+    // Refusals and rollbacks from the server would otherwise go unnoticed.
+    const offSyncErrors =
+      syncing.onSyncError?.((errors) => {
+        const shown = errors.filter((e) => e.code !== 'nothing_to_undo');
+        if (shown.length) this.emit({ type: 'error', errors: shown, label: 'Sync' });
+      }) ?? (() => {});
+    // The server used other ids for something this editor created: follow them.
+    const offRenamed =
+      syncing.onRenamed?.((renamed) => {
+        const map = new Map(Object.entries(renamed));
+        if (this.hovered) this.hovered = renameId(this.hovered, map);
+        if (this.selected) {
+          const next = renameId(this.selected, map);
+          if (next !== this.selected && this.store.doc.nodes[next]) this.select(next);
+        }
+      }) ?? (() => {});
     return () => {
       offCommit();
       offLoad();
       offChangesets();
       offPeers();
+      offSyncErrors();
+      offRenamed();
     };
   }
 
@@ -143,6 +171,14 @@ export class EditorController {
   destroy(): void {
     this.unsubscribe();
     this.listeners.clear();
+  }
+
+  /**
+   * Who this editor's changes are attributed to: the identity a sync server confirmed, if any,
+   * else `actor`. Use it to find "your" changes in history.
+   */
+  get identity(): Actor {
+    return (this.store as Store & SyncingStore).actor ?? this.actor;
   }
 
   private emit(event: EditorEvent): void {
@@ -439,14 +475,14 @@ export class EditorController {
   }
 
   undo(): ApplyResult {
-    const result = this.store.undo({ actorId: this.actor.id, actor: this.actor });
+    const result = this.store.undo({ actorId: this.identity.id, actor: this.actor });
     if (!result.ok && result.errors[0]?.code !== 'nothing_to_undo')
       this.emit({ type: 'error', errors: result.errors });
     return result;
   }
 
   redo(): ApplyResult {
-    const result = this.store.redo({ actorId: this.actor.id, actor: this.actor });
+    const result = this.store.redo({ actorId: this.identity.id, actor: this.actor });
     if (!result.ok && result.errors[0]?.code !== 'nothing_to_undo')
       this.emit({ type: 'error', errors: result.errors });
     return result;

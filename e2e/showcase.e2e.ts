@@ -10,6 +10,14 @@ describe.skipIf(!apps)('showcase', () => {
     await expect
       .poll(() => heading.textContent())
       .toBe('Two days on the future of the web platform');
+    // The app fits the window: nothing scrolls the page sideways (the assistant column used
+    // to grow past its 320px track because of the textarea's intrinsic width).
+    const overflow = () =>
+      page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+    expect(await overflow()).toBe(0);
+    await page.setViewportSize({ width: 1100, height: 960 });
+    expect(await overflow()).toBe(0);
+    await page.setViewportSize({ width: 1600, height: 960 });
 
     // Switch to the empty event and let the scripted agent build it.
     await page.getByLabel('Event', { exact: true }).selectOption({ label: 'Design Systems Day' });

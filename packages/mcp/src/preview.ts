@@ -1,9 +1,9 @@
-import { randomBytes } from 'node:crypto';
+import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { type Actor, describeOp, formatIssue, type Store } from '@bowerbirdjs/core';
 import { escapeAttr, escapeHtml, renderDocument } from '@bowerbirdjs/html';
-import { type ClientMessage, createSyncServer } from '@bowerbirdjs/sync';
+import { type ClientMessage, createSyncServer, type PresenceState } from '@bowerbirdjs/sync';
 
 export interface PreviewOptions {
   store: Store;
@@ -13,14 +13,38 @@ export interface PreviewOptions {
   reviewer?: Actor;
   /**
    * Serve live sync at `/__bowerbird/sync`, so editors (on localhost pages) can edit the same
-   * site as the agent, with presence. Default true.
+   * site as the agent, with presence. Default true. Editors connect with `syncUrl`, which holds a
+   * key made for this run.
    */
   sync?: boolean;
+  /** Most sync connections at once. Default 32. */
+  maxSyncConnections?: number;
+  /**
+   * The key editors need to sync (at least 16 characters). Default: random per run. Pass the
+   * same key after a restart so open editors reconnect by themselves.
+   */
+  syncKey?: string;
 }
 
 export interface PreviewServer {
   url: string;
+  /** Where editors connect (`httpChannel(syncUrl)`); includes the key. Unset without sync. */
+  syncUrl?: string;
+  /** Shows an agent working on the store as present in synced editors (e.g. per tool call). */
+  touch(actor: Actor, state?: PresenceState): void;
   close(): Promise<void>;
+}
+
+/** True for requests from this machine. */
+function fromLoopback(req: IncomingMessage): boolean {
+  const address = req.socket.remoteAddress ?? '';
+  return address === '::1' || /^(::ffff:)?127\./.test(address);
+}
+
+function sameSecret(a: string, b: string): boolean {
+  const x = Buffer.from(a);
+  const y = Buffer.from(b);
+  return x.length === y.length && timingSafeEqual(x, y);
 }
 
 const EVENTS_PATH = '/__bowerbird/events';
@@ -93,9 +117,14 @@ export async function startPreview(options: PreviewOptions): Promise<PreviewServ
   const allowedHosts = new Set(['localhost', '127.0.0.1', '::1', host]);
   let lastChange = 'No changes yet';
 
-  // Live sync for editors: server-sent events down, POSTs up. Only pages on this machine may
-  // connect (the Host check below, plus CORS limited to localhost origins).
+  // Live sync for editors: server-sent events down, POSTs up. Connecting needs the key from
+  // `syncUrl` (only the person running the server sees it); the Host check and CORS limited to
+  // localhost origins keep other web pages out on top of that.
   const sync = options.sync === false ? undefined : createSyncServer(store);
+  if (options.syncKey !== undefined && !/^[A-Za-z0-9_-]{16,128}$/.test(options.syncKey))
+    throw new Error('syncKey must be 16–128 letters, digits, "-" or "_".');
+  const syncKey = options.syncKey ?? randomBytes(16).toString('hex');
+  const maxConnections = options.maxSyncConnections ?? 32;
   const connections = new Map<string, (message: ClientMessage) => void>();
   const localOrigin = (origin: string | undefined) => {
     if (!origin) return undefined;
@@ -155,6 +184,16 @@ export async function startPreview(options: PreviewOptions): Promise<PreviewServ
     const cors = allowed ? { 'access-control-allow-origin': allowed, vary: 'Origin' } : {};
     const url = new URL(req.url ?? '/', 'http://localhost');
     if (req.method === 'GET' && url.pathname === '/__bowerbird/sync') {
+      if (!sameSecret(url.searchParams.get('key') ?? '', syncKey)) {
+        res.writeHead(403, { 'content-type': 'text/plain', ...cors });
+        res.end('Wrong or missing sync key: connect with the sync URL the server printed.');
+        return;
+      }
+      if (connections.size >= maxConnections) {
+        res.writeHead(503, { 'content-type': 'text/plain', ...cors });
+        res.end('Too many sync connections.');
+        return;
+      }
       const id = randomBytes(12).toString('hex');
       res.writeHead(200, {
         'content-type': 'text/event-stream',
@@ -163,16 +202,20 @@ export async function startPreview(options: PreviewOptions): Promise<PreviewServ
         ...cors,
       });
       let onClose = () => {};
-      sync!.connect({
-        send: (message) => res.write(`data: ${JSON.stringify(message)}\n\n`),
-        receive: (handler) => connections.set(id, handler),
-        closed: (handler) => {
-          onClose = handler;
+      sync!.connect(
+        {
+          send: (message) => res.write(`data: ${JSON.stringify(message)}\n\n`),
+          receive: (handler) => connections.set(id, handler),
+          closed: (handler) => {
+            onClose = handler;
+          },
+          close: () => res.end(),
         },
-        close: () => res.end(),
-      });
+        req,
+      );
       // The id is the only way to post to this connection, and only this page can read it.
-      res.write(`event: connection\ndata: ${id}\n\n`);
+      // `retry` makes browsers reconnect within a second if the stream drops.
+      res.write(`retry: 1000\nevent: connection\ndata: ${id}\n\n`);
       req.on('close', () => {
         connections.delete(id);
         onClose();
@@ -205,7 +248,9 @@ export async function startPreview(options: PreviewOptions): Promise<PreviewServ
     const sameOrigin =
       !origin || allowedHosts.has(new URL(origin).hostname.replace(/^\[|\]$/g, ''));
     const form = await readForm(req);
-    if (!match || !sameOrigin || form.get('token') !== token) {
+    // Accepting or rejecting is for the person at this machine, even when the preview is shared
+    // on the network (--host): others can read the page (and its token) but not act on it.
+    if (!match || !sameOrigin || !fromLoopback(req) || form.get('token') !== token) {
       res.writeHead(403, { 'content-type': 'text/plain' });
       res.end('Forbidden');
       return;
@@ -295,13 +340,17 @@ export async function startPreview(options: PreviewOptions): Promise<PreviewServ
     server.listen(options.port ?? 4321, host, () => resolve());
   });
   const { port } = server.address() as AddressInfo;
+  const url = `http://${host === '0.0.0.0' || host === '127.0.0.1' ? 'localhost' : host}:${port}`;
   return {
-    url: `http://${host === '0.0.0.0' || host === '127.0.0.1' ? 'localhost' : host}:${port}`,
+    url,
+    ...(sync ? { syncUrl: `${url}/__bowerbird/sync?key=${syncKey}` } : {}),
+    touch: (actor, state) => sync?.touch(actor, state),
     close: () =>
       new Promise<void>((resolve) => {
         unsubscribe();
         offChangesets();
         sync?.close();
+        connections.clear();
         for (const client of clients) client.end();
         server.close(() => resolve());
       }),

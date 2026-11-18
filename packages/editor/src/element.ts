@@ -267,11 +267,13 @@ export class BowerbirdEditor extends LitElement {
     const c = this.controller!;
     switch (event.type) {
       case 'commit':
-        this.emit('bb-transaction', {
-          entry: event.event.entry,
-          summary: event.event.summary,
-          doc: event.event.doc,
-        });
+        // A synced store's confirmation of a change already reported is not a new transaction.
+        if (!event.event.echo)
+          this.emit('bb-transaction', {
+            entry: event.event.entry,
+            summary: event.event.summary,
+            doc: event.event.doc,
+          });
         this.emit('bb-change', { doc: event.event.doc });
         break;
       case 'selection':
@@ -459,13 +461,14 @@ export class BowerbirdEditor extends LitElement {
   }
 
   private canUndo(c: EditorController): boolean {
-    return c.store.history.some((e) => e.actor.id === c.actor.id && e.kind !== 'undo' && !e.undone);
+    const me = c.identity.id;
+    return c.store.history.some((e) => e.actor.id === me && e.kind !== 'undo' && !e.undone);
   }
 
   private canRedo(c: EditorController): boolean {
     for (let i = c.store.history.length - 1; i >= 0; i--) {
       const e = c.store.history[i]!;
-      if (e.actor.id !== c.actor.id) continue;
+      if (e.actor.id !== c.identity.id) continue;
       if (e.kind === 'edit') return false;
       if (e.kind === 'undo' && !e.redone) return true;
     }
@@ -898,7 +901,8 @@ export class BowerbirdEditor extends LitElement {
     if (!entries.length) return html`<p class="empty">No changes yet.</p>`;
     const others = new Map<string, Actor>();
     for (const e of entries)
-      if (e.actor.id !== c.actor.id && e.actor.kind !== 'system') others.set(e.actor.id, e.actor);
+      if (e.actor.id !== c.identity.id && e.actor.kind !== 'system')
+        others.set(e.actor.id, e.actor);
     return html`
       ${
         others.size

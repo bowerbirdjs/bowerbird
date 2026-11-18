@@ -6,6 +6,13 @@ export type {
   PresenceState,
   ServerMessage,
   WireEntry,
+  WireInput,
 } from './protocol.js';
 export { createSyncServer, type SyncServer, type SyncServerOptions } from './server.js';
-export { httpChannel, memoryChannelPair, type SocketLike, socketChannel } from './transport.js';
+export {
+  type HttpChannelOptions,
+  httpChannel,
+  memoryChannelPair,
+  type SocketLike,
+  socketChannel,
+} from './transport.js';
