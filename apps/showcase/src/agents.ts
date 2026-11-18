@@ -376,7 +376,12 @@ export function describeError(error: unknown): string {
   if (error instanceof Anthropic.APIUserAbortError) return 'Stopped.';
   if (error instanceof DOMException && error.name === 'AbortError') return 'Stopped.';
   if (error instanceof Anthropic.AuthenticationError) {
-    return 'No valid API key: put ANTHROPIC_API_KEY in .env (repository root or apps/showcase) and restart the showcase, or use the demo agent.';
+    // The dev server says which key it sent (file and masked key), or why it has none.
+    const sent = error.headers?.get('x-showcase-api-key');
+    const said = error.apiMessage ?? error.message;
+    return sent
+      ? `The API rejected the key from ${sent}: ${said}. Check the key in the Claude Console, or use the demo agent.`
+      : `${said.replace(/\.?$/, '.')} The demo agent works without a key.`;
   }
   if (error instanceof Anthropic.RateLimitError) return 'Rate limited; try again in a moment.';
   if (error instanceof Anthropic.APIError)
