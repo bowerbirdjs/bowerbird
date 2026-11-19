@@ -90,10 +90,46 @@ function attrString(attrs: Record<string, unknown>): string {
   return out;
 }
 
+/**
+ * Global attributes a code component's props never become: on the custom element they would change
+ * the element itself (a prop called `hidden` would hide it, `id` would clash with the page's ids)
+ * instead of reaching the component.
+ */
+const GLOBAL_ATTRS = new Set([
+  'accesskey',
+  'autofocus',
+  'class',
+  'contenteditable',
+  'dir',
+  'draggable',
+  'enterkeyhint',
+  'hidden',
+  'id',
+  'inert',
+  'inputmode',
+  'is',
+  'itemid',
+  'itemprop',
+  'itemref',
+  'itemscope',
+  'itemtype',
+  'lang',
+  'nonce',
+  'part',
+  'popover',
+  'role',
+  'slot',
+  'spellcheck',
+  'style',
+  'tabindex',
+  'translate',
+]);
+
 function codeComponentAttrs(props: BNode['props']): NonNullable<ElementSpec['attrs']> {
   const attrs: NonNullable<ElementSpec['attrs']> = {};
   for (const [key, value] of Object.entries(props)) {
     const name = key.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`);
+    if (GLOBAL_ATTRS.has(name) || name.startsWith('aria-') || name.startsWith('data-bb')) continue;
     attrs[name] = typeof value === 'object' && value !== null ? JSON.stringify(value) : value;
   }
   return attrs;

@@ -150,6 +150,40 @@ describe('code components', () => {
     expect(renderPage(store.doc, registry, 'home').html).not.toContain('data-bb-code');
   });
 
+  it('props named like global attributes never reach the element itself', () => {
+    const registry = createRegistry({
+      components: [
+        defineComponent({
+          name: 'promo-card',
+          kind: 'code',
+          tag: 'acme-promo',
+          description: 'Promo',
+          children: false,
+          props: z.looseObject({}),
+        }),
+      ],
+    });
+    const store = createStore({ registry, doc: createEmptyDoc() });
+    store.apply({ ops: [{ op: 'page.create', path: '/', title: 'Home' }] });
+    store.apply({
+      ops: [
+        {
+          op: 'node.insert',
+          parent: 'root-home',
+          node: {
+            type: 'promo-card',
+            props: { hidden: true, id: 'x', tabIndex: 3, ariaLabel: 'no', heading: 'Hi' },
+          },
+        },
+      ],
+    });
+    for (const mode of ['editor', 'published'] as const) {
+      const html = renderPage(store.doc, registry, 'home', { mode }).html;
+      expect(html).toContain('heading="Hi"');
+      expect(html).not.toMatch(/ hidden| id="x"| tabindex| aria-label/);
+    }
+  });
+
   it('a prop marked as editable carries its field, but no data path, and only in the editor', () => {
     const registry = createRegistry({
       components: [
