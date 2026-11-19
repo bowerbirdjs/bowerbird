@@ -1064,8 +1064,9 @@ export class CanvasView {
     const stored = (f: EditField) =>
       f.value ?? (f.path ? undefined : this.propText(owner, f.prop!));
     const value = stored(first) ?? shown;
-    // Plain text, or (on several lines) paragraphs and line breaks showing exactly the value.
-    const plain = kind === 'multiline' ? onlyParagraphs(el) : el.children.length === 0;
+    // Text showing exactly the value: inline styling only (a span a design sets in another
+    // face), and on several lines paragraphs and line breaks too.
+    const plain = onlyText(el, kind === 'multiline');
     const inPlace =
       fields.length === 1 &&
       (kind === 'text' || kind === 'multiline') &&
@@ -1628,10 +1629,31 @@ function flatten(text: string): string {
     .trim();
 }
 
-/** An element holding only text, paragraphs and line breaks (what a multi-line value renders as). */
-function onlyParagraphs(el: Element): boolean {
-  for (const child of el.querySelectorAll('*'))
-    if (child.tagName !== 'P' && child.tagName !== 'BR') return false;
+/** Elements that only style a run of text; editing over them loses nothing the value holds. */
+const TEXT_STYLE = new Set([
+  'SPAN',
+  'EM',
+  'STRONG',
+  'B',
+  'I',
+  'U',
+  'S',
+  'SMALL',
+  'MARK',
+  'SUB',
+  'SUP',
+]);
+
+/**
+ * An element holding only text in styling elements, plus paragraphs and line breaks when the
+ * value has several lines; nothing in it is marked for the editor itself.
+ */
+function onlyText(el: Element, multiline: boolean): boolean {
+  for (const child of el.querySelectorAll('*')) {
+    const tag = child.tagName;
+    if (!TEXT_STYLE.has(tag) && !(multiline && (tag === 'P' || tag === 'BR'))) return false;
+    for (const attr of child.getAttributeNames()) if (attr.startsWith('data-bb-')) return false;
+  }
   return true;
 }
 

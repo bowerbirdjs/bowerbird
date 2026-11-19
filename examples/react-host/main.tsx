@@ -72,7 +72,10 @@ function Promo({ mount }: { mount: ComponentMount }) {
     JSON.stringify([{ prop, label, ...more }]);
   return (
     <section className="promo" data-testid={`promo-${mount.id}`}>
-      <h2 data-bb-edit={edit('heading', 'Überschrift', { required: true })}>{heading}</h2>
+      {/* The span only styles the text: the heading is still edited on the page. */}
+      <h2 data-bb-edit={edit('heading', 'Überschrift', { required: true })}>
+        <span className="promo-title">{heading}</span>
+      </h2>
       {body ? (
         <div data-bb-edit={edit('body', 'Text', { kind: 'multiline' })}>
           {body.split(/\n{2,}/).map((para) => (
