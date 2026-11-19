@@ -1,5 +1,6 @@
 import type { FreedomLevel } from '@bowerbirdjs/core';
 import type { EditorIcons } from './icons.js';
+import type { EditorStrings } from './strings.js';
 import type { EditorAppearance, EditorDensity, EditorTokens } from './theme.js';
 
 /**
@@ -141,6 +142,11 @@ export interface EditorUI {
    * ignored with a warning). Icons follow the text colour (`currentColor`).
    */
   icons?: EditorIcons;
+  /**
+   * Words on the canvas in your language (see `EditorStrings`; any subset, the rest stay English),
+   * e.g. `{ moveUp: 'Nach oben', selectionLabel: (n) => n.title ?? n.type }`.
+   */
+  strings?: Partial<EditorStrings>;
 }
 
 /** The resolved settings: which features are on, and the allowlists. */

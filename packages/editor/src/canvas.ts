@@ -1,4 +1,4 @@
-import { type EditField, localizedProps, sanitizeRichText } from '@bowerbirdjs/core';
+import { type BNode, type EditField, localizedProps, sanitizeRichText } from '@bowerbirdjs/core';
 import { renderPage, renderSubtree } from '@bowerbirdjs/html';
 import { type EditorController, type EditorEvent, splitDataPath } from './controller.js';
 import {
@@ -12,7 +12,23 @@ import {
 import { FIELD_PANEL_CSS, FieldPanel, type PanelField } from './field-panel.js';
 import { type IconName, iconMarkup } from './icons.js';
 import { fieldsFor } from './schema-form.js';
+import { DEFAULT_STRINGS, type EditorStrings, resolveStrings } from './strings.js';
 import { CANVAS_TOKEN_CSS } from './theme.js';
+
+/**
+ * A code component the host draws itself (see `BowerbirdEditor.hostComponents`): render into `el`.
+ * The element stays the same across canvas renders, so a framework root or portal in it survives
+ * every change to the page; it is replaced only after text was edited in place inside it.
+ */
+export interface ComponentMount {
+  id: string;
+  type: string;
+  /** Props in the language shown (`locale`). */
+  props: Record<string, unknown>;
+  node: BNode;
+  locale?: string;
+  el: HTMLElement;
+}
 
 /** Where picked image files go (the element's `assets`). */
 export interface CanvasAssets {
@@ -100,13 +116,24 @@ ${CANVAS_TOKEN_CSS}
 .bbx-host .bbx-itembar button:disabled { opacity: .4; cursor: default; }
 ${FIELD_PANEL_CSS}`;
 
-const TOOLBAR: [action: string, label: string, icon: IconName][] = [
-  ['drag', 'Drag to move', 'grip'],
-  ['parent', 'Select parent', 'parent'],
-  ['up', 'Move up', 'arrow-up'],
-  ['down', 'Move down', 'arrow-down'],
-  ['duplicate', 'Duplicate', 'copy'],
-  ['delete', 'Delete', 'trash'],
+type StringKey = {
+  [K in keyof EditorStrings]: EditorStrings[K] extends string ? K : never;
+}[keyof EditorStrings];
+
+const TOOLBAR: [action: string, label: StringKey, icon: IconName][] = [
+  ['drag', 'drag', 'grip'],
+  ['parent', 'parent', 'parent'],
+  ['up', 'moveUp', 'arrow-up'],
+  ['down', 'moveDown', 'arrow-down'],
+  ['duplicate', 'duplicate', 'copy'],
+  ['delete', 'delete', 'trash'],
+];
+
+const ITEMBAR: [action: string, label: StringKey, icon: IconName][] = [
+  ['up', 'itemUp', 'arrow-up'],
+  ['down', 'itemDown', 'arrow-down'],
+  ['duplicate', 'itemCopy', 'copy'],
+  ['remove', 'itemRemove', 'trash'],
 ];
 
 const TEXT_TYPES = new Set(['text', 'button', 'link', 'rich-text']);
@@ -237,13 +264,15 @@ export class CanvasView {
     key: string;
     /** Editing a piece of site data in place, rather than a node's prop. */
     data?: { path: string; required: boolean; multiline: boolean };
+    /** Editing a prop shown in markup marked with `data-bb-edit` (a host component's, say). */
+    prop?: { required: boolean; multiline: boolean };
   } | null = null;
   /** Where picked image files go (set by the element from its `assets`). */
   assets: CanvasAssets | undefined;
   private readonly panel: FieldPanel;
   private readonly itemBox: HTMLElement;
   private readonly itembar: HTMLElement;
-  /** The editable data field last clicked (Enter edits it). */
+  /** The editable field last clicked, as a field key (`fieldKey`); Enter edits it. */
   private activeField: string | null = null;
   /** The list item from site data last clicked. */
   private activeItem: { path: string; unique?: string[] } | null = null;
@@ -253,6 +282,17 @@ export class CanvasView {
   private pendingEdit: string | null = null;
   private dropTargetState: DropTarget | null = null;
   private scale = 1;
+  /** Code components get a mount the host renders into (see `ComponentMount`). */
+  hostComponents = false;
+  /** Attributes for the page's root element, set by the host (see `BowerbirdEditor.pageAttributes`). */
+  pageAttributes: Record<string, string> | undefined;
+  /** Called when the mounts change (which components, their nodes, the language). */
+  onMounts: ((mounts: ComponentMount[]) => void) | undefined;
+  private readonly mountEls = new Map<string, HTMLElement>();
+  private reported: ComponentMount[] = [];
+  private strings: EditorStrings = DEFAULT_STRINGS;
+  private stringsFrom: unknown;
+  private stringsPainted = false;
 
   constructor(
     readonly host: HTMLElement,
@@ -273,7 +313,7 @@ export class CanvasView {
     // Focusable so keyboard shortcuts (Delete, Enter, Alt+arrows) work after clicking the page.
     this.frame.tabIndex = 0;
     this.frame.setAttribute('role', 'region');
-    this.frame.setAttribute('aria-label', 'Page canvas');
+    this.frame.setAttribute('aria-label', this.strings.canvas);
     this.pageStyle = doc.createElement('style');
     this.frame.append(this.pageStyle);
     this.banner = el('div', 'bbx-banner', this.frame);
@@ -290,12 +330,10 @@ export class CanvasView {
     this.selectLabel = el('div', 'bbx-label', this.selectBox);
     this.toolbar = el('div', 'bbx-toolbar', this.overlay);
     this.toolbar.setAttribute('role', 'toolbar');
-    this.toolbar.setAttribute('aria-label', 'Selected element');
     for (const [action, label, name] of TOOLBAR) {
       const b = el('button', '', this.toolbar);
       b.dataset.action = action;
-      b.title = label;
-      b.setAttribute('aria-label', label);
+      b.dataset.label = label;
       b.dataset.icon = name;
       if (action === 'drag') b.draggable = true;
     }
@@ -303,17 +341,10 @@ export class CanvasView {
     this.itemBox = el('div', 'bbx-item-box', this.overlay);
     this.itembar = el('div', 'bbx-itembar', this.overlay);
     this.itembar.setAttribute('role', 'toolbar');
-    this.itembar.setAttribute('aria-label', 'List item');
-    for (const [action, label, name] of [
-      ['up', 'Move item up', 'arrow-up'],
-      ['down', 'Move item down', 'arrow-down'],
-      ['duplicate', 'Copy item', 'copy'],
-      ['remove', 'Remove item', 'trash'],
-    ] as const) {
+    for (const [action, label, name] of ITEMBAR) {
       const b = el('button', '', this.itembar);
       b.dataset.action = action;
-      b.title = label;
-      b.setAttribute('aria-label', label);
+      b.dataset.label = label;
       b.dataset.icon = name;
     }
     this.panel = new FieldPanel(this.overlay, (refocus) => {
@@ -321,6 +352,7 @@ export class CanvasView {
     });
     this.panel.icon = (name) => this.iconMarkup(name);
     this.paintIcons();
+    this.paintStrings();
     for (const e of [
       this.hoverBox,
       this.selectBox,
@@ -340,6 +372,11 @@ export class CanvasView {
   }
 
   destroy(): void {
+    this.mountEls.clear();
+    if (this.reported.length) {
+      this.reported = [];
+      this.onMounts?.([]);
+    }
     this.off();
     this.resize.disconnect();
     cancelAnimationFrame(this.frameRequest);
@@ -357,11 +394,7 @@ export class CanvasView {
         const typed = (el.innerText ?? el.textContent ?? '').trim();
         this.finishEditing(false);
         this.controller.report([
-          {
-            code: 'conflict',
-            nodeId: id,
-            message: `"${id}" was removed while you were editing it, so your text wasn't saved${typed ? `: “${typed.slice(0, 120)}”` : ''}.`,
-          },
+          { code: 'conflict', nodeId: id, message: this.strings.removedWhileEditing(id, typed) },
         ]);
       }
       this.needsRender = true;
@@ -395,8 +428,28 @@ export class CanvasView {
       b.innerHTML = this.iconMarkup(b.dataset.icon as IconName);
   }
 
+  /** Labels the chrome in the host's words (`ui.strings`), again whenever they change. */
+  private paintStrings(): void {
+    const custom = this.controller.features.ui.strings;
+    if (this.stringsPainted && this.stringsFrom === custom) return;
+    this.stringsPainted = true;
+    this.stringsFrom = custom;
+    this.strings = resolveStrings(custom);
+    const t = this.strings;
+    this.frame.setAttribute('aria-label', t.canvas);
+    this.toolbar.setAttribute('aria-label', t.selected);
+    this.itembar.setAttribute('aria-label', t.listItem);
+    for (const b of this.overlay.querySelectorAll<HTMLElement>('button[data-label]')) {
+      const label = t[b.dataset.label as StringKey];
+      b.title = label;
+      b.setAttribute('aria-label', label);
+    }
+    this.panel.strings = t;
+  }
+
   render(): void {
     this.paintIcons();
+    this.paintStrings();
     this.needsRender = false;
     const c = this.controller;
     const doc = c.viewDoc;
@@ -421,31 +474,120 @@ export class CanvasView {
       }));
       empty = !Object.values(doc.nodes).some((n) => n.parent === page.rootId);
     } else {
-      this.content.innerHTML = '<div class="bbx-empty">This site has no pages yet.</div>';
+      this.content.innerHTML = '<div class="bbx-empty"></div>';
+      this.content.firstElementChild!.textContent = this.strings.noPages;
+      this.attachMounts();
       this.updateBanner();
       return;
     }
     this.pageStyle.textContent = css;
     queueMicrotask(() => this.runPendingEdit());
-    this.content.innerHTML = empty
-      ? `${html}<div class="bbx-empty">${c.can('insert') ? 'This page is empty. Add a section from the Insert panel, or drag one here.' : 'This page is empty.'}</div>`
-      : html;
-    // The page's links and buttons are content being edited, not controls: keep them out of the
-    // Tab order (the canvas itself is focusable, and nodes are reached through Layers). The
-    // editor's own add buttons stay reachable.
+    this.content.innerHTML = html;
+    if (empty) {
+      const hint = this.content.ownerDocument.createElement('div');
+      hint.className = 'bbx-empty';
+      hint.textContent = c.can('insert') ? this.strings.emptyPageInsert : this.strings.emptyPage;
+      this.content.append(hint);
+    }
+    this.applyPageAttributes();
+    this.attachMounts();
+    this.prepareContent();
+    if (c.theme) this.frame.setAttribute('data-theme', c.theme);
+    else this.frame.removeAttribute('data-theme');
+    this.frame.toggleAttribute('data-preview', c.preview);
+    this.updateBanner();
+  }
+
+  /**
+   * Readies rendered content for editing. The page's links and buttons are content, not controls:
+   * they leave the Tab order (the canvas itself is focusable, and nodes are reached through
+   * Layers); the editor's own add buttons stay reachable. Runs after every render, and again when
+   * the host has drawn its components (`componentsRendered`).
+   */
+  prepareContent(): void {
+    const c = this.controller;
     for (const el of this.content.querySelectorAll<HTMLElement>(
       'a[href], button, input, select, textarea, summary, [tabindex]',
     ))
-      if (!el.hasAttribute('data-bb-add')) el.tabIndex = -1;
+      if (!el.hasAttribute('data-bb-add') && el.tabIndex !== -1) el.tabIndex = -1;
     // Add buttons only where a click would add something (the host may have turned adding off).
     for (const el of this.content.querySelectorAll<HTMLElement>('[data-bb-add]')) {
       const add = readAdd(el);
       el.toggleAttribute('data-bbx-off', !add || !c.canAdd(add.path, add.value));
     }
-    if (c.theme) this.frame.setAttribute('data-theme', c.theme);
-    else this.frame.removeAttribute('data-theme');
-    this.frame.toggleAttribute('data-preview', c.preview);
-    this.updateBanner();
+  }
+
+  /** The host's drawn components changed size or content: re-ready them and the overlays. */
+  componentsRendered(): void {
+    this.prepareContent();
+    this.layout();
+  }
+
+  /** Attributes the host asked for on the page root (`pageAttributes`); event handlers are skipped. */
+  private applyPageAttributes(): void {
+    const root = this.content.querySelector<HTMLElement>('.bb-page');
+    if (!root || !this.pageAttributes) return;
+    for (const [name, value] of Object.entries(this.pageAttributes)) {
+      if (!/^[a-z][a-z0-9-]*$/.test(name) || name.startsWith('on')) continue;
+      if (name === 'class') root.classList.add(...String(value).split(/\s+/).filter(Boolean));
+      else if (name === 'style') root.style.cssText += `;${value}`;
+      else root.setAttribute(name, String(value));
+    }
+  }
+
+  /** Gives every code component on the page its mount, and tells the host when they changed. */
+  private attachMounts(): void {
+    const c = this.controller;
+    const mounts: ComponentMount[] = [];
+    if (this.hostComponents) {
+      const doc = this.content.ownerDocument;
+      const locale = c.locale ?? undefined;
+      for (const el of this.content.querySelectorAll<HTMLElement>('[data-bb-code][data-bb-node]')) {
+        const id = el.getAttribute('data-bb-node')!;
+        const node = c.node(id);
+        if (!node || mounts.some((m) => m.id === id)) continue;
+        let mount = this.mountEls.get(id);
+        if (!mount) {
+          mount = doc.createElement('div');
+          mount.setAttribute('data-bbx-mount', id);
+          // The mount adds no box: the host's markup lays out as the component's own content.
+          mount.style.display = 'contents';
+          this.mountEls.set(id, mount);
+        }
+        el.prepend(mount);
+        mounts.push({
+          id,
+          type: node.type,
+          props: localizedProps(node, locale),
+          node,
+          ...(locale ? { locale } : {}),
+          el: mount,
+        });
+      }
+    }
+    for (const id of [...this.mountEls.keys()])
+      if (!mounts.some((m) => m.id === id)) this.mountEls.delete(id);
+    const before = this.reported;
+    const same =
+      before.length === mounts.length &&
+      mounts.every((m, i) => {
+        const b = before[i]!;
+        return b.id === m.id && b.node === m.node && b.el === m.el && b.locale === m.locale;
+      });
+    if (same) return;
+    this.reported = mounts;
+    this.onMounts?.(mounts);
+  }
+
+  /** The host's drawn components, as last reported. */
+  get mounts(): readonly ComponentMount[] {
+    return this.reported;
+  }
+
+  /** Re-reads the host options (`hostComponents`, `pageAttributes`) on the next frame. */
+  refresh(): void {
+    this.needsRender = true;
+    this.schedule();
   }
 
   private updateBanner(): void {
@@ -455,17 +597,16 @@ export class CanvasView {
     this.banner.classList.toggle('bbx-ghost-banner', !!ghost);
     this.banner.classList.toggle('bbx-symbol-banner', !ghost && !!symbol);
     if (ghost) {
-      const parts = [
-        ghost.created.length && `${ghost.created.length} new`,
-        ghost.updated.length && `${ghost.updated.length} changed`,
-        ghost.removed.length && `${ghost.removed.length} removed`,
-      ].filter(Boolean);
-      this.banner.textContent = `${ghost.label}${parts.length ? ` · ${parts.join(', ')}` : ''} · not applied yet`;
+      this.banner.textContent = this.strings.ghostBanner(ghost.label, {
+        created: ghost.created.length,
+        updated: ghost.updated.length,
+        removed: ghost.removed.length,
+      });
     } else if (symbol) {
       const count = Object.values(c.doc.nodes).filter(
         (n) => n.link?.symbol === symbol.id && n.link.node === symbol.rootId,
       ).length;
-      this.banner.textContent = `Editing linked component “${symbol.name}”: changes apply to ${count} instance${count === 1 ? '' : 's'}`;
+      this.banner.textContent = this.strings.symbolBanner(symbol.name, count);
     }
     this.banner.hidden = !ghost && !symbol;
   }
@@ -570,7 +711,9 @@ export class CanvasView {
       box.style.width = `${rect.width}px`;
       box.style.height = `${rect.height}px`;
       const name = peer.actor.name ?? peer.actor.id;
-      box.firstElementChild!.textContent = `${name}${peer.editing ? ' is typing…' : peer.activity ? ` · ${peer.activity}` : ''}`;
+      box.firstElementChild!.textContent = peer.editing
+        ? this.strings.peerTyping(name)
+        : `${name}${peer.activity ? ` · ${peer.activity}` : ''}`;
       box.title = name;
     });
   }
@@ -605,9 +748,14 @@ export class CanvasView {
     this.selectLabel.hidden = !c.can('canvas.label');
     if (rect && c.selected) {
       const node = c.node(c.selected);
-      this.selectLabel.textContent = node?.section
-        ? `${c.selected} · ${node.section.name}`
-        : `${c.selected} · ${node?.type}`;
+      const def = node ? c.store.registry.component(node.type) : undefined;
+      this.selectLabel.textContent = this.strings.selectionLabel({
+        id: c.selected,
+        type: node?.type ?? '',
+        ...(def?.title ? { title: def.title } : {}),
+        ...(node?.name ? { name: node.name } : {}),
+        ...(node?.section ? { section: node.section.name } : {}),
+      });
     }
     if (rect && c.selected && showToolbar) {
       const s = this.stage.getBoundingClientRect();
@@ -696,10 +844,8 @@ export class CanvasView {
       bottom: r.bottom - s.top,
       width: r.width,
     });
-    if (panel.anchor?.startsWith('data:')) {
-      const el = this.content.querySelector<HTMLElement>(
-        `[data-bb-data="${CSS.escape(panel.anchor.slice(5))}"]`,
-      );
+    if (panel.anchor?.startsWith('data:') || panel.anchor?.startsWith('prop:')) {
+      const el = this.fieldElement(panel.anchor);
       if (!el || c.readOnly) panel.close();
       else panel.place(toStage(el.getBoundingClientRect()), this.stage.clientHeight);
       return;
@@ -714,7 +860,8 @@ export class CanvasView {
       return;
     }
     const anchor = `node:${node!.id}`;
-    if (panel.anchor !== anchor) panel.show(anchor, 'Selected element', fields, { modal: false });
+    if (panel.anchor !== anchor)
+      panel.show(anchor, this.strings.selected, fields, { modal: false });
     panel.place(toStage(selected!), this.stage.clientHeight);
   }
 
@@ -749,7 +896,7 @@ export class CanvasView {
             !!c.setProps(
               id,
               { [f.key]: v === '' && !f.required ? null : v },
-              `Edit ${f.label.toLowerCase()}`,
+              this.strings.editField(f.label),
             ).ok,
           ...(kind === 'image' && this.assets
             ? { upload: (file: File) => this.upload(id, f.key, file) }
@@ -769,13 +916,15 @@ export class CanvasView {
         if (asset.height) props.height = asset.height;
         if (asset.alt && !node?.props.alt) props.alt = asset.alt;
       }
-      c.setProps(id, props, 'Upload image');
+      c.setProps(id, props, this.strings.uploadImage);
     } catch (error) {
       c.report([
         {
           code: 'invalid_props',
           nodeId: id,
-          message: `Upload failed: ${error instanceof Error ? error.message : String(error)}`,
+          message: this.strings.uploadFailed(
+            error instanceof Error ? error.message : String(error),
+          ),
         },
       ]);
     }
@@ -807,76 +956,97 @@ export class CanvasView {
     const path = this.pendingEdit;
     if (!path || this.editing) return;
     this.pendingEdit = null;
-    const el = this.content.querySelector<HTMLElement>(
-      `[data-bb-data="${CSS.escape(path)}"][data-bb-edit]`,
-    );
+    const el = this.fieldElement(`data:${path}`);
     if (el) {
-      this.activeField = path;
+      this.activeField = `data:${path}`;
       this.startDataEditing(el);
     }
   }
 
-  /** Edits the data field last clicked (Enter on the canvas). */
+  /** Edits the field last clicked (Enter on the canvas). */
   editActiveField(): boolean {
     if (!this.activeField) return false;
-    const el = this.content.querySelector<HTMLElement>(
-      `[data-bb-data="${CSS.escape(this.activeField)}"][data-bb-edit]`,
-    );
+    const el = this.fieldElement(this.activeField);
     return !!el && this.startDataEditing(el);
   }
 
   /**
-   * Edits site data shown by an element: in place when it's one text field showing its value,
-   * otherwise in a form over it.
+   * Names the field an editable element shows: `data:<path>` for site data, `prop:<node>:<prop>`
+   * for a prop of its node (markup a host draws for a code component marks props this way).
+   */
+  private fieldKey(el: Element): string | null {
+    const fields = readFields(el);
+    const first = fields[0];
+    if (first?.path) return `data:${first.path}`;
+    const owner = el.closest('[data-bb-node]')?.getAttribute('data-bb-node');
+    return first?.prop && owner ? `prop:${owner}:${first.prop}` : null;
+  }
+
+  /** The element showing a field (see `fieldKey`), as rendered now. */
+  private fieldElement(key: string): HTMLElement | null {
+    if (key.startsWith('data:'))
+      return this.content.querySelector<HTMLElement>(
+        `[data-bb-data="${CSS.escape(key.slice(5))}"][data-bb-edit]`,
+      );
+    for (const el of this.content.querySelectorAll<HTMLElement>('[data-bb-edit]'))
+      if (this.fieldKey(el) === key) return el;
+    return null;
+  }
+
+  /**
+   * Edits what an element marked with `data-bb-edit` shows (site data, or a prop of its node): in
+   * place when it's one text field showing its value, otherwise in a form over it.
    */
   startDataEditing(el: HTMLElement): boolean {
     const c = this.controller;
-    if (c.readOnly || !c.can('data')) return false;
-    let fields: EditField[];
-    try {
-      fields = JSON.parse(el.getAttribute('data-bb-edit') ?? '[]') as EditField[];
-    } catch {
-      return false;
-    }
-    if (!fields.length) return false;
+    if (c.readOnly) return false;
+    const owner = el.closest('[data-bb-node]')?.getAttribute('data-bb-node') ?? '';
+    // A prop field belongs to the node the element is in; data fields need the `data` feature.
+    const fields = readFields(el).filter((f) =>
+      f.path ? c.can('data') : !!f.prop && !!owner && c.can('text'),
+    );
+    const key = this.fieldKey(el);
+    if (!fields.length || !key) return false;
     if (this.editing) this.finishEditing(true);
     const first = fields[0]!;
     const kind = first.kind ?? 'text';
     const shown = (el.textContent ?? '').trim();
-    const value = first.value ?? shown;
-    const owner = el.closest('[data-bb-node]')?.getAttribute('data-bb-node') ?? '';
+    const stored = (f: EditField) =>
+      f.value ?? (f.path ? undefined : this.propText(owner, f.prop!));
+    const value = stored(first) ?? shown;
     const inPlace =
       fields.length === 1 &&
       (kind === 'text' || kind === 'multiline') &&
       el.children.length === 0 &&
       shown === value.trim();
+    const t = this.strings;
     if (!inPlace) {
       this.panel.show(
-        `data:${first.path}`,
-        first.label ?? 'Edit',
+        key,
+        first.label ?? t.edit,
         fields.map((f) => ({
-          label: f.label ?? f.path.split('.').at(-1)!,
+          label: f.label ?? (f.path ?? f.prop!).split('.').at(-1)!,
           kind: f.kind ?? 'text',
-          value: f.value ?? '',
+          value: stored(f) ?? '',
           ...(f.options ? { options: f.options } : {}),
-          commit: (v: string) =>
-            !!c.setData(f.path, v, {
-              ...(f.required ? { required: true } : {}),
-              label: `Edit ${f.label?.toLowerCase() ?? 'field'}`,
-            })?.ok,
+          commit: (v: string) => {
+            const label = t.editField(f.label ?? f.prop ?? 'field');
+            if (f.path)
+              return !!c.setData(f.path, v, { ...(f.required ? { required: true } : {}), label })
+                ?.ok;
+            if (v === '' && f.required) return false;
+            return c.setProps(owner, { [f.prop!]: v === '' ? null : v }, label).ok;
+          },
         })),
         { modal: true, at: { rect: this.stageRect(el), stageHeight: this.stage.clientHeight } },
       );
       this.updateOverlays();
       return true;
     }
-    this.editing = {
-      id: owner,
-      el,
-      original: value,
-      key: '',
-      data: { path: first.path, required: !!first.required, multiline: kind === 'multiline' },
-    };
+    const field = { required: !!first.required, multiline: kind === 'multiline' };
+    this.editing = first.path
+      ? { id: owner, el, original: value, key: '', data: { path: first.path, ...field } }
+      : { id: owner, el, original: value, key: first.prop!, prop: field };
     try {
       el.contentEditable = 'plaintext-only';
     } catch {
@@ -950,12 +1120,13 @@ export class CanvasView {
           return;
         }
         // Remember the data field and list item clicked (Enter edits the field; the item gets a toolbar).
-        this.activeField = target.closest?.('[data-bb-edit]')?.getAttribute('data-bb-data') ?? null;
+        const fieldEl = target.closest?.('[data-bb-edit]');
+        this.activeField = fieldEl ? this.fieldKey(fieldEl) : null;
         const itemEl = target.closest?.<HTMLElement>('[data-bb-item]');
         this.activeItem = itemEl ? readItem(itemEl) : null;
         if (
-          this.panel.anchor?.startsWith('data:') &&
-          this.panel.anchor.slice(5) !== this.activeField
+          (this.panel.anchor?.startsWith('data:') || this.panel.anchor?.startsWith('prop:')) &&
+          this.panel.anchor !== this.activeField
         )
           this.panel.close();
         c.select(id);
@@ -1102,7 +1273,7 @@ export class CanvasView {
         if (k === 'b') toggleInline(el, 'strong', ['strong', 'b']);
         else if (k === 'i') toggleInline(el, 'em', ['em', 'i']);
         else {
-          const url = doc.defaultView?.prompt('Link to (URL or /path):', 'https://');
+          const url = doc.defaultView?.prompt(this.strings.linkPrompt, 'https://');
           if (url) doc.execCommand('createLink', false, url);
         }
         return;
@@ -1199,18 +1370,51 @@ export class CanvasView {
             {
               code: 'conflict',
               path: state.data.path,
-              message: `Someone else changed ${state.data.path} while you were editing, so your text wasn't saved: “${typed.slice(0, 120)}”.`,
-              hint: 'Edit it again to replace their version.',
+              message: this.strings.editConflict(state.data.path, typed),
+              hint: this.strings.editConflictHint,
             },
           ]);
         } else {
           const result = this.controller.setData(state.data.path, typed, {
             required: state.data.required,
-            label: 'Edit text',
+            label: this.strings.editText,
           });
           if (!result?.ok) state.el.textContent = state.original;
         }
       } else state.el.textContent = current ?? state.original;
+      this.renewMount(state.el);
+      this.needsRender = true;
+      this.schedule();
+      return;
+    }
+    if (state.prop) {
+      // A prop shown in marked markup: plain text, saved through props.set (empty removes an
+      // optional one).
+      const typed = state.prop.multiline ? text : text.replace(/\s*\n\s*/g, ' ');
+      const current = this.propText(state.id, state.key);
+      if (commit && typed !== normalize(state.original)) {
+        if (current !== undefined && current !== state.original) {
+          state.el.textContent = current;
+          this.controller.report([
+            {
+              code: 'conflict',
+              nodeId: state.id,
+              message: this.strings.editConflict(`${state.id} (${state.key})`, typed),
+              hint: this.strings.editConflictHint,
+            },
+          ]);
+        } else if (typed === '' && state.prop.required) {
+          state.el.textContent = state.original;
+        } else {
+          const result = this.controller.setProps(
+            state.id,
+            { [state.key]: typed === '' ? null : typed },
+            this.strings.editText,
+          );
+          if (!result.ok) state.el.textContent = state.original;
+        }
+      } else state.el.textContent = current ?? state.original;
+      this.renewMount(state.el);
       this.needsRender = true;
       this.schedule();
       return;
@@ -1231,12 +1435,16 @@ export class CanvasView {
           {
             code: 'conflict',
             nodeId: state.id,
-            message: `Someone else changed "${state.id}" while you were editing, so your text wasn't saved: “${text.slice(0, 120)}”.`,
-            hint: 'Edit it again to replace their version.',
+            message: this.strings.editConflict(`"${state.id}"`, text),
+            hint: this.strings.editConflictHint,
           },
         ]);
       } else {
-        const result = this.controller.setProps(state.id, { [state.key]: text }, 'Edit text');
+        const result = this.controller.setProps(
+          state.id,
+          { [state.key]: text },
+          this.strings.editText,
+        );
         if (!result.ok) show(state.original);
       }
     } else {
@@ -1248,6 +1456,42 @@ export class CanvasView {
 
   get isEditing(): boolean {
     return !!this.editing;
+  }
+
+  /** A node's prop as text, in the language shown (undefined when it isn't a string). */
+  private propText(id: string, prop: string): string | undefined {
+    const node = this.controller.node(id);
+    const value = node
+      ? localizedProps(node, this.controller.locale ?? undefined)[prop]
+      : undefined;
+    return typeof value === 'string' ? value : undefined;
+  }
+
+  /**
+   * After text was edited in place inside a host's mount, the host gets a fresh one: typing may
+   * have replaced nodes its framework still holds, so its next render starts from a clean element.
+   */
+  private renewMount(el: HTMLElement): void {
+    const id = el.closest('[data-bbx-mount]')?.getAttribute('data-bbx-mount');
+    if (id) this.mountEls.delete(id);
+  }
+}
+
+/** The fields an element marks as editable (`data-bb-edit`); malformed markup marks none. */
+function readFields(el: Element): EditField[] {
+  try {
+    const fields = JSON.parse(el.getAttribute('data-bb-edit') ?? '[]') as unknown;
+    return Array.isArray(fields)
+      ? fields.filter(
+          (f): f is EditField =>
+            !!f &&
+            typeof f === 'object' &&
+            (typeof (f as EditField).path === 'string' ||
+              typeof (f as EditField).prop === 'string'),
+        )
+      : [];
+  } catch {
+    return [];
   }
 }
 

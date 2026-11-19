@@ -7,6 +7,7 @@
  */
 
 import { type IconName, iconMarkup } from './icons.js';
+import { DEFAULT_STRINGS, type EditorStrings } from './strings.js';
 
 export interface PanelField {
   label: string;
@@ -60,6 +61,8 @@ export class FieldPanel {
   modal = false;
   /** Icon markup (the canvas passes the host's icon set). */
   icon: (name: IconName) => string = (name) => iconMarkup(name, 'bbx-icon');
+  /** Words (the canvas passes the host's `ui.strings`). */
+  strings: EditorStrings = DEFAULT_STRINGS;
 
   constructor(
     parent: HTMLElement,
@@ -104,7 +107,8 @@ export class FieldPanel {
         label.textContent = field.label;
         const button = doc.createElement('button');
         button.type = 'button';
-        button.innerHTML = `${this.icon('upload')}<span>Replace photo…</span>`;
+        button.innerHTML = `${this.icon('upload')}<span></span>`;
+        button.lastElementChild!.textContent = this.strings.replacePhoto;
         const file = doc.createElement('input');
         file.type = 'file';
         file.accept = 'image/*';

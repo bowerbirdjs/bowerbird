@@ -63,6 +63,7 @@ The working log for building Bowerbird phase by phase. Each phase ends with a re
   - Sync and tools: `undo`/`redo` `overwrite` through sync; `socketChannel` waits for a connecting socket; the preview's review endpoint refuses odd Origins; agent tools refuse misspelled arguments; `get_layout`/`screenshot` take `locale`; `acceptChangeset` has `dryRun` (kept local by synced stores).
   - Content: links can't contain links or buttons (directly or deeper); long words wrap (`overflow-wrap: anywhere` on the page) instead of widening mobile layouts; the catalog shows child allow-lists.
   - Editor: page content takes no Tab stops; shortcuts, drag and drop and inserts respect linked-instance structure; dragged sections stay top-level; History shows redone entries as active; Review only offers Accept when it would work and says why; `input`/`select` parts on every field; peer avatars are buttons; the page menu shows titles in the language being edited.
+- [x] Host components on the canvas: code components drawn by the host's framework into stable mounts (`hostComponents`, `bb-mounts`, `componentsRendered()`; React `renderComponent` through portals, state and context survive page changes), `pageAttributes` on the canvas page root for site CSS scoped there, `EditField.prop` marks so host markup edits its node's props in place or in the field panel, canvas words from `ui.strings` (`EditorStrings`, `resolveStrings`); `examples/react-host` with a browser test. Built for embedding in Joy Phone, kept general.
 
 ## Notes
 

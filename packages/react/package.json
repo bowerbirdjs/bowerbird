@@ -28,7 +28,8 @@
     "@bowerbirdjs/editor": "workspace:*"
   },
   "peerDependencies": {
-    "react": ">=18"
+    "react": ">=18",
+    "react-dom": ">=18"
   },
   "devDependencies": {
     "@types/react": "^19.3.0",

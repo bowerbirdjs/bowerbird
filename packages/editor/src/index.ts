@@ -1,4 +1,4 @@
-export { CANVAS_CSS, type CanvasAssets, CanvasView } from './canvas.js';
+export { CANVAS_CSS, type CanvasAssets, CanvasView, type ComponentMount } from './canvas.js';
 export {
   EditorController,
   type EditorEvent,
@@ -36,6 +36,12 @@ export {
 } from './features.js';
 export { type EditorIcons, ICON_NAMES, type IconName, iconMarkup, isIconMarkup } from './icons.js';
 export { type Field, type FieldKind, fieldsFor, fieldValue } from './schema-form.js';
+export {
+  DEFAULT_STRINGS,
+  type EditorStrings,
+  resolveStrings,
+  type SelectionInfo,
+} from './strings.js';
 export { editorStyles } from './styles.js';
 export {
   EDITOR_TOKENS,

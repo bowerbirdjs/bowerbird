@@ -52,10 +52,17 @@ export interface AddData {
   edit?: string;
 }
 
-/** A piece of site data that can be edited on the canvas (see `ElementSpec.edit`). */
+/**
+ * A value an element shows that can be edited on the canvas (see `ElementSpec.edit`): a piece of
+ * site data (`path`), or a prop of the node the element belongs to (`prop`). Markup a host renders
+ * itself (a code component's) marks its text the same way, with a `data-bb-edit` attribute holding
+ * these fields as JSON.
+ */
 export interface EditField {
-  /** `<group>.<path>`, e.g. `schedule.0.time`. */
-  path: string;
+  /** Site data: `<group>.<path>`, e.g. `schedule.0.time`. */
+  path?: string;
+  /** A prop of the closest node (`data-bb-node`), e.g. `heading`. Used when there is no `path`. */
+  prop?: string;
   /** Input to use. Default `text`. */
   kind?: 'text' | 'multiline' | 'time' | 'date' | 'url' | 'color' | 'select';
   /** The stored value (what the element shows may be formatted). */

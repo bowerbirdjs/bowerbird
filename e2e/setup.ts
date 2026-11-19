@@ -18,6 +18,7 @@ declare module 'vitest' {
       collab: string;
       mcpEditor: string;
       wedding: string;
+      reactHost: string;
     } | null;
   }
 }
@@ -31,6 +32,7 @@ const APPS = {
   collab: 'examples/collab',
   mcpEditor: 'examples/mcp-editor',
   wedding: 'apps/wedding',
+  reactHost: 'examples/react-host',
 } as const;
 const TYPES: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',

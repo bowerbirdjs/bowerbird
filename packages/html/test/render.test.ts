@@ -149,6 +149,42 @@ describe('code components', () => {
     );
     expect(renderPage(store.doc, registry, 'home').html).not.toContain('data-bb-code');
   });
+
+  it('a prop marked as editable carries its field, but no data path, and only in the editor', () => {
+    const registry = createRegistry({
+      components: [
+        defineComponent({
+          name: 'quote-card',
+          kind: 'primitive',
+          description: 'Quote',
+          children: false,
+          props: z.object({ quote: z.string() }),
+          render: (node) => ({
+            tag: 'blockquote',
+            text: String(node.props.quote),
+            edit: { prop: 'quote', label: 'Quote', kind: 'multiline' },
+          }),
+        }),
+      ],
+    });
+    const store = createStore({ registry, doc: createEmptyDoc() });
+    store.apply({ ops: [{ op: 'page.create', path: '/', title: 'Home' }] });
+    store.apply({
+      ops: [
+        {
+          op: 'node.insert',
+          parent: 'root-home',
+          node: { type: 'quote-card', props: { quote: 'Hi' } },
+        },
+      ],
+    });
+    const editor = renderPage(store.doc, registry, 'home', { mode: 'editor' }).html;
+    expect(editor).toContain(
+      `data-bb-edit="${JSON.stringify([{ prop: 'quote', label: 'Quote', kind: 'multiline' }]).replace(/"/g, '&quot;')}"`,
+    );
+    expect(editor).not.toContain('data-bb-data');
+    expect(renderPage(store.doc, registry, 'home').html).not.toContain('data-bb-edit');
+  });
 });
 
 describe('standalone documents', () => {

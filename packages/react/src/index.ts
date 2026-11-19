@@ -10,6 +10,7 @@ import type {
 import '@bowerbirdjs/editor/define';
 import type {
   AssetAdapter,
+  ComponentMount,
   EditorAppearance,
   EditorDensity,
   BowerbirdEditor as EditorElement,
@@ -19,15 +20,19 @@ import type {
 import {
   type CSSProperties,
   createElement,
+  Fragment,
   forwardRef,
+  type ReactNode,
   useEffect,
   useImperativeHandle,
   useLayoutEffect,
   useRef,
   useState,
 } from 'react';
+import { createPortal, flushSync } from 'react-dom';
 
 export {
+  type ComponentMount,
   createDefaultStore,
   EDITOR_TOKENS,
   type EditorAppearance,
@@ -73,6 +78,20 @@ export interface BowerbirdEditorProps {
   onChangesets?: (detail: { changesets: readonly Changeset[] }) => void;
   /** Text shown from site data was clicked; `path` is `<group>.<path>`, e.g. `schedule.0.time`. */
   onDataClick?: (detail: { path: string; node: string | null }) => void;
+  /**
+   * Draws code components (`kind: 'code'`) on the canvas with your React components: called for
+   * each one on the page, rendered through a portal into its mount. Your components keep the app's
+   * context (providers above the editor), and their state survives every change to the page.
+   * Mark editable text in your markup with `data-bb-edit` (see `EditField`).
+   */
+  renderComponent?: (mount: ComponentMount) => ReactNode;
+  /**
+   * Attributes for the canvas page's root element, e.g. `{ 'data-site': '', style: '--brand: #c00' }`
+   * for site CSS scoped to the site root. Keep the object stable (e.g. `useMemo`).
+   */
+  pageAttributes?: Record<string, string>;
+  /** The code components on the page changed (with `renderComponent`). */
+  onMounts?: (detail: { mounts: readonly ComponentMount[] }) => void;
 }
 
 const EVENTS = {
@@ -83,6 +102,7 @@ const EVENTS = {
   'bb-error': 'onError',
   'bb-changesets': 'onChangesets',
   'bb-data-click': 'onDataClick',
+  'bb-mounts': 'onMounts',
 } as const;
 
 // Layout effects run after the element is inserted but before its first (microtask) update, so it
@@ -103,7 +123,9 @@ export const BowerbirdEditor = forwardRef<EditorElement | null, BowerbirdEditorP
     const latest = useRef(props);
     latest.current = props;
     const [mounted, setMounted] = useState(false);
+    const [mounts, setMounts] = useState<readonly ComponentMount[]>([]);
     useEffect(() => setMounted(true), []);
+    const drawsComponents = !!props.renderComponent;
     // biome-ignore lint/correctness/useExhaustiveDependencies: the element exists once mounted
     useImperativeHandle(ref, () => element.current as EditorElement, [mounted]);
 
@@ -131,6 +153,30 @@ export const BowerbirdEditor = forwardRef<EditorElement | null, BowerbirdEditorP
     useIsomorphicLayoutEffect(() => {
       if (element.current) element.current.density = props.density;
     }, [mounted, props.density]);
+    useIsomorphicLayoutEffect(() => {
+      if (element.current) element.current.pageAttributes = props.pageAttributes;
+    }, [mounted, props.pageAttributes]);
+    useIsomorphicLayoutEffect(() => {
+      const el = element.current;
+      if (!el) return;
+      el.hostComponents = drawsComponents;
+      if (!drawsComponents) {
+        setMounts([]);
+        return;
+      }
+      // Drawn in the same frame the canvas rendered, so outlines measure the finished markup.
+      const onMounts = (event: Event) => {
+        const next = (event as CustomEvent<{ mounts: readonly ComponentMount[] }>).detail.mounts;
+        flushSync(() => setMounts(next));
+      };
+      el.addEventListener('bb-mounts', onMounts);
+      setMounts(el.mounts);
+      return () => el.removeEventListener('bb-mounts', onMounts);
+    }, [mounted, drawsComponents]);
+    // After every render of the portals: the editor readies the new markup and re-measures.
+    useIsomorphicLayoutEffect(() => {
+      if (drawsComponents && mounts.length) element.current?.componentsRendered();
+    });
 
     useIsomorphicLayoutEffect(() => {
       const el = element.current;
@@ -155,10 +201,18 @@ export const BowerbirdEditor = forwardRef<EditorElement | null, BowerbirdEditorP
         'data-bowerbird-editor': '',
       });
     }
-    return createElement('bowerbird-editor', {
+    const editor = createElement('bowerbird-editor', {
       ref: element,
       className: props.className,
       style: props.style,
     });
+    const render = props.renderComponent;
+    if (!render || !mounts.length) return editor;
+    return createElement(
+      Fragment,
+      null,
+      editor,
+      mounts.map((mount) => createPortal(render(mount), mount.el, mount.id)),
+    );
   },
 );

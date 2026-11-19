@@ -20,7 +20,7 @@ import { html, LitElement, nothing, type PropertyValues, type TemplateResult } f
 import { classMap } from 'lit/directives/class-map.js';
 import { live } from 'lit/directives/live.js';
 import { unsafeHTML } from 'lit/directives/unsafe-html.js';
-import { CanvasView } from './canvas.js';
+import { CanvasView, type ComponentMount } from './canvas.js';
 import { EditorController, type EditorEvent, type Position } from './controller.js';
 import { currentDrag, type DragPayload, endDrag, performDrop, startDrag } from './dnd.js';
 import type { EditorElementName, EditorPreset, EditorUI } from './features.js';
@@ -160,13 +160,16 @@ export interface EditorChangeDetail {
  *
  * Properties: `store` (a Bowerbird store; one is created if omitted), `actor` (who edits, default
  * the local user), `page` (page id, reflected), `ui` (what the editor offers, see `EditorUI`),
- * `assets` (image uploads). Attributes `preset` (`full`, `layout`, `content`), `appearance`
+ * `assets` (image uploads), `hostComponents` (attribute `host-components`: you draw code
+ * components on the canvas yourself, see `mounts`), `pageAttributes` (attributes for the page's
+ * root element, e.g. the attribute and custom properties your site CSS is scoped to). Attributes `preset` (`full`, `layout`, `content`), `appearance`
  * (`light`, `dark`, `auto`) and `density` (`comfortable`, `compact`) are shorthands for the same
  * `ui` settings. The look follows the `--bb-editor-*` design tokens (see `EDITOR_TOKENS`).
  * Events (bubbling, composed): `bb-change`, `bb-transaction`, `bb-selection`, `bb-page`,
  * `bb-error`, `bb-changesets` (proposed changes waiting for review changed), `bb-data-click`
- * (text shown from site data was clicked: `{ path, node }`).
- * Methods: `apply(ops, label)`, `select(id)`, `undo()`, `redo()`.
+ * (text shown from site data was clicked: `{ path, node }`), `bb-mounts` (with
+ * `hostComponents`: the code components to draw changed, `{ mounts }`).
+ * Methods: `apply(ops, label)`, `select(id)`, `undo()`, `redo()`, `componentsRendered()`.
  * Slots: `toolbar-start`, `toolbar-end` (your own controls in the top bar).
  * Parts (for `::part()`): `toolbar`, `title` (page title), `structure`, `inspector`, `tabs`, `tab`,
  * `panel-section`, `heading`, `layer`, `card`, `button` (also `primary`, `danger`), `field`,
@@ -182,6 +185,8 @@ export class BowerbirdEditor extends LitElement {
     actor: { attribute: false },
     assets: { attribute: false },
     ui: { attribute: false },
+    hostComponents: { type: Boolean, attribute: 'host-components', reflect: true },
+    pageAttributes: { attribute: false },
     preset: { type: String },
     appearance: { type: String, reflect: true },
     density: { type: String, reflect: true },
@@ -197,6 +202,17 @@ export class BowerbirdEditor extends LitElement {
   declare assets: AssetAdapter | undefined;
   /** What the editor offers; see `EditorUI`. */
   declare ui: EditorUI | undefined;
+  /**
+   * You draw code components (`kind: 'code'`) on the canvas with your own framework: each one gets
+   * a mount element (`mounts`, event `bb-mounts`) that stays the same while the page changes.
+   */
+  declare hostComponents: boolean | undefined;
+  /**
+   * Attributes for the canvas page's root element (`.bb-page`): `data-*`, `lang`, `class`, `style`
+   * and the like, re-applied on every render. For site CSS scoped to an attribute on the site root,
+   * or custom properties it reads there.
+   */
+  declare pageAttributes: Record<string, string> | undefined;
   /** Shorthand for `ui.preset` (which wins when both are set). */
   declare preset: EditorPreset | 'auto' | undefined;
   /** Light or dark editor (`auto` follows the system). `ui.appearance` wins when both are set. */
@@ -324,6 +340,7 @@ export class BowerbirdEditor extends LitElement {
     this.canvasHost.className = 'bbx-host';
     this.append(this.canvasHost);
     this.canvas = new CanvasView(this.canvasHost, controller);
+    this.canvas.onMounts = (mounts) => this.emit('bb-mounts', { mounts });
     if (
       Object.keys(this.store.doc.pages).length &&
       !this.store.view.children(controller.currentPage?.rootId ?? '').length
@@ -406,7 +423,12 @@ export class BowerbirdEditor extends LitElement {
     if (changed.has('actor') && this.actor) c.actor = this.actor;
     if (changed.has('ui') || changed.has('preset')) c.setUI(this.effectiveUI());
     if (changed.has('ui')) this.applyLook(this.ui ?? {});
-    if (this.canvas) this.canvas.assets = this.assets;
+    if (this.canvas) {
+      this.canvas.assets = this.assets;
+      this.canvas.hostComponents = !!this.hostComponents;
+      this.canvas.pageAttributes = this.pageAttributes;
+      if (changed.has('hostComponents') || changed.has('pageAttributes')) this.canvas.refresh();
+    }
     if (requested && requested !== c.page) c.setPage(requested);
     if (this.page !== c.page) this.page = c.page;
     // Panels with nothing to show give their space to the canvas.
@@ -430,6 +452,19 @@ export class BowerbirdEditor extends LitElement {
 
   undo() {
     return this.controller?.undo();
+  }
+
+  /** The code components to draw (with `hostComponents`), as last sent in `bb-mounts`. */
+  get mounts(): readonly ComponentMount[] {
+    return this.canvas?.mounts ?? [];
+  }
+
+  /**
+   * Tell the editor you've drawn into the mounts: it readies the new markup (links and buttons
+   * leave the Tab order) and re-measures the selection outlines.
+   */
+  componentsRendered(): void {
+    this.canvas?.componentsRendered();
   }
 
   /** Moves keyboard focus to the page canvas. */

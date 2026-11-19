@@ -151,7 +151,10 @@ function dataMarks(ctx: Ctx, spec: ElementSpec): Record<string, unknown> {
   const fields = spec.edit ? (Array.isArray(spec.edit) ? spec.edit : [spec.edit]) : [];
   return {
     ...(fields[0]
-      ? { 'data-bb-data': fields[0].path, 'data-bb-edit': JSON.stringify(fields) }
+      ? {
+          ...(fields[0].path ? { 'data-bb-data': fields[0].path } : {}),
+          'data-bb-edit': JSON.stringify(fields),
+        }
       : {}),
     ...(spec.item ? { 'data-bb-item': JSON.stringify(spec.item) } : {}),
     ...(spec.add ? { 'data-bb-add': JSON.stringify(spec.add), role: 'button', tabindex: 0 } : {}),

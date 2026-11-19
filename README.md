@@ -97,6 +97,22 @@ import { BowerbirdEditor } from '@bowerbirdjs/react';
 
 Everything the editor does goes through the same operations as agents, so people's changes are validated, attributed and undoable too.
 
+### Draw your own components on the canvas
+
+Register a code component (`defineComponent({ kind: 'code', tag: 'promo-card', props, … })`) and the editor stores, arranges, moves, copies and undoes it like any node; your framework draws it. With `hostComponents` (attribute `host-components`) each code component on the canvas gets a mount element that stays the same while the page changes, so a portal or framework root in it keeps its state; `bb-mounts` says which components to draw (`{ id, type, props, node, locale, el }`). The React wrapper does the wiring:
+
+```tsx
+<BowerbirdEditor
+  store={store}
+  renderComponent={(mount) => <PromoCard {...mount.props} />}
+  pageAttributes={{ 'data-shop': '', style: '--brand: #0f766e' }}
+/>;
+```
+
+Your components render inside your React tree (context and providers above the editor reach them). `pageAttributes` go on the canvas page's root element, for site CSS scoped to an attribute on the site root or custom properties read there. Mark text a person may edit on the page with `data-bb-edit='[{"prop":"heading","label":"Heading"}]'` (one plain-text value: edited in place; otherwise a small form): it is written to that prop of the component's node through `props.set`, and the component gets a fresh mount afterwards. Site data is marked the same way with `path`. Without the wrapper, set `hostComponents`, listen to `bb-mounts`, render into each `el` and call `componentsRendered()` once drawn. `examples/react-host` is a working example.
+
+The words on the canvas (toolbar, empty page, field panel, the label on the selected element) come from `ui.strings`: pass any subset of `EditorStrings` in your language, e.g. `{ moveUp: 'Nach oben', selectionLabel: (n) => n.title ?? n.type }`. The side panels aren't covered yet.
+
 ### Choose what the editor offers
 
 Not every product wants the full editor. By default it offers what the store's policy lets the person change: someone with `content` access sees text, links and images only, `layout` access adds arranging sections but no styling, and everyone else gets everything. Pick a preset yourself, then turn single parts on or off and limit what can be added and styled:

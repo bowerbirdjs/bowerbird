@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Bowerbird: React components on the canvas</title>
+    <style>
+      html, body { margin: 0; height: 100%; font-family: system-ui, sans-serif; }
+      #root { height: 100%; display: grid; grid-template-rows: auto 1fr; }
+      header { padding: 10px 16px; border-bottom: 1px solid #e5e7eb; display: flex; gap: 12px; align-items: center; }
+      bowerbird-editor { display: grid; min-height: 0; }
+      /* The site's own CSS, scoped to the attribute the editor puts on the page root. */
+      [data-shop] { font-family: Georgia, serif; }
+      [data-shop] promo-card { display: block; }
+      [data-shop] .promo { margin: 0; padding: 32px; background: var(--brand); color: #fff; }
+      [data-shop] .promo h2 { margin: 0 0 8px; font-size: 28px; }
+      [data-shop] .promo a { color: inherit; }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="./main.tsx"></script>
+  </body>
+</html>
