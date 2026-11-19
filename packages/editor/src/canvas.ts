@@ -289,6 +289,9 @@ export class CanvasView {
   /** Data just added: once it's on the page, its field is edited. */
   private pendingEdit: string | null = null;
   private dropTargetState: DropTarget | null = null;
+  private scrollSpeed = 0;
+  private scrollSeen = 0;
+  private scrollFrame = 0;
   private scale = 1;
   /** Code components get a mount the host renders into (see `ComponentMount`). */
   hostComponents = false;
@@ -382,6 +385,7 @@ export class CanvasView {
   }
 
   destroy(): void {
+    this.stopAutoScroll();
     this.mountEls.clear();
     if (this.reported.length) {
       this.reported = [];
@@ -1276,23 +1280,42 @@ export class CanvasView {
   }
 
   /**
-   * Near the top or bottom edge of the canvas during a drag, scrolls it, faster the closer the
-   * pointer is (dragover keeps firing while the pointer rests), so a section can be dragged
-   * anywhere on a long page.
+   * Near the top or bottom edge of the canvas during a drag, scrolls it every frame, faster the
+   * closer the pointer is, so a section can be dragged anywhere on a long page. The scroll stops
+   * once dragover stops coming (pointer left the edge, the frame or the drag ended).
    */
   private autoScroll(y: number): void {
     const rect = this.frame.getBoundingClientRect();
-    const edge = Math.min(64, rect.height / 4);
-    const step =
+    const edge = Math.min(72, rect.height / 4);
+    const into =
       y < rect.top + edge
         ? -(rect.top + edge - y)
         : y > rect.bottom - edge
           ? y - (rect.bottom - edge)
           : 0;
-    if (step) this.frame.scrollBy(0, Math.round(step / 2));
+    const near = Math.min(1, Math.abs(into) / edge);
+    this.scrollSpeed = into === 0 ? 0 : Math.sign(into) * Math.round(3 + near * near * 27);
+    this.scrollSeen = performance.now();
+    if (!this.scrollSpeed || this.scrollFrame) return;
+    const tick = () => {
+      if (!this.scrollSpeed || performance.now() - this.scrollSeen > 200) {
+        this.scrollFrame = 0;
+        return;
+      }
+      this.frame.scrollBy(0, this.scrollSpeed);
+      this.scrollFrame = requestAnimationFrame(tick);
+    };
+    this.scrollFrame = requestAnimationFrame(tick);
+  }
+
+  private stopAutoScroll(): void {
+    this.scrollSpeed = 0;
+    if (this.scrollFrame) cancelAnimationFrame(this.scrollFrame);
+    this.scrollFrame = 0;
   }
 
   private clearDrop(): void {
+    this.stopAutoScroll();
     this.dropTargetState = null;
     this.updateOverlays();
   }
