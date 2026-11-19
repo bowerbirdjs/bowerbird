@@ -156,13 +156,13 @@ describe.skipIf(!apps)('editor use cases from the QA pass', () => {
     await editor.getByLabel('Language').selectOption('de');
     await page.locator('[data-bb-node="hero-2/heading"]').click();
     const inspector = editor.locator('[part="inspector"]');
-    await expect.poll(() => inspector.locator('.head strong').textContent()).toBe('“Hallo Welt”');
+    await expect.poll(() => inspector.locator('.node-name').textContent()).toBe('“Hallo Welt”');
     // The instance matches its definition in German too: no override mark.
     expect(await inspector.locator('.override').count()).toBe(0);
     await page.locator('[data-bb-node="hero-1/heading"]').click();
     await expect
-      .poll(() => inspector.locator('.provenance').textContent())
-      .toMatch(/text \(de\) last changed by local/);
+      .poll(() => inspector.locator('.provenance').allTextContents())
+      .toContainEqual(expect.stringMatching(/text \(de\) last changed by local/));
     expect(errors).toEqual([]);
   });
 
