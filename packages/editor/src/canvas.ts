@@ -1538,6 +1538,8 @@ export function createPageSlots(doc: Document): { start: HTMLElement; end: HTMLE
   const make = (name: string) => {
     const el = doc.createElement('div');
     el.setAttribute('data-bbx-slot', name);
+    // Host markup: the page's base styles and resets leave it to the host's CSS.
+    el.setAttribute('data-bb-host', '');
     el.style.display = 'contents';
     return el;
   };

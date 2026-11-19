@@ -33,10 +33,11 @@ export interface CompileCssOptions {
 }
 
 /**
- * The page's own content, not what a host code component draws (`data-bb-code`, marked in the
- * editor): base and reset rules leave the host's markup to the host's CSS.
+ * The page's own content, not the host's markup (what a code component draws, `data-bb-code`, and
+ * the host's own markup in the page, `data-bb-host`, both marked in the editor): base and reset
+ * rules leave it to the host's CSS.
  */
-const OWN = ':where(:not([data-bb-code] *))';
+const OWN = ':where(:not([data-bb-code] *, [data-bb-host] *))';
 
 /** Reset and page-level defaults. Uses `:where()` so sections override them easily. */
 export const BASE_CSS = `.bb-page {
@@ -72,12 +73,12 @@ export const BASE_CSS = `.bb-page {
  * Host `!important` rules and selectors more specific than two classes still get through.
  */
 export const EDITOR_RESET_CSS = `.bb-page { all: initial; display: block; }
-.bb-page :where(*):where(:not(svg, svg *, img, video, iframe, [data-bb-code], [data-bb-code] *, [data-bb-frame])),
-.bb-page :where(*:not(svg *, [data-bb-code], [data-bb-code] *, [data-bb-frame]))::before,
-.bb-page :where(*:not(svg *, [data-bb-code], [data-bb-code] *, [data-bb-frame]))::after,
-.bb-page :where(*:not(svg *, [data-bb-code], [data-bb-code] *, [data-bb-frame]))::marker,
-.bb-page :where(*:not(svg *, [data-bb-code], [data-bb-code] *, [data-bb-frame]))::first-letter,
-.bb-page :where(*:not(svg *, [data-bb-code], [data-bb-code] *, [data-bb-frame]))::first-line { all: revert; }
+.bb-page :where(*):where(:not(svg, svg *, img, video, iframe, [data-bb-code], [data-bb-code] *, [data-bb-host], [data-bb-host] *, [data-bb-frame])),
+.bb-page :where(*:not(svg *, [data-bb-code], [data-bb-code] *, [data-bb-host], [data-bb-host] *, [data-bb-frame]))::before,
+.bb-page :where(*:not(svg *, [data-bb-code], [data-bb-code] *, [data-bb-host], [data-bb-host] *, [data-bb-frame]))::after,
+.bb-page :where(*:not(svg *, [data-bb-code], [data-bb-code] *, [data-bb-host], [data-bb-host] *, [data-bb-frame]))::marker,
+.bb-page :where(*:not(svg *, [data-bb-code], [data-bb-code] *, [data-bb-host], [data-bb-host] *, [data-bb-frame]))::first-letter,
+.bb-page :where(*:not(svg *, [data-bb-code], [data-bb-code] *, [data-bb-host], [data-bb-host] *, [data-bb-frame]))::first-line { all: revert; }
 .bb-page :where(img, video, iframe)${OWN} {
   margin: 0; padding: 0; border: 0; border-radius: 0; outline: 0; box-shadow: none; background: none;
   opacity: 1; filter: none; transform: none; object-fit: fill; vertical-align: baseline;

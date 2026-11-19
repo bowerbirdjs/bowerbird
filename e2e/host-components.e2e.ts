@@ -37,6 +37,8 @@ describe.skipIf(!apps)('code components drawn by the host (React)', () => {
     // The page-start slot holds the host's menu, first in the frame, not selectable.
     const nav = frame.locator('.shop-nav');
     expect(await nav.count()).toBe(1);
+    // Styled by the host's CSS, untouched by the editor's resets.
+    expect(await nav.evaluate((el) => getComputedStyle(el).display)).toBe('flex');
     await nav.getByText('Shop').click();
     expect(await page.locator('.bbx-label').isVisible()).toBe(false);
     // Links and buttons in host markup are content: out of the Tab order.
