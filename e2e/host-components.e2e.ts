@@ -111,6 +111,25 @@ describe.skipIf(!apps)('code components drawn by the host (React)', () => {
     expect(errors).toEqual([]);
   });
 
+  test('dragging near the canvas edge scrolls it, so a drag can reach the whole page', async () => {
+    const { page, errors } = await open(apps?.reactHost ?? '', { width: 1000, height: 320 });
+    const summer = page.locator('[data-bb-canvas] [data-testid="promo-summer"] h2');
+    await summer.waitFor();
+    const frame = page.locator('.bbx-frame');
+    await frame.evaluate((f) => f.scrollTo(0, f.scrollHeight));
+    await summer.click();
+    const before = await frame.evaluate((f) => f.scrollTop);
+    expect(before).toBeGreaterThan(0);
+    const grip = await page.locator('.bbx-toolbar button[data-action="drag"]').boundingBox();
+    const box = await frame.boundingBox();
+    await page.mouse.move((grip?.x ?? 0) + 13, (grip?.y ?? 0) + 13);
+    await page.mouse.down();
+    await page.mouse.move((grip?.x ?? 0) + 13, (box?.y ?? 0) + 6, { steps: 12 });
+    await expect.poll(() => frame.evaluate((f) => f.scrollTop)).toBeLessThan(before);
+    await page.mouse.up();
+    expect(errors).toEqual([]);
+  });
+
   test('children the host draws: added by dragging from the app, selected and edited', async () => {
     const { page, errors } = await open(apps?.reactHost ?? '');
     const spring = page.locator('[data-bb-canvas] [data-testid="promo-spring"]');

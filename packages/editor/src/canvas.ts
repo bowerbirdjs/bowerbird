@@ -1245,6 +1245,7 @@ export class CanvasView {
     this.frame.addEventListener('dragover', (e) => {
       const payload = currentDrag(e, c);
       if (!payload || c.readOnly) return;
+      this.autoScroll(e.clientY);
       const allowed =
         payload.kind === 'move'
           ? c.can('move')
@@ -1272,6 +1273,23 @@ export class CanvasView {
       e.preventDefault();
       performDrop(c, payload, target);
     });
+  }
+
+  /**
+   * Near the top or bottom edge of the canvas during a drag, scrolls it, faster the closer the
+   * pointer is (dragover keeps firing while the pointer rests), so a section can be dragged
+   * anywhere on a long page.
+   */
+  private autoScroll(y: number): void {
+    const rect = this.frame.getBoundingClientRect();
+    const edge = Math.min(64, rect.height / 4);
+    const step =
+      y < rect.top + edge
+        ? -(rect.top + edge - y)
+        : y > rect.bottom - edge
+          ? y - (rect.bottom - edge)
+          : 0;
+    if (step) this.frame.scrollBy(0, Math.round(step / 2));
   }
 
   private clearDrop(): void {
