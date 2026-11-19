@@ -53,6 +53,11 @@ describe.skipIf(!apps)('code components drawn by the host (React)', () => {
     // The selected component moves with the editor's toolbar, in the host's words.
     await page.locator('[data-testid="promo-summer"] h2').click();
     await expect.poll(() => page.locator('.bbx-label').textContent()).toBe('Aktion');
+    // Right under the page root there is no parent to select.
+    const titles = await page
+      .locator('.bbx-toolbar button')
+      .evaluateAll((bs) => bs.filter((b) => !(b as HTMLElement).hidden).map((b) => b.title));
+    expect(titles).toEqual(['Ziehen zum Verschieben', 'Nach oben', 'Duplizieren', 'Löschen']);
     await page.getByRole('button', { name: 'Nach oben' }).click();
     await expect
       .poll(() =>

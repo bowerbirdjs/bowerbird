@@ -731,9 +731,11 @@ export class CanvasView {
     // What the host turned off disappears from the selection's label and toolbar.
     // Only what the feature settings and the policy allow for this node.
     const allowed = c.selectionActions();
+    // A node right under the page root has no parent to select.
+    const parentId = c.selected ? c.node(c.selected)?.parent : null;
     const shown: Record<string, boolean> = {
       drag: allowed.up || allowed.down,
-      parent: true,
+      parent: !!parentId && !c.isRoot(parentId),
       up: allowed.up,
       down: allowed.down,
       duplicate: allowed.duplicate,
