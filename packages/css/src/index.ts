@@ -32,6 +32,12 @@ export interface CompileCssOptions {
   canvasSelector?: string;
 }
 
+/**
+ * The page's own content, not what a host code component draws (`data-bb-code`, marked in the
+ * editor): base and reset rules leave the host's markup to the host's CSS.
+ */
+const OWN = ':where(:not([data-bb-code] *))';
+
 /** Reset and page-level defaults. Uses `:where()` so sections override them easily. */
 export const BASE_CSS = `.bb-page {
   container: ${PAGE_CONTAINER} / inline-size;
@@ -44,16 +50,16 @@ export const BASE_CSS = `.bb-page {
   overflow-wrap: anywhere;
 }
 .bb-page *, .bb-page *::before, .bb-page *::after { box-sizing: border-box; }
-.bb-page :where(h1, h2, h3, h4, h5, h6, p, figure, blockquote, ul, ol) { margin: 0; }
-.bb-page :where(ul, ol) { padding: 0; list-style: none; }
-.bb-page :where(h1, h2, h3, h4, h5, h6) {
+.bb-page :where(h1, h2, h3, h4, h5, h6, p, figure, blockquote, ul, ol)${OWN} { margin: 0; }
+.bb-page :where(ul, ol)${OWN} { padding: 0; list-style: none; }
+.bb-page :where(h1, h2, h3, h4, h5, h6)${OWN} {
   font-family: var(--font-heading, inherit);
   line-height: var(--leading-tight, 1.15);
   text-wrap: balance;
 }
-.bb-page :where(img, svg, video) { display: block; max-width: 100%; height: auto; }
-.bb-page :where(a) { color: inherit; }
-.bb-page :where(button) { font: inherit; }`;
+.bb-page :where(img, svg, video)${OWN} { display: block; max-width: 100%; height: auto; }
+.bb-page :where(a)${OWN} { color: inherit; }
+.bb-page :where(button)${OWN} { font: inherit; }`;
 
 /**
  * Editor mode only: the canvas shares the host document, so host element rules (`h1 { … }`,
@@ -61,17 +67,18 @@ export const BASE_CSS = `.bb-page {
  * editor's) fonts. The page root starts from initial values, so nothing is inherited, and
  * everything the host sets on content elements and their pseudo-elements is reverted to browser
  * defaults. It comes first, so base, section and node rules (same specificity, later) still win.
- * Images and media keep their size attributes; SVG and host code components keep their styling.
+ * Images and media keep their size attributes; SVG, host code components and the host's page frame
+ * (`data-bb-frame`) keep their styling.
  * Host `!important` rules and selectors more specific than two classes still get through.
  */
 export const EDITOR_RESET_CSS = `.bb-page { all: initial; display: block; }
-.bb-page :where(*):where(:not(svg, svg *, img, video, iframe, [data-bb-code], [data-bb-code] *)),
-.bb-page :where(*:not(svg *, [data-bb-code], [data-bb-code] *))::before,
-.bb-page :where(*:not(svg *, [data-bb-code], [data-bb-code] *))::after,
-.bb-page :where(*:not(svg *, [data-bb-code], [data-bb-code] *))::marker,
-.bb-page :where(*:not(svg *, [data-bb-code], [data-bb-code] *))::first-letter,
-.bb-page :where(*:not(svg *, [data-bb-code], [data-bb-code] *))::first-line { all: revert; }
-.bb-page :where(img, video, iframe) {
+.bb-page :where(*):where(:not(svg, svg *, img, video, iframe, [data-bb-code], [data-bb-code] *, [data-bb-frame])),
+.bb-page :where(*:not(svg *, [data-bb-code], [data-bb-code] *, [data-bb-frame]))::before,
+.bb-page :where(*:not(svg *, [data-bb-code], [data-bb-code] *, [data-bb-frame]))::after,
+.bb-page :where(*:not(svg *, [data-bb-code], [data-bb-code] *, [data-bb-frame]))::marker,
+.bb-page :where(*:not(svg *, [data-bb-code], [data-bb-code] *, [data-bb-frame]))::first-letter,
+.bb-page :where(*:not(svg *, [data-bb-code], [data-bb-code] *, [data-bb-frame]))::first-line { all: revert; }
+.bb-page :where(img, video, iframe)${OWN} {
   margin: 0; padding: 0; border: 0; border-radius: 0; outline: 0; box-shadow: none; background: none;
   opacity: 1; filter: none; transform: none; object-fit: fill; vertical-align: baseline;
 }`;

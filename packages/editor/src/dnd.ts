@@ -129,19 +129,32 @@ export function dropTarget(
     if (!inside) return null;
     return { parent: node.id, indicator: { kind: 'box', rect, orientation: 'vertical' } };
   }
-  const parent = view.node(node.parent);
-  if (!parent || !registry.accepts(parent.type, type) || !controller.canInsertInto(parent.id))
-    return null;
-  const horizontal = isHorizontal(nodeEl.parentElement);
-  const side = (horizontal ? x < rect.left + rect.width / 2 : y < rect.top + rect.height / 2)
+  // Before or after the hovered node, or the nearest ancestor whose parent takes this type (a
+  // section dragged over something inside another section goes next to that section).
+  let anchor = node;
+  let parent = view.node(node.parent);
+  while (parent && !(registry.accepts(parent.type, type) && controller.canInsertInto(parent.id))) {
+    anchor = parent;
+    parent = parent.parent ? view.node(parent.parent) : undefined;
+  }
+  if (!parent || (payload.kind === 'move' && anchor.id === payload.id)) return null;
+  const anchorEl = anchor === node ? nodeEl : elementOf(anchor.id);
+  if (!anchorEl) return null;
+  const anchorRect = anchor === node ? rect : anchorEl.getBoundingClientRect();
+  const horizontal = isHorizontal(anchorEl.parentElement);
+  const side = (
+    horizontal
+      ? x < anchorRect.left + anchorRect.width / 2
+      : y < anchorRect.top + anchorRect.height / 2
+  )
     ? 'before'
     : 'after';
   return {
     parent: parent.id,
-    [side]: node.id,
+    [side]: anchor.id,
     indicator: {
       kind: 'line',
-      rect: lineRect(rect, side, horizontal),
+      rect: lineRect(anchorRect, side, horizontal),
       orientation: horizontal ? 'horizontal' : 'vertical',
     },
   };

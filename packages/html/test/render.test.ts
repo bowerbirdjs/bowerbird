@@ -228,3 +228,61 @@ describe('standalone documents', () => {
     expect(html).toContain('<body style="margin:0;background:var(--color-surface,Canvas)">');
   });
 });
+
+describe('host frame and host-drawn children (editor)', () => {
+  const setup = () => {
+    const registry = createRegistry({
+      components: [
+        defineComponent({
+          name: 'card',
+          kind: 'code',
+          tag: 'acme-card',
+          description: 'Card',
+          children: { allow: ['text'] },
+          props: z.object({}),
+        }),
+      ],
+    });
+    const store = createStore({ registry, doc: createEmptyDoc() });
+    store.apply({ ops: [{ op: 'page.create', path: '/', title: 'Home' }] });
+    store.apply({
+      ops: [
+        {
+          op: 'node.insert',
+          parent: 'root-home',
+          node: {
+            type: 'card',
+            id: 'card-1',
+            children: [{ type: 'text', props: { text: 'Inside' } }],
+          },
+        },
+      ],
+    });
+    return { store, registry };
+  };
+
+  it('wraps the content in a frame with the host attributes, in the editor only', () => {
+    const { store, registry } = setup();
+    const html = renderPage(store.doc, registry, 'home', {
+      mode: 'editor',
+      frame: { 'data-site': '', style: '--brand: #c00', onclick: 'alert(1)', lang: 'de' },
+    }).html;
+    expect(html).toMatch(
+      /<div class="bb-page"[^>]*>\n<div data-bb-frame data-site="" style="--brand: #c00" lang="de">/,
+    );
+    expect(html).not.toContain('onclick');
+    const published = renderPage(store.doc, registry, 'home', { frame: { 'data-site': '' } }).html;
+    expect(published).not.toContain('data-bb-frame');
+  });
+
+  it('leaves a code component’s children to the host when asked', () => {
+    const { store, registry } = setup();
+    const drawn = renderPage(store.doc, registry, 'home', {
+      mode: 'editor',
+      hostChildren: true,
+    }).html;
+    expect(drawn).toContain('data-bb-node="card-1"');
+    expect(drawn).not.toContain('Inside');
+    expect(renderPage(store.doc, registry, 'home', { mode: 'editor' }).html).toContain('Inside');
+  });
+});

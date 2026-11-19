@@ -1,4 +1,10 @@
-import { type BNode, type EditField, localizedProps, sanitizeRichText } from '@bowerbirdjs/core';
+import {
+  type BNode,
+  descendants,
+  type EditField,
+  localizedProps,
+  sanitizeRichText,
+} from '@bowerbirdjs/core';
 import { renderPage, renderSubtree } from '@bowerbirdjs/html';
 import { type EditorController, type EditorEvent, splitDataPath } from './controller.js';
 import {
@@ -26,6 +32,8 @@ export interface ComponentMount {
   /** Props in the language shown (`locale`). */
   props: Record<string, unknown>;
   node: BNode;
+  /** Its child nodes, in order: the host draws them too (see `BowerbirdEditor.hostComponents`). */
+  children: BNode[];
   locale?: string;
   el: HTMLElement;
 }
@@ -81,7 +89,7 @@ ${CANVAS_TOKEN_CSS}
 .bbx-host .bbx-toolbar button:focus-visible { outline: 2px solid var(--bbe-focus); outline-offset: 1px; }
 .bbx-host .bbx-toolbar button[data-action="delete"]:hover { color: color-mix(in srgb, var(--bbe-danger) 55%, var(--bbe-floating-fg)); }
 .bbx-host .bbx-toolbar button[hidden], .bbx-host .bbx-label[hidden] { display: none; }
-.bbx-host .bbx-toolbar [draggable="true"] { cursor: grab; }
+.bbx-host .bbx-toolbar [draggable="true"] { cursor: grab; -webkit-user-drag: element; user-select: none; }
 .bbx-host .bbx-drop { position: absolute; background: var(--bbe-selection); border-radius: 2px; }
 .bbx-host .bbx-drop.bbx-inside { background: color-mix(in srgb, var(--bbe-selection) 10%, transparent);
   outline: 2px dashed var(--bbe-selection); outline-offset: -2px; }
@@ -290,6 +298,8 @@ export class CanvasView {
   onMounts: ((mounts: ComponentMount[]) => void) | undefined;
   private readonly mountEls = new Map<string, HTMLElement>();
   private reported: ComponentMount[] = [];
+  /** Each mounted component's descendants as last reported: a change in any re-reports it. */
+  private subtrees = new Map<string, BNode[]>();
   private strings: EditorStrings = DEFAULT_STRINGS;
   private stringsFrom: unknown;
   private stringsPainted = false;
@@ -390,8 +400,7 @@ export class CanvasView {
       // Someone else removed (or the page switched away from) the node being edited.
       if (this.editing && !this.controller.node(this.editing.id)) {
         const { id, el } = this.editing;
-        // biome-ignore lint/performance/useDomNodeTextContent: innerText keeps the typed line breaks
-        const typed = (el.innerText ?? el.textContent ?? '').trim();
+        const typed = editableText(el).trim();
         this.finishEditing(false);
         this.controller.report([
           { code: 'conflict', nodeId: id, message: this.strings.removedWhileEditing(id, typed) },
@@ -459,11 +468,16 @@ export class CanvasView {
     let html: string;
     let css: string;
     let empty: boolean;
+    const frameOptions = {
+      ...(this.pageAttributes ? { frame: this.pageAttributes } : {}),
+      ...(this.hostComponents ? { hostChildren: true } : {}),
+    };
     if (symbol && doc.nodes[symbol.rootId]) {
       ({ html, css } = renderSubtree(doc, c.store.registry, symbol.rootId, {
         mode: 'editor',
         canvasSelector,
         ...(c.locale ? { locale: c.locale } : {}),
+        ...frameOptions,
       }));
       empty = false;
     } else if (page && doc.pages[page.id]) {
@@ -471,6 +485,7 @@ export class CanvasView {
         mode: 'editor',
         canvasSelector,
         ...(c.locale ? { locale: c.locale } : {}),
+        ...frameOptions,
       }));
       empty = !Object.values(doc.nodes).some((n) => n.parent === page.rootId);
     } else {
@@ -489,7 +504,7 @@ export class CanvasView {
       hint.textContent = c.can('insert') ? this.strings.emptyPageInsert : this.strings.emptyPage;
       this.content.append(hint);
     }
-    this.applyPageAttributes();
+    this.attachSlots();
     this.attachMounts();
     this.prepareContent();
     if (c.theme) this.frame.setAttribute('data-theme', c.theme);
@@ -523,22 +538,39 @@ export class CanvasView {
     this.layout();
   }
 
-  /** Attributes the host asked for on the page root (`pageAttributes`); event handlers are skipped. */
-  private applyPageAttributes(): void {
-    const root = this.content.querySelector<HTMLElement>('.bb-page');
-    if (!root || !this.pageAttributes) return;
-    for (const [name, value] of Object.entries(this.pageAttributes)) {
-      if (!/^[a-z][a-z0-9-]*$/.test(name) || name.startsWith('on')) continue;
-      if (name === 'class') root.classList.add(...String(value).split(/\s+/).filter(Boolean));
-      else if (name === 'style') root.style.cssText += `;${value}`;
-      else root.setAttribute(name, String(value));
+  /**
+   * Elements at the start and end of the page frame for the host's own markup (a site header, a
+   * footer note): not part of the document, never selectable. Asking for them turns them on; like
+   * mounts, they stay the same across renders.
+   */
+  pageSlots(slots?: { start: HTMLElement; end: HTMLElement }): {
+    start: HTMLElement;
+    end: HTMLElement;
+  } {
+    if (!this.slots || (slots && slots !== this.slots)) {
+      this.slots = slots ?? createPageSlots(this.content.ownerDocument);
+      this.refresh();
     }
+    return this.slots;
+  }
+
+  private slots: { start: HTMLElement; end: HTMLElement } | undefined;
+
+  private attachSlots(): void {
+    if (!this.slots) return;
+    const frame =
+      this.content.querySelector<HTMLElement>('[data-bb-frame]') ??
+      this.content.querySelector<HTMLElement>('.bb-page');
+    if (!frame) return;
+    frame.prepend(this.slots.start);
+    frame.append(this.slots.end);
   }
 
   /** Gives every code component on the page its mount, and tells the host when they changed. */
   private attachMounts(): void {
     const c = this.controller;
     const mounts: ComponentMount[] = [];
+    const subtrees = new Map<string, BNode[]>();
     if (this.hostComponents) {
       const doc = this.content.ownerDocument;
       const locale = c.locale ?? undefined;
@@ -560,9 +592,11 @@ export class CanvasView {
           type: node.type,
           props: localizedProps(node, locale),
           node,
+          children: c.store.view.children(id),
           ...(locale ? { locale } : {}),
           el: mount,
         });
+        subtrees.set(id, descendants(c.store.view, id));
       }
     }
     for (const id of [...this.mountEls.keys()])
@@ -572,8 +606,18 @@ export class CanvasView {
       before.length === mounts.length &&
       mounts.every((m, i) => {
         const b = before[i]!;
-        return b.id === m.id && b.node === m.node && b.el === m.el && b.locale === m.locale;
+        const was = this.subtrees.get(m.id) ?? [];
+        const now = subtrees.get(m.id) ?? [];
+        return (
+          b.id === m.id &&
+          b.node === m.node &&
+          b.el === m.el &&
+          b.locale === m.locale &&
+          was.length === now.length &&
+          was.every((n, j) => n === now[j])
+        );
       });
+    this.subtrees = subtrees;
     if (same) return;
     this.reported = mounts;
     this.onMounts?.(mounts);
@@ -1012,15 +1056,17 @@ export class CanvasView {
     if (this.editing) this.finishEditing(true);
     const first = fields[0]!;
     const kind = first.kind ?? 'text';
-    const shown = (el.textContent ?? '').trim();
+    const shown = flatten(editableText(el));
     const stored = (f: EditField) =>
       f.value ?? (f.path ? undefined : this.propText(owner, f.prop!));
     const value = stored(first) ?? shown;
+    // Plain text, or (on several lines) paragraphs and line breaks showing exactly the value.
+    const plain = kind === 'multiline' ? onlyParagraphs(el) : el.children.length === 0;
     const inPlace =
       fields.length === 1 &&
       (kind === 'text' || kind === 'multiline') &&
-      el.children.length === 0 &&
-      shown === value.trim();
+      plain &&
+      shown === flatten(value);
     const t = this.strings;
     if (!inPlace) {
       this.panel.show(
@@ -1141,6 +1187,15 @@ export class CanvasView {
       true,
     );
     content.addEventListener('submit', (e) => e.preventDefault(), true);
+    // Page links are content: no click of any kind opens them (middle click, a link dragged out).
+    content.addEventListener('auxclick', (e) => e.preventDefault(), true);
+    content.addEventListener('mousedown', (e) => {
+      if (e.button === 1) e.preventDefault();
+    });
+    content.addEventListener('dragstart', (e) => {
+      if (!this.content.querySelector('[contenteditable]')?.contains(e.target as Node))
+        e.preventDefault();
+    });
     // Add placeholders are buttons for the keyboard too.
     content.addEventListener('keydown', (e) => {
       const adder = (e.target as Element).closest?.<HTMLElement>('[data-bb-add]');
@@ -1356,8 +1411,7 @@ export class CanvasView {
     if (rich) normalizeTypedSpaces(state.el);
     const text = rich
       ? sanitizeRichText(state.el.innerHTML.split(CARET_HOLDER).join(''))
-      : // biome-ignore lint/performance/useDomNodeTextContent: innerText keeps the typed line breaks
-        normalize(state.el.innerText ?? state.el.textContent ?? '');
+      : normalize(editableText(state.el));
     state.el.removeAttribute('contenteditable');
     // Enter or Escape: keep keyboard focus in the canvas. A blur moved it elsewhere already.
     if (focused) this.frame.focus({ preventScroll: true });
@@ -1477,6 +1531,65 @@ export class CanvasView {
     const id = el.closest('[data-bbx-mount]')?.getAttribute('data-bbx-mount');
     if (id) this.mountEls.delete(id);
   }
+}
+
+/** The two (empty, box-less) elements of `CanvasView.pageSlots`. */
+export function createPageSlots(doc: Document): { start: HTMLElement; end: HTMLElement } {
+  const make = (name: string) => {
+    const el = doc.createElement('div');
+    el.setAttribute('data-bbx-slot', name);
+    el.style.display = 'contents';
+    return el;
+  };
+  return { start: make('start'), end: make('end') };
+}
+
+const TEXT_BLOCKS = new Set(['P', 'DIV', 'LI', 'BLOCKQUOTE', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6']);
+
+/**
+ * The text an element holds as typed: line breaks and paragraphs kept (a paragraph is a blank
+ * line), and unlike `innerText`, without CSS `text-transform`, which is styling, not the text.
+ */
+export function editableText(el: Element): string {
+  let out = '';
+  const walk = (node: Node) => {
+    for (const child of node.childNodes) {
+      if (child.nodeType === 3) {
+        out += (child as Text).data;
+        continue;
+      }
+      if (child.nodeType !== 1) continue;
+      const tag = (child as Element).tagName;
+      if (tag === 'BR') {
+        out += '\n';
+        continue;
+      }
+      const block = TEXT_BLOCKS.has(tag);
+      if (block && out && !out.endsWith('\n')) out += '\n';
+      if (tag === 'P' && out && !out.endsWith('\n\n')) out += '\n';
+      walk(child);
+      if (block && !out.endsWith('\n')) out += '\n';
+    }
+  };
+  walk(el);
+  return out.split(CARET_HOLDER).join('');
+}
+
+/** Whitespace as text compares: runs of spaces as one, no spaces around line breaks. */
+function flatten(text: string): string {
+  return text
+    .replace(/\r\n?/g, '\n')
+    .replace(/[^\S\n]+/g, ' ')
+    .replace(/ ?\n ?/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+/** An element holding only text, paragraphs and line breaks (what a multi-line value renders as). */
+function onlyParagraphs(el: Element): boolean {
+  for (const child of el.querySelectorAll('*'))
+    if (child.tagName !== 'P' && child.tagName !== 'BR') return false;
+  return true;
 }
 
 /** The fields an element marks as editable (`data-bb-edit`); malformed markup marks none. */

@@ -109,3 +109,16 @@ describe('compileCss', () => {
     expect(published).not.toContain(':is(#bb-node');
   });
 });
+
+describe('host code components and the page frame', () => {
+  it('base styles and resets leave what a host component draws to the host', async () => {
+    const { BASE_CSS, EDITOR_RESET_CSS } = await import('@bowerbirdjs/css');
+    for (const line of BASE_CSS.split('\n').filter((l) => l.startsWith('.bb-page :where('))) {
+      expect(line).toContain(':where(:not([data-bb-code] *))');
+    }
+    expect(EDITOR_RESET_CSS).toContain('[data-bb-frame]');
+    expect(EDITOR_RESET_CSS).toMatch(
+      /:where\(img, video, iframe\):where\(:not\(\[data-bb-code\] \*\)\)/,
+    );
+  });
+});

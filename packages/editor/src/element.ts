@@ -20,7 +20,7 @@ import { html, LitElement, nothing, type PropertyValues, type TemplateResult } f
 import { classMap } from 'lit/directives/class-map.js';
 import { live } from 'lit/directives/live.js';
 import { unsafeHTML } from 'lit/directives/unsafe-html.js';
-import { CanvasView, type ComponentMount } from './canvas.js';
+import { CanvasView, type ComponentMount, createPageSlots } from './canvas.js';
 import { EditorController, type EditorEvent, type Position } from './controller.js';
 import { currentDrag, type DragPayload, endDrag, performDrop, startDrag } from './dnd.js';
 import type { EditorElementName, EditorPreset, EditorUI } from './features.js';
@@ -161,8 +161,10 @@ export interface EditorChangeDetail {
  * Properties: `store` (a Bowerbird store; one is created if omitted), `actor` (who edits, default
  * the local user), `page` (page id, reflected), `ui` (what the editor offers, see `EditorUI`),
  * `assets` (image uploads), `hostComponents` (attribute `host-components`: you draw code
- * components on the canvas yourself, see `mounts`), `pageAttributes` (attributes for the page's
- * root element, e.g. the attribute and custom properties your site CSS is scoped to). Attributes `preset` (`full`, `layout`, `content`), `appearance`
+ * components and their children on the canvas yourself, see `mounts`), `pageAttributes`
+ * (attributes for the page frame, an element around the page's content that the editor's resets
+ * leave alone, e.g. the attribute and custom properties your site CSS is scoped to), `pageSlots`
+ * (elements for your own markup at the start and end of the frame). Attributes `preset` (`full`, `layout`, `content`), `appearance`
  * (`light`, `dark`, `auto`) and `density` (`comfortable`, `compact`) are shorthands for the same
  * `ui` settings. The look follows the `--bb-editor-*` design tokens (see `EDITOR_TOKENS`).
  * Events (bubbling, composed): `bb-change`, `bb-transaction`, `bb-selection`, `bb-page`,
@@ -204,13 +206,16 @@ export class BowerbirdEditor extends LitElement {
   declare ui: EditorUI | undefined;
   /**
    * You draw code components (`kind: 'code'`) on the canvas with your own framework: each one gets
-   * a mount element (`mounts`, event `bb-mounts`) that stays the same while the page changes.
+   * a mount element (`mounts`, event `bb-mounts`) that stays the same while the page changes. You
+   * draw a code component's child nodes too (the editor renders none), each in an element marked
+   * `data-bb-node="<id>"` so it can be selected, moved and edited.
    */
   declare hostComponents: boolean | undefined;
   /**
-   * Attributes for the canvas page's root element (`.bb-page`): `data-*`, `lang`, `class`, `style`
-   * and the like, re-applied on every render. For site CSS scoped to an attribute on the site root,
-   * or custom properties it reads there.
+   * Attributes for the page frame (`data-bb-frame`), an element around the page's content inside
+   * its root: `data-*`, `lang`, `class`, `style` and the like. The editor's resets and base styles
+   * leave it alone, so site CSS scoped to an attribute on your site's root applies there as on your
+   * own pages.
    */
   declare pageAttributes: Record<string, string> | undefined;
   /** Shorthand for `ui.preset` (which wins when both are set). */
@@ -341,6 +346,7 @@ export class BowerbirdEditor extends LitElement {
     this.append(this.canvasHost);
     this.canvas = new CanvasView(this.canvasHost, controller);
     this.canvas.onMounts = (mounts) => this.emit('bb-mounts', { mounts });
+    if (this.slotEls) this.canvas.pageSlots(this.slotEls);
     if (
       Object.keys(this.store.doc.pages).length &&
       !this.store.view.children(controller.currentPage?.rootId ?? '').length
@@ -457,6 +463,19 @@ export class BowerbirdEditor extends LitElement {
   undo() {
     return this.controller?.undo();
   }
+
+  /**
+   * Elements at the start and end of the page frame for your own markup that isn't part of the
+   * document (a site header or menu): they stay the same across renders, and nothing in them can be
+   * selected. Reading this turns them on.
+   */
+  get pageSlots(): { start: HTMLElement; end: HTMLElement } {
+    this.slotEls ??= createPageSlots(this.ownerDocument);
+    this.canvas?.pageSlots(this.slotEls);
+    return this.slotEls;
+  }
+
+  private slotEls: { start: HTMLElement; end: HTMLElement } | undefined;
 
   /** The code components to draw (with `hostComponents`), as last sent in `bb-mounts`. */
   get mounts(): readonly ComponentMount[] {

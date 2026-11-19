@@ -257,6 +257,9 @@ describe.skipIf(!apps)('wedding planner POC', () => {
 
     // A missing value: how to get there.
     await canvas.getByText('+ Describe how to get there').click();
+    await expect
+      .poll(() => page.evaluate(() => document.activeElement?.getAttribute('data-bb-data')))
+      .toBe('travel.text');
     await page.keyboard.press('Control+A');
     await page.keyboard.type('Take the train to Hollow Junction.');
     await page.keyboard.press('Control+Enter');

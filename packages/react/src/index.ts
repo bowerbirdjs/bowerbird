@@ -92,6 +92,10 @@ export interface BowerbirdEditorProps {
   pageAttributes?: Record<string, string>;
   /** The code components on the page changed (with `renderComponent`). */
   onMounts?: (detail: { mounts: readonly ComponentMount[] }) => void;
+  /** Your markup at the start of the page frame, outside the document (a site header or menu). */
+  pageStart?: ReactNode;
+  /** Your markup at the end of the page frame, outside the document. */
+  pageEnd?: ReactNode;
 }
 
 const EVENTS = {
@@ -124,6 +128,8 @@ export const BowerbirdEditor = forwardRef<EditorElement | null, BowerbirdEditorP
     latest.current = props;
     const [mounted, setMounted] = useState(false);
     const [mounts, setMounts] = useState<readonly ComponentMount[]>([]);
+    const [slots, setSlots] = useState<{ start: HTMLElement; end: HTMLElement } | undefined>();
+    const wantsSlots = props.pageStart !== undefined || props.pageEnd !== undefined;
     useEffect(() => setMounted(true), []);
     const drawsComponents = !!props.renderComponent;
     // biome-ignore lint/correctness/useExhaustiveDependencies: the element exists once mounted
@@ -173,9 +179,12 @@ export const BowerbirdEditor = forwardRef<EditorElement | null, BowerbirdEditorP
       setMounts(el.mounts);
       return () => el.removeEventListener('bb-mounts', onMounts);
     }, [mounted, drawsComponents]);
+    useIsomorphicLayoutEffect(() => {
+      if (element.current && wantsSlots && !slots) setSlots(element.current.pageSlots);
+    }, [mounted, wantsSlots, slots]);
     // After every render of the portals: the editor readies the new markup and re-measures.
     useIsomorphicLayoutEffect(() => {
-      if (drawsComponents && mounts.length) element.current?.componentsRendered();
+      if ((drawsComponents && mounts.length) || slots) element.current?.componentsRendered();
     });
 
     useIsomorphicLayoutEffect(() => {
@@ -207,12 +216,16 @@ export const BowerbirdEditor = forwardRef<EditorElement | null, BowerbirdEditorP
       style: props.style,
     });
     const render = props.renderComponent;
-    if (!render || !mounts.length) return editor;
-    return createElement(
-      Fragment,
-      null,
-      editor,
-      mounts.map((mount) => createPortal(render(mount), mount.el, mount.id)),
-    );
+    const portals = [
+      ...(render ? mounts.map((mount) => createPortal(render(mount), mount.el, mount.id)) : []),
+      ...(slots && props.pageStart !== undefined
+        ? [createPortal(props.pageStart, slots.start, 'bb-page-start')]
+        : []),
+      ...(slots && props.pageEnd !== undefined
+        ? [createPortal(props.pageEnd, slots.end, 'bb-page-end')]
+        : []),
+    ];
+    if (!portals.length) return editor;
+    return createElement(Fragment, null, editor, portals);
   },
 );

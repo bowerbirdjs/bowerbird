@@ -1,4 +1,10 @@
-export { CANVAS_CSS, type CanvasAssets, CanvasView, type ComponentMount } from './canvas.js';
+export {
+  CANVAS_CSS,
+  type CanvasAssets,
+  CanvasView,
+  type ComponentMount,
+  editableText,
+} from './canvas.js';
 export {
   EditorController,
   type EditorEvent,

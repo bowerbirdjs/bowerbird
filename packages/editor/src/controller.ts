@@ -559,6 +559,7 @@ export class EditorController {
     const next = bps[i + 1];
     const max = next ? next.minWidth - 1 : Number.POSITIVE_INFINITY;
     const preferred =
+      bp.preview ??
       PREVIEW_WIDTH[bp.id] ??
       (next ? Math.round((bp.minWidth + next.minWidth) / 2) : Math.max(bp.minWidth, 1280));
     return Math.max(bp.minWidth, Math.min(preferred, max));

@@ -96,6 +96,8 @@ export interface Breakpoint {
   /** Minimum container width in px. The first breakpoint must be 0 (mobile-first base). */
   minWidth: number;
   label?: string;
+  /** Width the editor's canvas shows this breakpoint at (default: a typical device width). */
+  preview?: number;
 }
 
 /** Design tokens in (a lenient subset of) the W3C DTCG format. */

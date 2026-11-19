@@ -26,6 +26,14 @@ export interface RenderOptions {
   canvasSelector?: CompileCssOptions['canvasSelector'];
   /** Render this language's translations (falling back to the default content). */
   locale?: string;
+  /**
+   * Editor mode: a frame element (`data-bb-frame`) around the page's content, inside its root, with
+   * these attributes (trusted, from the host; `style` allowed, event handlers dropped). It stays out
+   * of the editor's resets, so site CSS scoped to an attribute on the site's root applies to it.
+   */
+  frame?: Record<string, string>;
+  /** Editor mode: code components draw their child nodes themselves, so none are rendered here. */
+  hostChildren?: boolean;
 }
 
 export interface RenderedPage {
@@ -141,6 +149,8 @@ interface Ctx {
   mode: CssMode;
   nodeIds: NonNullable<RenderOptions['nodeIds']>;
   locale?: string;
+  frame?: Record<string, string>;
+  hostChildren?: boolean;
   /** What components' `render` functions see. */
   render: RenderContext;
 }
@@ -260,7 +270,8 @@ function renderNode(
 
   const open = `<${tag}${attrString(cleanAttrs(ctx, attrs))}>`;
   if (spec.void || VOID.has(tag)) return open;
-  const children = ctx.view.children(node.id);
+  const hostDrawn = ctx.mode === 'editor' && ctx.hostChildren && def?.kind === 'code';
+  const children = hostDrawn ? [] : ctx.view.children(node.id);
   // Links can't nest (browsers split them apart), so rich text inside a link loses its own links.
   const linked = inLink || tag === 'a';
   const inner = children.length
@@ -268,7 +279,19 @@ function renderNode(
         .map((c) => renderNode(ctx, c, scope, depth + 1, linked))
         .join(node.parent === null ? '\n' : '')
     : specInner(ctx, spec, depth, linked);
-  return node.parent === null ? `${open}\n${inner}\n</${tag}>` : `${open}${inner}</${tag}>`;
+  if (node.parent !== null) return `${open}${inner}</${tag}>`;
+  return `${open}\n${framed(ctx, inner)}\n</${tag}>`;
+}
+
+/** The page's content inside the host's frame element, when the editor was given one. */
+function framed(ctx: Ctx, inner: string): string {
+  if (ctx.mode !== 'editor' || !ctx.frame) return inner;
+  let attrs = ' data-bb-frame';
+  for (const [name, value] of Object.entries(ctx.frame)) {
+    if (!ATTR_RE.test(name) || name.startsWith('on') || name === 'data-bb-frame') continue;
+    attrs += ` ${name}="${escapeAttr(String(value))}"`;
+  }
+  return `<div${attrs}>\n${inner}\n</div>`;
 }
 
 /** Renders one page to semantic HTML (light DOM, no scripts) plus its CSS. */
@@ -290,6 +313,8 @@ export function renderPage(
     mode,
     nodeIds: options.nodeIds ?? (mode === 'editor' ? 'all' : 'styled'),
     ...(options.locale ? { locale: options.locale } : {}),
+    ...(options.frame ? { frame: options.frame } : {}),
+    ...(options.hostChildren ? { hostChildren: true } : {}),
     render: renderContext(view, mode, options.locale),
   };
   const html = renderNode(ctx, root, undefined);
@@ -321,9 +346,10 @@ export function renderSubtree(
     mode,
     nodeIds: options.nodeIds ?? (mode === 'editor' ? 'all' : 'styled'),
     ...(options.locale ? { locale: options.locale } : {}),
+    ...(options.hostChildren ? { hostChildren: true } : {}),
     render: renderContext(view, mode, options.locale),
   };
-  const html = `<div class="bb-page">\n${renderNode(ctx, root, undefined)}\n</div>`;
+  const html = `<div class="bb-page">\n${framed({ ...ctx, ...(options.frame ? { frame: options.frame } : {}) }, renderNode(ctx, root, undefined))}\n</div>`;
   const css = compileCss(doc, registry, {
     mode,
     root: rootId,
