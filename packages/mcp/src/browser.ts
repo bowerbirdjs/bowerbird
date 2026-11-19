@@ -87,10 +87,17 @@ export function createPlaywrightLayoutProvider(
     return launch();
   };
 
-  const open = async (page: string, width: number, theme?: string, doc = store.doc) => {
+  const open = async (
+    page: string,
+    width: number,
+    theme?: string,
+    doc = store.doc,
+    locale?: string,
+  ) => {
     const html = renderDocument(doc, store.registry, page, {
       nodeIds: 'all',
       ...(theme ? { theme } : {}),
+      ...(locale ? { locale } : {}),
     })
       // Lazy images below the fold would never load in a measurement or a screenshot.
       .replaceAll('loading="lazy"', 'loading="eager"');
@@ -104,16 +111,16 @@ export function createPlaywrightLayoutProvider(
   };
 
   return {
-    async snapshot({ page, width, theme, doc }): Promise<LayoutSnapshot> {
-      const tab = await open(page, width, theme, doc);
+    async snapshot({ page, width, theme, doc, locale }): Promise<LayoutSnapshot> {
+      const tab = await open(page, width, theme, doc, locale);
       try {
         return await tab.locator('.bb-page').evaluate(measureLayout, { page });
       } finally {
         await tab.close();
       }
     },
-    async screenshot({ page, width, theme, node, doc }) {
-      const tab = await open(page, width, theme, doc);
+    async screenshot({ page, width, theme, node, doc, locale }) {
+      const tab = await open(page, width, theme, doc, locale);
       try {
         const target = node
           ? tab.locator(`[data-bb-node="${node.replace(/["\\]/g, '')}"]`)

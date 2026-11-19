@@ -5,6 +5,7 @@ import {
   type Changeset,
   type CommitEvent,
   definitionOf,
+  type HistoryEntry,
   type Issue,
   isInstanceRoot,
   LOCAL_USER,
@@ -349,6 +350,29 @@ export class EditorController {
     return !node.link || isInstanceRoot(this.store.view, node);
   }
 
+  /**
+   * Whether new nodes can go inside `id`: not while previewing, and not into a linked component
+   * instance (its children follow the definition).
+   */
+  canInsertInto(id: string | null | undefined): boolean {
+    const node = this.node(id);
+    if (!node || this.previewing) return false;
+    return !(node.link && this.store.doc.symbols?.[node.link.symbol]);
+  }
+
+  /**
+   * Whether a history entry's changes are currently reverted: undone, and not redone since (an
+   * undo that was redone, unless that redo was undone again).
+   */
+  isUndone(entry: HistoryEntry): boolean {
+    if (!entry.undone) return false;
+    const history = this.store.history;
+    const undo = history.findLast((e) => e.kind === 'undo' && e.target === entry.txId);
+    if (!undo?.redone) return true;
+    const redo = history.findLast((e) => e.kind === 'redo' && e.target === undo.txId);
+    return !redo || this.isUndone(redo);
+  }
+
   sectionOf(id: string): BNode | undefined {
     return sectionRootOf(this.store.view, id);
   }
@@ -517,6 +541,26 @@ export class EditorController {
     return result;
   }
 
+  private acceptChecks = new Map<
+    string,
+    { key: string; problem: Issue | undefined; policy: Store['policy'] }
+  >();
+
+  /**
+   * Why this person can't accept these ops of a changeset (their access, dependencies), if they
+   * can't: the Review panel says so instead of offering a button that fails.
+   */
+  acceptProblem(id: string, ops: number[]): Issue | undefined {
+    if (!ops.length) return undefined;
+    const key = `${ops.join(',')}|${this.store.doc.revision}|${this.store.changeset(id)?.status.join()}`;
+    const cached = this.acceptChecks.get(id);
+    if (cached && cached.key === key && cached.policy === this.store.policy) return cached.problem;
+    const result = this.store.acceptChangeset(id, { by: this.actor, ops, dryRun: true });
+    const problem = result.ok ? undefined : result.errors[0];
+    this.acceptChecks.set(id, { key, problem, policy: this.store.policy });
+    return problem;
+  }
+
   rejectChangeset(id: string, ops?: number[]): void {
     this.clearPreview();
     const result = this.store.rejectChangeset(id, { by: this.actor, ...(ops ? { ops } : {}) });
@@ -615,6 +659,7 @@ export class EditorController {
   insertNode(input: NodeInput, position?: Position) {
     if (!this.can('insert.elements') || this.previewing) return undefined;
     const target = position ?? this.defaultNodePosition(input.type);
+    if (target && !this.canInsertInto(target.parent)) return undefined;
     if (!target) {
       this.emit({
         type: 'error',
@@ -639,15 +684,20 @@ export class EditorController {
   defaultNodePosition(type: string): (Position & { parent: string }) | undefined {
     const sel = this.selectedNode;
     const registry = this.store.registry;
-    if (sel && registry.accepts(sel.type, type)) return { parent: sel.id };
-    if (sel?.parent && registry.accepts(this.node(sel.parent)?.type ?? '', type)) {
+    if (sel && registry.accepts(sel.type, type) && this.canInsertInto(sel.id))
+      return { parent: sel.id };
+    if (
+      sel?.parent &&
+      registry.accepts(this.node(sel.parent)?.type ?? '', type) &&
+      this.canInsertInto(sel.parent)
+    ) {
       return { parent: sel.parent, after: sel.id };
     }
     return undefined;
   }
 
   move(id: string, position: Position) {
-    if (!this.can('move') || this.previewing) return undefined;
+    if (!this.can('move') || !this.canRestructure(id)) return undefined;
     return this.apply([{ op: 'node.move', id, ...position }], 'Move');
   }
 
@@ -664,7 +714,7 @@ export class EditorController {
 
   removeSelected() {
     const node = this.selectedNode;
-    if (!node || !this.can('delete') || this.previewing) return undefined;
+    if (!node || !this.can('delete') || !this.canRestructure(node.id)) return undefined;
     const parent = node.parent;
     const result = this.apply([{ op: 'node.remove', id: node.id }], 'Delete');
     if (result.ok && parent && !this.isRoot(parent)) this.select(parent);
@@ -673,7 +723,7 @@ export class EditorController {
 
   duplicateSelected() {
     const node = this.selectedNode;
-    if (!node || !this.can('duplicate') || this.previewing) return undefined;
+    if (!node || !this.can('duplicate') || !this.canRestructure(node.id)) return undefined;
     const result = this.apply([{ op: 'node.duplicate', id: node.id }], 'Duplicate');
     if (result.ok) {
       const copy = result.summary.created.find((id) => this.node(id)?.parent === node.parent);

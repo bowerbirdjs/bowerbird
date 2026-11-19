@@ -85,3 +85,54 @@ describe('style declarations', () => {
     expect(store.view.node('hero-1/heading')?.styles).toBeUndefined();
   });
 });
+
+describe('linked instances, history and review (QA round 2)', () => {
+  test('parts of an instance are not restructured or inserted into, by any gesture', () => {
+    const { store, c } = setup();
+    c.insertSection('hero');
+    store.apply({ ops: [{ op: 'symbol.create', id: 'hero-1', name: 'Promo' }] });
+    const errors: unknown[] = [];
+    c.on((e) => {
+      if (e.type === 'error') errors.push(e);
+    });
+    c.select('hero-1/heading');
+    expect(c.canRestructure('hero-1/heading')).toBe(false);
+    expect(c.removeSelected()).toBeUndefined();
+    expect(c.duplicateSelected()).toBeUndefined();
+    expect(c.nudge(1)).toBeUndefined();
+    expect(c.canInsertInto('hero-1/content')).toBe(false);
+    expect(c.defaultNodePosition('text')).toBeUndefined();
+    expect(errors).toEqual([]);
+    // The instance root still moves as a whole.
+    expect(c.canRestructure('hero-1')).toBe(true);
+  });
+
+  test('an entry that was undone and redone reads as active again', () => {
+    const { c } = setup();
+    c.insertSection('hero');
+    const entry = () => c.store.history.find((e) => e.label === 'Add hero section')!;
+    c.undo();
+    expect(c.isUndone(entry())).toBe(true);
+    c.redo();
+    expect(c.isUndone(entry())).toBe(false);
+    c.undo();
+    expect(c.isUndone(entry())).toBe(true);
+  });
+
+  test('Accept is only offered when it would work for this person', () => {
+    const { store, c } = setup();
+    store.setPolicy(createPolicy({ review: { agent: true }, actors: { sam: 'content' } }));
+    const p = store.propose({
+      actor: BOT,
+      ops: [{ op: 'token.set', path: 'color.accent', value: '#123456' }],
+    });
+    if (!p.ok) throw new Error('propose');
+    expect(c.acceptProblem(p.changeset.id, [0])?.message).toMatch(
+      /may make content changes, but changing design tokens/,
+    );
+    // Checking didn't accept anything.
+    expect(store.changeset(p.changeset.id)?.status).toEqual(['open']);
+    store.setPolicy(createPolicy({ review: { agent: true } }));
+    expect(c.acceptProblem(p.changeset.id, [0])).toBeUndefined();
+  });
+});

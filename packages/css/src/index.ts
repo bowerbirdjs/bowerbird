@@ -40,6 +40,8 @@ export const BASE_CSS = `.bb-page {
   background: var(--color-surface, Canvas);
   line-height: var(--leading-normal, 1.6);
   -webkit-font-smoothing: antialiased;
+  /* One long word (a URL, a German compound) wraps instead of widening the layout. */
+  overflow-wrap: anywhere;
 }
 .bb-page *, .bb-page *::before, .bb-page *::after { box-sizing: border-box; }
 .bb-page :where(h1, h2, h3, h4, h5, h6, p, figure, blockquote, ul, ol) { margin: 0; }

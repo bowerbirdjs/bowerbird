@@ -162,7 +162,8 @@ export const editorStyles = css`
   .override { color: var(--linked); font-size: 10px; }
   .provenance { margin: 6px 0 0; font-size: 12px; }
   .peers { display: flex; gap: 2px; margin: 0 0 0 8px; padding: 0; list-style: none; }
-  .peers li { display: grid; place-items: center; width: 24px; height: 24px; border-radius: 999px; cursor: pointer;
+  .peers li { display: grid; }
+  .peers button { display: grid; place-items: center; width: 24px; height: 24px; padding: 0; border-radius: 999px; cursor: pointer;
     background: var(--peer); color: #fff; font-size: 11px; font-weight: 700; border: 2px solid var(--bg); }
   .upload { display: inline-block; margin-top: 6px; font-size: 12px; color: var(--accent); cursor: pointer; }
   .upload input { position: absolute; width: 1px; height: 1px; opacity: 0; }
@@ -171,6 +172,7 @@ export const editorStyles = css`
   .changeset .ops label { display: flex; gap: 6px; align-items: flex-start; font-size: 12px; }
   .changeset .ops span { overflow-wrap: anywhere; }
   .changeset .notes { margin: 0 0 8px; padding-left: 16px; color: var(--warning); font-size: 12px; }
+  .changeset p.notes { padding-left: 0; }
   .badge.actor.agent { background: #fef3c7; color: #92400e; }
   .row-inline > * { min-width: 0; }
   .decl { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr) auto; gap: 4px; align-items: center; margin-bottom: 4px; }

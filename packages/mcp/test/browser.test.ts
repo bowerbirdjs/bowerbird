@@ -131,4 +131,32 @@ describe.skipIf(!hasPlaywright())('rendered layout in Chromium', { timeout: 30_0
       await provider.close();
     }
   });
+
+  it('one very long word wraps instead of widening the page on a phone', async () => {
+    const store = createStore({ registry: createDefaultRegistry(), doc: createStarterDoc() });
+    store.apply({
+      ops: [
+        { op: 'page.create', path: '/', title: 'Home' },
+        {
+          op: 'section.insert',
+          section: 'hero',
+          variant: { layout: 'split' },
+          content: { heading: { text: 'Datenschutzgrundverordnungskonformität leicht gemacht' } },
+        },
+      ],
+    });
+    const provider = createPlaywrightLayoutProvider(store);
+    try {
+      const snapshot = await provider.snapshot({ page: 'home', width: 390 });
+      expect(
+        lintLayout(snapshot).filter(
+          (i) => i.rule === 'horizontal-overflow' || i.rule === 'clipped-content',
+        ),
+      ).toEqual([]);
+      const heading = snapshot.boxes.find((b) => b.id === 'hero-1/heading');
+      expect((heading?.x ?? 0) + (heading?.w ?? 999)).toBeLessThanOrEqual(390);
+    } finally {
+      await provider.close();
+    }
+  });
 });

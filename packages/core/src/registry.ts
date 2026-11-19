@@ -22,8 +22,11 @@ export interface ComponentDef {
   description: string;
   // biome-ignore lint/suspicious/noExplicitAny: any object schema is accepted
   props: z.ZodObject<any, any>;
-  /** Whether the node may have children; `{ allow }` restricts child types. */
-  children: boolean | { allow: string[] };
+  /**
+   * Whether the node may have children; `{ allow }` restricts child types, `{ deny }` rules some
+   * out (a link can't contain links or buttons).
+   */
+  children: boolean | { allow?: string[]; deny?: string[] };
   /** Props editable at the "content" freedom level (copy, links, images). */
   contentProps?: string[];
   /** `false` hides the component from insertion (e.g. the page root). */
@@ -136,7 +139,8 @@ export class Registry {
     const def = this.components.get(parentType);
     if (!def || def.children === false) return false;
     if (def.children === true) return true;
-    return def.children.allow.includes(childType);
+    const { allow, deny } = def.children;
+    return (!allow || allow.includes(childType)) && !deny?.includes(childType);
   }
 }
 

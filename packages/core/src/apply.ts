@@ -808,6 +808,7 @@ function sectionInsert(ctx: OpContext, op: OpOf<'section.insert'>) {
     section: { name: def.name, version: def.version, variant },
   });
   if (!root) return;
+  checkLinkNesting(ctx, root);
   for (const [partPath, patch] of Object.entries(op.content ?? {})) {
     const target = draft.node(`${id}/${partPath}`);
     if (!target) {
@@ -832,7 +833,29 @@ function nodeInsert(ctx: OpContext, op: OpOf<'node.insert'>) {
   if (!parent || !guardParent(ctx, parent)) return;
   const order = positionKey(ctx, parent.id, op.before, op.after);
   if (order === undefined) return;
-  createTree(ctx, op.node, parent, order, scopeFor(ctx.draft, parent.id), { explicit: true });
+  const node = createTree(ctx, op.node, parent, order, scopeFor(ctx.draft, parent.id), {
+    explicit: true,
+  });
+  if (node) checkLinkNesting(ctx, node);
+}
+
+const INTERACTIVE = new Set(['link', 'button']);
+
+/**
+ * Fails if `node` (just placed) puts a link or button somewhere inside a link: browsers split
+ * nested interactive content, so the page would no longer match the document.
+ */
+function checkLinkNesting(ctx: OpContext, node: BNode): void {
+  const link = ancestors(ctx.draft, node.id).find((a) => a.type === 'link');
+  if (!link) return;
+  const inner = [node, ...descendants(ctx.draft, node.id)].find((n) => INTERACTIVE.has(n.type));
+  if (!inner) return;
+  fail(ctx, {
+    code: 'invalid_parent',
+    nodeId: inner.id,
+    message: `"${inner.id}" (${inner.type}) can't be inside link "${link.id}": links can't contain links or buttons.`,
+    hint: `Put it next to "${link.id}" instead.`,
+  });
 }
 
 function nodeMove(ctx: OpContext, op: OpOf<'node.move'>) {
@@ -879,7 +902,9 @@ function nodeMove(ctx: OpContext, op: OpOf<'node.move'>) {
   }
   const order = positionKey(ctx, parent.id, op.before, op.after, node.id);
   if (order === undefined) return;
-  ctx.draft.setNode({ ...node, parent: parent.id, order });
+  const moved = { ...node, parent: parent.id, order };
+  ctx.draft.setNode(moved);
+  checkLinkNesting(ctx, moved);
 }
 
 function nodeRemove(ctx: OpContext, op: OpOf<'node.remove'>) {

@@ -9,6 +9,8 @@ export interface LayoutProvider {
     page: string;
     width: number;
     theme?: string;
+    /** Lay out this translation (a language of the site other than the default). */
+    locale?: string;
     /** Lay out this document instead of the current one (e.g. a proposal). */
     doc?: SiteDoc;
   }): Promise<LayoutSnapshot>;
@@ -17,6 +19,7 @@ export interface LayoutProvider {
     page: string;
     width: number;
     theme?: string;
+    locale?: string;
     /** Only this node. */
     node?: string;
     doc?: SiteDoc;
@@ -41,7 +44,7 @@ export function createDomLayoutProvider(
   const read = () =>
     typeof source === 'function' ? source() : { doc: source.doc, registry: source.registry };
   return {
-    async snapshot({ page, width, theme, doc: override }) {
+    async snapshot({ page, width, theme, locale, doc: override }) {
       const doc = options.document ?? document;
       const { doc: current, registry } = read();
       const site = override ?? current;
@@ -55,6 +58,7 @@ export function createDomLayoutProvider(
         mode: 'editor',
         nodeIds: 'all',
         canvasSelector: `[data-bb-measure="${id}"]`,
+        ...(locale ? { locale } : {}),
       });
       const style = doc.createElement('style');
       style.textContent = rendered.css;

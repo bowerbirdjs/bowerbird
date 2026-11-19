@@ -86,11 +86,15 @@ export function dropTarget(
   const id = nodeEl?.getAttribute('data-bb-node') ?? null;
   const elementOf = (nid: string) => content.querySelector(`[data-bb-node="${CSS.escape(nid)}"]`);
 
+  // Whole sections (new, or moved by their handle) go between the page's top-level sections.
+  const moving = payload.kind === 'move' ? view.node(payload.id) : undefined;
+  const sectionLike = payload.kind === 'section' || !!moving?.section;
   // A symbol definition has no page to add sections to.
-  if (payload.kind === 'section' && controller.symbolView) return null;
-  if (payload.kind === 'section') {
+  if (sectionLike && controller.symbolView) return null;
+  if (sectionLike) {
     let top = id ? view.node(id) : undefined;
     while (top?.parent && top.parent !== page.rootId) top = view.node(top.parent);
+    if (moving && top?.id === moving.id) return null;
     const topEl = top && top.parent === page.rootId ? elementOf(top.id) : null;
     if (top && topEl) {
       const rect = topEl.getBoundingClientRect();
@@ -119,12 +123,15 @@ export function dropTarget(
   const rect = nodeEl.getBoundingClientRect();
   const nearEdge =
     y - rect.top < EDGE || rect.bottom - y < EDGE || x - rect.left < EDGE || rect.right - x < EDGE;
-  if (node.parent === null || (registry.accepts(node.type, type) && !nearEdge)) {
-    if (!registry.accepts(node.type, type)) return null;
+  // Linked component instances take no new children (they follow their definition).
+  const inside = registry.accepts(node.type, type) && controller.canInsertInto(node.id);
+  if (node.parent === null || (inside && !nearEdge)) {
+    if (!inside) return null;
     return { parent: node.id, indicator: { kind: 'box', rect, orientation: 'vertical' } };
   }
   const parent = view.node(node.parent);
-  if (!parent || !registry.accepts(parent.type, type)) return null;
+  if (!parent || !registry.accepts(parent.type, type) || !controller.canInsertInto(parent.id))
+    return null;
   const horizontal = isHorizontal(nodeEl.parentElement);
   const side = (horizontal ? x < rect.left + rect.width / 2 : y < rect.top + rect.height / 2)
     ? 'before'

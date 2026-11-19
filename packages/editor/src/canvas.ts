@@ -335,6 +335,12 @@ export class CanvasView {
     this.content.innerHTML = empty
       ? `${html}<div class="bbx-empty">${c.can('insert') ? 'This page is empty. Add a section from the Insert panel, or drag one here.' : 'This page is empty.'}</div>`
       : html;
+    // The page's links and buttons are content being edited, not controls: keep them out of the
+    // Tab order (the canvas itself is focusable, and nodes are reached through Layers).
+    for (const el of this.content.querySelectorAll<HTMLElement>(
+      'a[href], button, input, select, textarea, summary, [tabindex]',
+    ))
+      el.tabIndex = -1;
     if (c.theme) this.frame.setAttribute('data-theme', c.theme);
     else this.frame.removeAttribute('data-theme');
     this.frame.toggleAttribute('data-preview', c.preview);

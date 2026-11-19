@@ -409,6 +409,10 @@ export function createAgentTools(options: AgentToolsOptions): AgentTool[] {
       240,
     );
   };
+  const localeError = (locale?: string): ToolResult | undefined => {
+    const error = locale && checkReadLocale(store.doc.locales, locale).error;
+    return error ? { isError: true, text: error } : undefined;
+  };
   const themeError = (theme?: string): ToolResult | undefined =>
     theme && !Object.hasOwn(store.doc.themes, theme)
       ? {
@@ -446,6 +450,10 @@ export function createAgentTools(options: AgentToolsOptions): AgentTool[] {
             root: z.string().optional().describe('Only list this node and its subtree.'),
             depth: z.number().int().min(1).max(12).optional(),
             theme: z.string().optional(),
+            locale: z
+              .string()
+              .optional()
+              .describe('Check a translation, e.g. "de" (longer text overflows first).'),
             changeset: z
               .string()
               .optional()
@@ -457,15 +465,17 @@ export function createAgentTools(options: AgentToolsOptions): AgentTool[] {
             if (typeof page !== 'string') return page;
             const width = widthFor(input.bp, input.width);
             if (typeof width !== 'number') return width;
-            const bad = themeError(input.theme);
+            const bad = themeError(input.theme) ?? localeError(input.locale);
             if (bad) return bad;
             const doc = docFor(input.changeset);
             if (!('nodes' in doc)) return doc;
+            const locale = input.locale && checkReadLocale(store.doc.locales, input.locale).locale;
             const snapshot = await layout.snapshot({
               page,
               width,
               doc,
               ...(input.theme ? { theme: input.theme } : {}),
+              ...(locale ? { locale } : {}),
             });
             return {
               text: formatLayout(snapshot, {
@@ -489,6 +499,7 @@ export function createAgentTools(options: AgentToolsOptions): AgentTool[] {
                   width: z.number().int().min(240).max(3840).optional(),
                   node: z.string().optional().describe('Only this node.'),
                   theme: z.string().optional(),
+                  locale: z.string().optional().describe('Show a translation, e.g. "de".'),
                   changeset: z.string().optional().describe('Show a proposal as if accepted.'),
                 }),
                 annotations: { readOnlyHint: true },
@@ -497,16 +508,19 @@ export function createAgentTools(options: AgentToolsOptions): AgentTool[] {
                   if (typeof page !== 'string') return page;
                   const width = widthFor(input.bp, input.width);
                   if (typeof width !== 'number') return width;
-                  const bad = themeError(input.theme);
+                  const bad = themeError(input.theme) ?? localeError(input.locale);
                   if (bad) return bad;
                   const doc = docFor(input.changeset);
                   if (!('nodes' in doc)) return doc;
+                  const locale =
+                    input.locale && checkReadLocale(store.doc.locales, input.locale).locale;
                   const image = await layout.screenshot!({
                     page,
                     width,
                     doc,
                     ...(input.node ? { node: input.node } : {}),
                     ...(input.theme ? { theme: input.theme } : {}),
+                    ...(locale ? { locale } : {}),
                   });
                   return {
                     text: `Screenshot of ${input.node ?? `page ${page}`} at ${width}px${

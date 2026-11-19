@@ -96,7 +96,8 @@ export const link: ComponentDef = {
     target: z.enum(['_self', '_blank']).optional(),
     label: z.string().max(200).optional(),
   }),
-  children: true,
+  // Browsers split nested interactive content, so a link holds no links or buttons.
+  children: { deny: ['link', 'button'] },
   contentProps: ['text', 'href', 'label'],
   render: (node) => ({
     tag: 'a',

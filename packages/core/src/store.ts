@@ -1129,7 +1129,15 @@ export class Store {
    * Applies open ops of a changeset (all, or the given indexes) as one transaction attributed to
    * the proposer and approved by `by`. Ops that depend on unaccepted ops must be included.
    */
-  acceptChangeset(id: string, options: { by: Actor; ops?: number[] }): ApplyResult {
+  acceptChangeset(
+    id: string,
+    options: {
+      by: Actor;
+      ops?: number[];
+      /** Check whether `by` could accept (policy, dependencies, conflicts) without accepting. */
+      dryRun?: boolean;
+    },
+  ): ApplyResult {
     const revision = this.current.revision;
     const cs = this.requireChangeset(id);
     if (!('ops' in cs)) return { ok: false, revision, errors: [cs] };
@@ -1189,6 +1197,16 @@ export class Store {
         ...(run.result.failedOp !== undefined
           ? { failedOp: selected[run.result.failedOp] ?? run.result.failedOp }
           : {}),
+      };
+    }
+    if (options.dryRun) {
+      return {
+        ok: true,
+        txId: null,
+        revision,
+        summary: summarize(run.draft.changes()),
+        dryRun: true,
+        warnings: run.ctx.warnings,
       };
     }
     stampChanges(run.draft, cs.actor, revision + 1, run.ctx.explicit);

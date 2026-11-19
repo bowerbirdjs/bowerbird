@@ -184,4 +184,52 @@ describe.skipIf(!apps)('editor use cases from the QA pass', () => {
     expect((bar?.y ?? 0) + (bar?.height ?? 0)).toBeLessThanOrEqual((sel?.y ?? 0) + 1);
     expect(errors).toEqual([]);
   });
+
+  test('a button dropped on a link goes next to it, never inside', async () => {
+    const { page, editor, errors } = await open(apps?.vanilla ?? '');
+    await editor.getByRole('button', { name: /Hero/ }).first().click();
+    const cta = page.locator('[data-bb-node="hero-1/primary"]');
+    await cta.waitFor();
+    await editor.getByRole('tab', { name: 'Insert' }).click();
+    const box = await cta.boundingBox();
+    await editor
+      .getByRole('button', { name: 'Button', exact: true })
+      .dragTo(cta, { targetPosition: { x: (box?.width ?? 20) / 2, y: (box?.height ?? 10) / 2 } });
+    const placed = () =>
+      page.evaluate(() => {
+        const doc = document.querySelector('bowerbird-editor')!.store!.doc;
+        const button = Object.values(doc.nodes).find((n) => n.type === 'button');
+        return button ? doc.nodes[button.parent!]?.type : null;
+      });
+    await expect.poll(placed).toBe('box');
+    expect(errors).toEqual([]);
+  });
+
+  test('page links don’t take Tab stops, and Delete on an instance part does nothing', async () => {
+    const { page, editor, errors } = await open(apps?.vanilla ?? '');
+    await editor
+      .getByRole('button', { name: /Navigation bar/ })
+      .first()
+      .click();
+    await page.locator('[data-bb-node="nav-1"]').waitFor();
+    const tabbable = await page
+      .locator('.bbx-content a[href], .bbx-content button')
+      .evaluateAll((els) => els.filter((e) => (e as HTMLElement).tabIndex >= 0).length);
+    expect(tabbable).toBe(0);
+    await apply(page, [{ op: 'symbol.create', id: 'nav-1', name: 'Site nav' }]);
+    await page.locator('[data-bb-node="nav-1/brand"]').click();
+    await page.keyboard.press('Delete');
+    await page.keyboard.press('Control+d');
+    expect(await page.locator('[data-bb-node="nav-1/brand"]').count()).toBe(1);
+    expect(await editor.locator('[part="toast"]').isHidden()).toBe(true);
+    expect(errors).toEqual([]);
+  });
+
+  test('other people’s avatars are buttons that show their selection', async () => {
+    const { page, errors } = await open(apps?.collab ?? '');
+    const ana = page.locator('#ana');
+    await expect.poll(() => ana.locator('.peers button').count()).toBe(1);
+    expect(await ana.locator('.peers button').getAttribute('aria-label')).toMatch(/^Sam/);
+    expect(errors).toEqual([]);
+  });
 });

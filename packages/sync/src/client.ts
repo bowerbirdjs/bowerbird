@@ -299,8 +299,12 @@ export class SyncedStore extends Store {
     return { ok: true, changeset: provisional, warnings: check.result.warnings };
   }
 
-  override acceptChangeset(id: string, options: { by: Actor; ops?: number[] }): ApplyResult {
-    if (!this.syncing) return super.acceptChangeset(id, options);
+  override acceptChangeset(
+    id: string,
+    options: { by: Actor; ops?: number[]; dryRun?: boolean },
+  ): ApplyResult {
+    // A dry run only checks, on this copy: it must never reach the server.
+    if (!this.syncing || options.dryRun) return super.acceptChangeset(id, options);
     if (!this.connected) return this.offline();
     this.channel!.send({
       type: 'accept',

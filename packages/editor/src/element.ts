@@ -622,7 +622,7 @@ export class BowerbirdEditor extends LitElement {
               }}
             >
               <optgroup label="Pages">
-                ${pages.map((p) => html`<option value=${p.id} .selected=${live(!c.symbolView && p.id === c.page)}>${p.title} (${p.path})</option>`)}
+                ${pages.map((p) => html`<option value=${p.id} .selected=${live(!c.symbolView && p.id === c.page)}>${(c.locale && p.l10n?.[c.locale]?.title) || p.title} (${p.path})</option>`)}
               </optgroup>
               ${
                 symbols.length
@@ -637,15 +637,19 @@ export class BowerbirdEditor extends LitElement {
       ${
         c.peers.length && c.can('toolbar.peers')
           ? html`<ul class="peers" aria-label="Also here">
-            ${c.peers.map(
-              (p) => html`<li
-                style=${`--peer: ${p.color}`}
-                title=${`${p.actor.name ?? p.actor.id}${p.actor.kind === 'agent' ? ' (agent)' : ''}${p.activity ? `: ${p.activity}` : ''}`}
-                @click=${() => p.selection && c.select(p.selection)}
-              >
-                ${(p.actor.name ?? p.actor.id).slice(0, 1).toUpperCase()}
-              </li>`,
-            )}
+            ${c.peers.map((p) => {
+              const who = `${p.actor.name ?? p.actor.id}${p.actor.kind === 'agent' ? ' (agent)' : ''}${p.activity ? `: ${p.activity}` : ''}`;
+              return html`<li style=${`--peer: ${p.color}`}>
+                <button
+                  part="button"
+                  title=${who}
+                  aria-label=${p.selection ? `${who}. Show their selection` : who}
+                  @click=${() => p.selection && c.select(p.selection)}
+                >
+                  ${(p.actor.name ?? p.actor.id).slice(0, 1).toUpperCase()}
+                </button>
+              </li>`;
+            })}
           </ul>`
           : nothing
       }
@@ -940,14 +944,17 @@ export class BowerbirdEditor extends LitElement {
       return null;
     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
     const y = (e.clientY - rect.top) / rect.height;
-    if (payload.kind === 'section')
+    // Whole sections (new or moved) go between the page's top-level sections.
+    if (payload.kind === 'section' || (payload.kind === 'move' && view.node(payload.id)?.section))
       return n.parent && c.isRoot(n.parent) ? (y < 0.5 ? 'before' : 'after') : null;
     const type = payload.kind === 'node' ? payload.input.type : view.node(payload.id)?.type;
     if (!type) return null;
-    const accepts = c.store.registry.accepts(n.type, type);
+    // Linked component instances take no new children (they follow their definition).
+    const accepts = c.store.registry.accepts(n.type, type) && c.canInsertInto(n.id);
     if (accepts && y > 0.3 && y < 0.7) return 'inside';
     const parent = n.parent ? view.node(n.parent) : undefined;
-    if (!parent || !c.store.registry.accepts(parent.type, type)) return accepts ? 'inside' : null;
+    if (!parent || !c.store.registry.accepts(parent.type, type) || !c.canInsertInto(parent.id))
+      return accepts ? 'inside' : null;
     return y < 0.5 ? 'before' : 'after';
   }
 
@@ -1099,7 +1106,7 @@ export class BowerbirdEditor extends LitElement {
       }
       <ol class="history" aria-label="History">
         ${entries.map(
-          (e) => html`<li class=${classMap({ entry: true, undone: !!e.undone })}>
+          (e) => html`<li class=${classMap({ entry: true, undone: c.isUndone(e) })}>
             <span class=${`actor ${e.actor.kind}`}>${e.actor.name ?? e.actor.id}</span>
             <span class="what">${e.label ?? e.kind}</span>
             <time datetime=${new Date(e.time).toISOString()}>${timeAgo(e.time)}</time>
@@ -1210,7 +1217,7 @@ export class BowerbirdEditor extends LitElement {
         <h3>Linked component</h3>
         <p class="muted">
           ${root?.id === node.id ? 'Instance' : 'Part of an instance'} of “${sym?.name ?? node.link.symbol}”.
-          ${overrides.length ? html`Overrides: ${overrides.map((o) => o.replace(/^props\./, '')).join(', ')}.` : 'Matches the definition.'}
+          ${overrides.length ? html`Overrides: ${overrides.map(fieldLabel).join(', ')}.` : 'Matches the definition.'}
         </p>
         <div class="row-inline">
           <button class="icon-btn" part="button" @click=${() => c.select(node.link!.node)}>Edit definition</button>
@@ -1258,6 +1265,8 @@ export class BowerbirdEditor extends LitElement {
       }
       const selected = openOps.filter((i) => chosen!.has(i));
       const previewing = c.ghost?.changeset === cs.id;
+      // Offer Accept only when it would work for this person (their access, dependencies).
+      const blocked = c.acceptProblem(cs.id, selected);
       return html`<div class="section changeset" part="panel-section">
         <div class="head">
           <strong>${cs.label ?? cs.id}</strong>
@@ -1306,6 +1315,7 @@ export class BowerbirdEditor extends LitElement {
           )}
         </ul>
         ${cs.warnings.length ? html`<ul class="notes">${cs.warnings.map((w) => html`<li>${w.message}</li>`)}</ul>` : nothing}
+        ${blocked ? html`<p class="notes" role="note">You can’t accept ${selected.length === 1 ? 'this' : 'these'}: ${blocked.message}</p>` : nothing}
         <div class="row-inline">
           <button
             class="icon-btn"
@@ -1315,7 +1325,7 @@ export class BowerbirdEditor extends LitElement {
           >
             ${previewing ? 'Hide preview' : 'Preview'}
           </button>
-          <button class="icon-btn primary" part="button" ?disabled=${!selected.length} @click=${() => {
+          <button class="icon-btn primary" part="button" ?disabled=${!selected.length || !!blocked} @click=${() => {
             this.reviewSelection.delete(cs.id);
             c.acceptChangeset(cs.id, selected);
           }}>
@@ -1347,13 +1357,13 @@ export class BowerbirdEditor extends LitElement {
     return html`
       <div class="section" part="panel-section">
         <h3>Page</h3>
-        <div class="field" part="field"><label for="pt">Title${suffix}</label><input id="pt"
+        <div class="field" part="field"><label for="pt">Title${suffix}</label><input id="pt" part="input"
           .value=${live(locale ? (translated?.title ?? '') : page.title)}
           placeholder=${locale ? page.title : ''} @change=${update('title')} /></div>
-        <div class="field" part="field"><label for="pp">Path</label><input id="pp" .value=${live(page.path)} @change=${update('path')} /></div>
+        <div class="field" part="field"><label for="pp">Path</label><input id="pp" part="input" .value=${live(page.path)} @change=${update('path')} /></div>
         <div class="field" part="field">
           <label for="pd">Description${suffix}</label>
-          <textarea id="pd" .value=${live(locale ? (translated?.description ?? '') : (page.description ?? ''))}
+          <textarea id="pd" part="input" .value=${live(locale ? (translated?.description ?? '') : (page.description ?? ''))}
             placeholder=${locale ? (page.description ?? '') : ''} @change=${update('description')}></textarea>
         </div>
       </div>
@@ -1375,7 +1385,7 @@ export class BowerbirdEditor extends LitElement {
       ${variants.map(
         ([axis, values]) => html`<div class="field" part="field">
           <label for=${`v-${axis}`}>${axis[0]!.toUpperCase() + axis.slice(1)}</label>
-          <select id=${`v-${axis}`} @change=${(e: Event) => c.setVariant(node.id, { [axis]: (e.target as HTMLSelectElement).value })}>
+          <select id=${`v-${axis}`} part="select" @change=${(e: Event) => c.setVariant(node.id, { [axis]: (e.target as HTMLSelectElement).value })}>
             ${values.map((v) => html`<option value=${v} .selected=${live(node.section?.variant[axis] === v)}>${v}</option>`)}
           </select>
         </div>`,
@@ -1389,11 +1399,11 @@ export class BowerbirdEditor extends LitElement {
           <label for=${id}>${(spec.description ?? name).replace(/\.$/, '')}</label>
           ${
             family
-              ? html`<select id=${id} @change=${(e: Event) => c.setVars(node.id, { [name]: (e.target as HTMLSelectElement).value || null })}>
+              ? html`<select id=${id} part="select" @change=${(e: Event) => c.setVars(node.id, { [name]: (e.target as HTMLSelectElement).value || null })}>
                 <option value="" .selected=${live(!current)}>Default (${spec.default})</option>
                 ${options.map((t) => html`<option value=${`var(${t})`} .selected=${live(current === `var(${t})`)}>${t.slice(2)}</option>`)}
               </select>`
-              : html`<input id=${id} .value=${live(current)} placeholder=${spec.default}
+              : html`<input id=${id} part="input" .value=${live(current)} placeholder=${spec.default}
                 @change=${(e: Event) => c.setVars(node.id, { [name]: (e.target as HTMLInputElement).value || null })} />`
           }
         </div>`;
@@ -1437,29 +1447,31 @@ export class BowerbirdEditor extends LitElement {
     };
     let control: TemplateResult;
     if (field.kind === 'select') {
-      control = html`<select id=${id} @change=${onChange}>
+      control = html`<select id=${id} part="select" @change=${onChange}>
         ${field.required ? nothing : html`<option value="" .selected=${live(value === undefined)}>—</option>`}
         ${field.options!.map((o) => html`<option value=${o} .selected=${live(value === o)}>${o}</option>`)}
       </select>`;
     } else if (field.kind === 'json') {
       control = html`<textarea
         id=${id}
+        part="input"
         class="code"
         spellcheck="false"
         .value=${live(value === undefined ? '' : JSON.stringify(value, null, 2))}
         @change=${onChange}
       ></textarea>`;
     } else if (field.kind === 'textarea') {
-      control = html`<textarea id=${id} .value=${live(String(value ?? ''))} @change=${onChange}></textarea>`;
+      control = html`<textarea id=${id} part="input" .value=${live(String(value ?? ''))} @change=${onChange}></textarea>`;
     } else if (field.kind === 'checkbox') {
       control = html`<input id=${id} type="checkbox" .checked=${live(!!value)} @change=${onChange} />`;
     } else if (field.kind === 'number') {
-      control = html`<input id=${id} type="number" .value=${live(value === undefined ? '' : String(value))} @change=${onChange} />`;
+      control = html`<input id=${id} part="input" type="number" .value=${live(value === undefined ? '' : String(value))} @change=${onChange} />`;
     } else {
       const text = String(value ?? '');
       const embedded = field.kind === 'image' && text.startsWith('data:');
       control = html`<input
         id=${id}
+        part="input"
         type=${field.kind === 'url' || field.kind === 'image' ? 'url' : 'text'}
         .value=${live(embedded ? '' : text)}
         placeholder=${embedded ? 'Embedded image (paste a URL to replace)' : field.kind === 'url' ? 'https:// or /path' : ''}
@@ -1501,6 +1513,7 @@ export class BowerbirdEditor extends LitElement {
         <label for="state">State</label>
         <select
           id="state"
+          part="select"
           @change=${(e: Event) => {
             this.styleState = (e.target as HTMLSelectElement).value;
             this.tick++;

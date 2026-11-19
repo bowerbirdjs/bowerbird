@@ -389,3 +389,38 @@ describe('review and pages', () => {
     );
   });
 });
+
+describe('links', () => {
+  it('can’t contain links or buttons, directly or deeper down', () => {
+    const store = makeStore();
+    ok(store, [{ op: 'section.insert', section: 'hero' }]);
+    const direct = errors(
+      store.apply({
+        ops: [{ op: 'node.insert', parent: 'hero-1/cta', node: { type: 'button', props: {} } }],
+      }),
+    );
+    expect(direct[0]?.message).toBe('"hero-1/cta" (link) can\'t contain a button.');
+    ok(store, [{ op: 'node.insert', parent: 'hero-1/cta', node: { type: 'box' } }]);
+    const deep = errors(
+      store.apply({
+        ops: [{ op: 'node.insert', parent: 'hero-1/box-1', node: { type: 'link', props: {} } }],
+      }),
+    );
+    expect(deep[0]?.message).toMatch(
+      /can't be inside link "hero-1\/cta": links can't contain links or buttons/,
+    );
+    // Moving a link into a link is refused the same way; images and text are fine.
+    expect(
+      errors(
+        store.apply({ ops: [{ op: 'node.move', id: 'hero-1/box-1', parent: 'hero-1/content' }] }),
+      ),
+    ).toEqual([]);
+    ok(store, [
+      {
+        op: 'node.insert',
+        parent: 'hero-1/cta',
+        node: { type: 'image', props: { src: '/a.png', alt: '' } },
+      },
+    ]);
+  });
+});

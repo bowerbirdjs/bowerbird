@@ -284,6 +284,38 @@ describe('agent tools (phase 2)', () => {
     );
   });
 
+  it('checks a translation’s layout (and explains unknown languages)', async () => {
+    const store = createStore({ registry: createDefaultRegistry(), doc: createStarterDoc() });
+    store.apply({
+      ops: [
+        { op: 'page.create', path: '/', title: 'Home' },
+        { op: 'locale.set', add: ['de'] },
+      ],
+    });
+    const seen: (string | undefined)[] = [];
+    const tools = createAgentTools({
+      store,
+      layout: {
+        snapshot: async ({ width, page, locale }) => {
+          seen.push(locale);
+          return { page, width, height: 1, overflowX: 0, boxes: [] };
+        },
+        screenshot: async ({ locale }) => {
+          seen.push(locale);
+          return { data: 'iVBORw0KGgo=', mimeType: 'image/png' };
+        },
+      },
+    });
+    await runTool(tools, 'get_layout', { locale: 'de' });
+    await runTool(tools, 'screenshot', { locale: 'de' });
+    // The default language is the content itself.
+    await runTool(tools, 'get_layout', { locale: 'en' });
+    expect(seen).toEqual(['de', 'de', undefined]);
+    const bad = await runTool(tools, 'get_layout', { locale: 'fr' });
+    expect(bad.isError).toBe(true);
+    expect(bad.text).toMatch(/no language "fr"/);
+  });
+
   it('dry runs of proposals say what would be proposed; lint can check a proposal', async () => {
     const store = createStore({
       registry: createDefaultRegistry(),

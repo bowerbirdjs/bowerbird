@@ -37,6 +37,7 @@ connect('sam', { kind: 'user', id: 'sam', name: 'Sam' });
 connect('ana', { kind: 'user', id: 'ana', name: 'Ana' });
 
 const revision = document.getElementById('revision')!;
+revision.textContent = `revision ${server.doc.revision}`;
 server.subscribe(({ doc }) => {
   revision.textContent = `revision ${doc.revision}`;
 });

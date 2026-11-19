@@ -50,7 +50,12 @@ export function exportCatalog(registry: Registry): Catalog {
         name: c.name,
         description: c.description,
         kind: c.kind,
-        children: Array.isArray(c.children) ? [...c.children] : !!c.children,
+        children:
+          typeof c.children === 'object'
+            ? c.children.allow
+              ? [...c.children.allow]
+              : true
+            : c.children,
         contentProps: [...(c.contentProps ?? [])],
         props: strip(
           z.toJSONSchema(c.props, { io: 'input', unrepresentable: 'any' }) as JsonSchema,
