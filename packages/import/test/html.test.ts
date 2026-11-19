@@ -123,4 +123,21 @@ describe('htmlToNodes', () => {
     const html = `<p>${'<span>'.repeat(5000)}deep${'</span>'.repeat(5000)}</p>`;
     expect(htmlToNodes(html).nodes[0]?.props?.text).toBe('deep');
   });
+
+  it('keeps buttons inside a link as text, so the import is accepted', () => {
+    const { nodes, warnings } = htmlToNodes(
+      '<a href="/buy"><img src="a.png" alt="Plan"><button>Buy now</button></a>',
+    );
+    expect(nodes[0]?.children?.[1]).toEqual({
+      type: 'text',
+      props: { tag: 'span', text: 'Buy now' },
+    });
+    expect(warnings).toContain('Links or buttons inside a link were kept as text.');
+    const store = createStore({ registry: createDefaultRegistry(), doc: createStarterDoc() });
+    store.apply({ ops: [{ op: 'page.create', path: '/', title: 'Home' }] });
+    const res = store.apply({
+      ops: nodes.map((node) => ({ op: 'node.insert', parent: 'root-home', node })),
+    });
+    expect(res.ok).toBe(true);
+  });
 });

@@ -319,7 +319,23 @@ export function htmlToNodes(html: string, options: HtmlImportOptions = {}): Html
             ...common(node),
           },
         ];
-      return [{ type: 'link', props, children: children(node, depth), ...common(node) }];
+      // Links can't hold links or buttons: keep their text instead.
+      const flatten = (n: NodeInput): NodeInput => {
+        if (n.type === 'link' || n.type === 'button') {
+          warnings.add('Links or buttons inside a link were kept as text.');
+          const text = typeof n.props?.text === 'string' ? n.props.text : '';
+          return { type: 'text', props: { tag: 'span', text } };
+        }
+        return n.children ? { ...n, children: n.children.map(flatten) } : n;
+      };
+      return [
+        {
+          type: 'link',
+          props,
+          children: children(node, depth).map(flatten),
+          ...common(node),
+        },
+      ];
     }
     if (tag === 'button') {
       count++;
