@@ -442,8 +442,12 @@ export class BowerbirdEditor extends LitElement {
   // -------------------------------------------------------------------------------------------
   // Public API
 
-  apply(ops: unknown[], label?: string) {
-    return this.controller?.apply(ops, label);
+  /**
+   * Applies ops as the editor's person (one transaction, one undo step). Pass `merge` for edits
+   * made on every key in your own form fields: a burst with the same key undoes as one step.
+   */
+  apply(ops: unknown[], label?: string, options?: { merge?: { key: string; within?: number } }) {
+    return this.controller?.apply(ops, label, options);
   }
 
   select(id: string | null): void {

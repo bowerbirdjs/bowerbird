@@ -697,8 +697,18 @@ export class EditorController {
   // Actions
 
   /** Applies ops as the editor's actor. Failures are emitted as `error` events and returned. */
-  apply(ops: unknown[], label?: string): ApplyResult {
-    const result = this.store.apply({ ops, actor: this.actor, ...(label ? { label } : {}) });
+  /** Applies ops as the editor's person; `merge` joins a burst of edits into one undo step. */
+  apply(
+    ops: unknown[],
+    label?: string,
+    options: { merge?: { key: string; within?: number } } = {},
+  ): ApplyResult {
+    const result = this.store.apply({
+      ops,
+      actor: this.actor,
+      ...(label ? { label } : {}),
+      ...(options.merge ? { merge: options.merge } : {}),
+    });
     if (!result.ok)
       this.emit({ type: 'error', errors: result.errors, ...(label ? { label } : {}) });
     return result;

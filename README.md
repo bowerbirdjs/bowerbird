@@ -111,6 +111,8 @@ Register a code component (`defineComponent({ kind: 'code', tag: 'promo-card', p
 
 Your components render inside your React tree (context and providers above the editor reach them). `pageAttributes` go on the canvas page's root element, for site CSS scoped to an attribute on the site root or custom properties read there. Mark text a person may edit on the page with `data-bb-edit='[{"prop":"heading","label":"Heading"}]'` (one plain-text value: edited in place; otherwise a small form): it is written to that prop of the component's node through `props.set`, and the component gets a fresh mount afterwards. Site data is marked the same way with `path`. Without the wrapper, set `hostComponents`, listen to `bb-mounts`, render into each `el` and call `componentsRendered()` once drawn. `examples/react-host` is a working example.
 
+Your own panels change the document with `editor.apply(ops, label)`, as the editor's person. A form field that writes on every key passes `{ merge: { key: 'hero-1:heading' } }` as the third argument: a burst with the same key (within 1.5 s) is one undo step.
+
 The words on the canvas (toolbar, empty page, field panel, the label on the selected element) come from `ui.strings`: pass any subset of `EditorStrings` in your language, e.g. `{ moveUp: 'Nach oben', selectionLabel: (n) => n.title ?? n.type }`. The side panels aren't covered yet.
 
 ### Choose what the editor offers

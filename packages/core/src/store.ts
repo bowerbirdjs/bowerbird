@@ -55,6 +55,13 @@ export interface TransactionInput {
    * For replaying pinned ops on a document that has moved on (sync).
    */
   renameTaken?: boolean;
+  /**
+   * Merge into the actor's previous transaction when that one carried the same `key`, is the newest
+   * entry in the history and was made less than `within` ms ago (default 1500): the burst becomes
+   * one undo step. For a host's own form fields that change the document on every key. Synced
+   * stores keep each transaction a step of its own.
+   */
+  merge?: { key: string; within?: number };
 }
 
 export interface ChangeSummary {
@@ -112,6 +119,8 @@ export interface HistoryEntry {
   time: number;
   undone?: boolean;
   redone?: boolean;
+  /** The `merge` key it was made with (later transactions with the same key may join it). */
+  merge?: string;
 }
 
 export interface CommitEvent {
@@ -813,6 +822,7 @@ export class Store {
       warnings: run.ctx.warnings,
       ...(input.label ? { label: input.label } : {}),
       ...(input.dryRun ? { dryRun: true } : {}),
+      ...(input.merge?.key ? { merge: input.merge } : {}),
     });
     if (!result.ok) return result;
     return {
@@ -1594,6 +1604,7 @@ export class Store {
       warnings: Issue[];
       approvedBy?: Actor;
       changeset?: string;
+      merge?: { key: string; within?: number };
     },
   ): ApplyResult {
     const revision = this.current.revision;
@@ -1615,21 +1626,39 @@ export class Store {
         }
       : undefined;
     const doc = draft.finish(revision + 1);
+    const now = Date.now();
+    const last = this.entries.at(-1);
+    const joined =
+      meta.merge &&
+      last &&
+      last.kind === 'edit' &&
+      last.merge === meta.merge.key &&
+      !last.undone &&
+      !last.changeset &&
+      last.actor.kind === actor.kind &&
+      last.actor.id === actor.id &&
+      now - last.time <= (meta.merge.within ?? 1500)
+        ? last
+        : undefined;
+    const label = meta.label ?? joined?.label;
+    const edits = joined ? mergeTokenEdits(joined.tokenEdits, tokenEdits) : tokenEdits;
     const entry: HistoryEntry = {
       txId: `tx-${doc.revision}`,
       revision: doc.revision,
       actor,
       kind: meta.kind,
-      changes,
-      ...(tokenEdits ? { tokenEdits } : {}),
-      time: Date.now(),
-      ...(meta.label ? { label: meta.label } : {}),
+      changes: joined ? mergeChanges(joined.changes, changes) : changes,
+      ...(edits ? { tokenEdits: edits } : {}),
+      time: now,
+      ...(label ? { label } : {}),
       ...(meta.target ? { target: meta.target } : {}),
       ...(meta.approvedBy ? { approvedBy: meta.approvedBy } : {}),
       ...(meta.changeset ? { changeset: meta.changeset } : {}),
+      ...(meta.merge ? { merge: meta.merge.key } : {}),
     };
     this.current = doc;
     this.index = undefined;
+    if (joined) this.entries.pop();
     this.entries.push(entry);
     if (this.entries.length > this.historyLimit)
       this.entries.splice(0, this.entries.length - this.historyLimit);
@@ -1651,6 +1680,28 @@ export class Store {
       warnings: meta.warnings,
     };
   }
+}
+
+/** Two entries' record changes as one: each record from its first state to its last. */
+function mergeChanges(first: Change[], then: Change[]): Change[] {
+  const out = first.map((c) => ({ ...c }));
+  for (const change of then) {
+    const earlier = out.find((c) => c.kind === change.kind && c.id === change.id);
+    if (earlier) (earlier as { after?: unknown }).after = (change as { after?: unknown }).after;
+    else out.push(change);
+  }
+  return out;
+}
+
+function mergeTokenEdits(
+  first: HistoryEntry['tokenEdits'],
+  then: HistoryEntry['tokenEdits'],
+): HistoryEntry['tokenEdits'] {
+  if (!first || !then) return first ?? then;
+  return {
+    before: { ...then.before, ...first.before },
+    after: { ...first.after, ...then.after },
+  };
 }
 
 function pickStamps(

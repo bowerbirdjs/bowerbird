@@ -233,7 +233,9 @@ export class SyncedStore extends Store {
 
   override apply(input: TransactionInput): ApplyResult {
     if (!this.syncing || input.dryRun) return super.apply(input);
-    const result = super.apply({ ...input, pinIds: true });
+    // Each change is sent and confirmed on its own, so it stays its own step.
+    const { merge: _merge, ...unmerged } = input;
+    const result = super.apply({ ...unmerged, pinIds: true });
     if (!result.ok || !result.txId) return result;
     const { pinned, ...rest } = result;
     const ops = pinned ?? (input.ops as Op[]);
