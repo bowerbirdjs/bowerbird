@@ -11,7 +11,7 @@ describe.skipIf(!apps)('rich text and languages', () => {
 
     // Rich text: insert inside the hero content, then bold a word inline.
     await page.locator('[data-bb-node="hero-1/subheading"]').click();
-    await editor.getByRole('button', { name: 'Rich text' }).click();
+    await editor.getByRole('button', { name: 'Rich text', exact: true }).click();
     const rich = page.locator('[data-bb-canvas] [data-bb-node$="rich-text-1"]');
     await rich.waitFor();
     await rich.dblclick();

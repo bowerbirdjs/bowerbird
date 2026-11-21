@@ -1,4 +1,16 @@
 import { defineSection, t } from '@bowerbirdjs/core';
+import {
+  cards,
+  content,
+  gallery,
+  pageHeader,
+  schedule,
+  split,
+  stats,
+  steps,
+  team,
+} from './sections-content.js';
+import { banner, contact, faq, logos, newsletter, testimonials } from './sections-more.js';
 import { GUTTER, MUTED, PLACEHOLDER_IMAGE, primaryButton, secondaryButton } from './shared.js';
 
 export const nav = defineSection({
@@ -399,4 +411,27 @@ export const footer = defineSection({
     ]),
 });
 
-export const SECTIONS = [nav, hero, features, pricing, cta, footer];
+/** Every starter section, in the order a page tends to use them. */
+export const SECTIONS = [
+  banner,
+  nav,
+  hero,
+  pageHeader,
+  logos,
+  features,
+  split,
+  steps,
+  stats,
+  cards,
+  gallery,
+  team,
+  schedule,
+  testimonials,
+  pricing,
+  faq,
+  content,
+  newsletter,
+  contact,
+  cta,
+  footer,
+];

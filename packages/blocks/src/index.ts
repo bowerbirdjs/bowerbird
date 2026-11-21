@@ -13,7 +13,27 @@ import { darkTheme, defaultTokens } from './theme.js';
 
 export { ICONS } from './icons.js';
 export { cta, features, footer, hero, nav, pricing, SECTIONS } from './sections.js';
-export { PLACEHOLDER_IMAGE, primaryButton, secondaryButton } from './shared.js';
+export {
+  cards,
+  content,
+  gallery,
+  pageHeader,
+  schedule,
+  split,
+  stats,
+  steps,
+  team,
+} from './sections-content.js';
+export { banner, contact, faq, logos, newsletter, testimonials } from './sections-more.js';
+export {
+  headerCss,
+  PLACEHOLDER_IMAGE,
+  placeholderPhoto,
+  placeholderPortrait,
+  primaryButton,
+  secondaryButton,
+  sectionCss,
+} from './shared.js';
 export { darkTheme, defaultTokens } from './theme.js';
 
 /**

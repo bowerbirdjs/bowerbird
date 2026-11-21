@@ -281,6 +281,10 @@ describe.skipIf(!apps)('wedding planner POC', () => {
     await canvas.locator('[data-bb-data="faq.0.q"]').click();
     await page.locator('.bbx-itembar').getByRole('button', { name: 'Remove item' }).click();
     await canvas.getByText('+ Add the first question').click();
+    // The new question is edited once it is on the page; typing before that would be lost.
+    await expect
+      .poll(() => page.evaluate(() => document.activeElement?.getAttribute('data-bb-data')))
+      .toBe('faq.0.q');
     await page.keyboard.press('Control+A');
     await page.keyboard.type('Is there parking?');
     await page.keyboard.press('Enter');

@@ -6,10 +6,7 @@ import { apps, useBrowser } from './browser.js';
 const apply = (page: Page, ops: unknown[]) =>
   page.evaluate((o) => document.querySelector('bowerbird-editor')!.apply(o), ops);
 const props = (page: Page, id: string) =>
-  page.evaluate(
-    (i) => document.querySelector('bowerbird-editor')!.store!.doc.nodes[i]?.props,
-    id,
-  );
+  page.evaluate((i) => document.querySelector('bowerbird-editor')!.store!.doc.nodes[i]?.props, id);
 const selected = (page: Page) =>
   page.evaluate(() => document.querySelector('bowerbird-editor')!.controller!.selected);
 
@@ -87,9 +84,7 @@ describe.skipIf(!apps)('forms, accordion items and icons in the editor', () => {
       .toEqual(['Monthly', 'Yearly']);
     // Back to a kind without choices: they go, instead of the change being refused.
     await editor.getByLabel('Kind').selectOption('email');
-    await expect
-      .poll(async () => (await props(page, 'hero-1/field-1'))?.options)
-      .toBeUndefined();
+    await expect.poll(async () => (await props(page, 'hero-1/field-1'))?.options).toBeUndefined();
     expect(errors).toEqual([]);
   });
 
@@ -165,9 +160,9 @@ describe.skipIf(!apps)('forms, accordion items and icons in the editor', () => {
     expect(box[2]).toBe(box[3]);
 
     const picker = editor.getByRole('group', { name: 'Icon' });
-    expect(await picker.getByRole('button', { name: 'star', exact: true }).getAttribute('aria-pressed')).toBe(
-      'true',
-    );
+    expect(
+      await picker.getByRole('button', { name: 'star', exact: true }).getAttribute('aria-pressed'),
+    ).toBe('true');
     await picker.getByRole('button', { name: 'rocket', exact: true }).click();
     await expect.poll(async () => (await props(page, 'hero-1/icon-1'))?.name).toBe('rocket');
     await expect.poll(drawing).not.toBe(star);

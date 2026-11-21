@@ -65,6 +65,35 @@ describe.skipIf(!hasPlaywright())('rendered layout in Chromium', { timeout: 30_0
     expect(lintLayout(s).filter((i) => i.rule === 'horizontal-overflow')).toEqual([]);
   });
 
+  it('reads text a node generates (a field’s label and help) and counts fields as targets', async () => {
+    const s = await measure(`
+      <form data-bb-node="form" style="background:#fff;color:#111">
+        <label data-bb-node="ok" style="display:grid">
+          <span style="font-size:14px">Email</span><input name="email" style="height:44px">
+          <span style="font-size:13px;color:#555">We never share it.</span>
+        </label>
+        <label data-bb-node="faint" style="display:grid">
+          <span style="font-size:11px;color:#bbb">Hard to read</span>
+          <select name="plan"><option>One option that is not shown as text</option></select>
+        </label>
+        <details data-bb-node="item"><summary data-bb-node="q" style="padding:12px 0">Question</summary>
+          <p data-bb-node="a" style="color:#eee">Folded away, so not measured</p></details>
+      </form>`);
+    const byId = Object.fromEntries(s.boxes.map((b) => [b.id, b]));
+    // The smallest size and the lowest contrast of what the node shows.
+    expect(byId.ok?.text).toMatchObject({ fontSize: 13, lines: 2 });
+    expect(byId.ok?.text?.contrast).toBeGreaterThan(7);
+    expect(byId.ok?.interactive).toBe(true);
+    expect(byId.faint?.text).toMatchObject({ fontSize: 11, chars: 12 });
+    expect(byId.faint?.text?.contrast).toBeLessThan(2);
+    expect(byId.q?.interactive).toBe(true);
+    expect(byId.a?.hidden).toBe(true);
+    expect(lintLayout(s).map((i) => `${i.rule} ${i.nodeId}`)).toEqual([
+      'contrast faint',
+      'small-text faint',
+    ]);
+  });
+
   it('the Playwright provider loads lazy images, crops tall shots and explains failures', async () => {
     const store = createStore({ registry: createDefaultRegistry(), doc: createStarterDoc() });
     store.apply({
@@ -103,21 +132,23 @@ describe.skipIf(!hasPlaywright())('rendered layout in Chromium', { timeout: 30_0
     const store = createStore({ registry, doc: createStarterDoc() });
     const ops: unknown[] = [{ op: 'page.create', path: '/', title: 'Home' }];
     for (const s of registry.listSections()) {
-      const [axis, values] = Object.entries(s.variants ?? {})[0] ?? [];
-      for (const value of values ?? [undefined]) {
-        ops.push({
-          op: 'section.insert',
-          section: s.name,
-          ...(axis && value ? { variant: { [axis]: value } } : {}),
-        });
-      }
+      // The default, then every other value of every axis.
+      ops.push({ op: 'section.insert', section: s.name });
+      for (const [axis, values] of Object.entries(s.variants ?? {}))
+        for (const value of values.slice(1))
+          ops.push({ op: 'section.insert', section: s.name, variant: { [axis]: value } });
     }
-    expect(store.apply({ ops }).ok).toBe(true);
+    // Accordion items are measured open too: folded content isn't laid out.
+    const applied = store.apply({ ops });
+    expect(applied.ok, JSON.stringify(applied)).toBe(true);
+    const items = Object.values(store.doc.nodes).filter((n) => n.type === 'details');
+    expect(items.length).toBeGreaterThan(0);
+    store.apply({ ops: items.map((n) => ({ op: 'props.set', id: n.id, props: { open: true } })) });
     const provider = createPlaywrightLayoutProvider(store);
     try {
       const found: string[] = [];
       for (const theme of [undefined, 'dark'])
-        for (const width of [390, 1280]) {
+        for (const width of [390, 820, 1280]) {
           const snapshot = await provider.snapshot({
             page: 'home',
             width,

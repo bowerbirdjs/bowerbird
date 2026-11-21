@@ -101,40 +101,92 @@ export function formatLint(pageId: string, issues: LintIssue[]): string {
   ].join('\n');
 }
 
+/**
+ * Part paths in few words: runs of numbered items with the same parts become one entry,
+ * `item-1 … item-6 (each: icon, title, body)`; other keyed items list theirs in brackets.
+ */
+export function compactParts(paths: string[]): string {
+  interface Entry {
+    key: string;
+    children: Entry[];
+  }
+  const root: Entry = { key: '', children: [] };
+  for (const path of paths) {
+    let at = root;
+    for (const key of path.split('/')) {
+      let next = at.children.find((c) => c.key === key);
+      if (!next) {
+        next = { key, children: [] };
+        at.children.push(next);
+      }
+      at = next;
+    }
+  }
+  const shape = (e: Entry): string => e.children.map((c) => `${c.key}{${shape(c)}}`).join(',');
+  const numbered = (key: string) => /^(.*)-(\d+)$/.exec(key);
+  const render = (entries: Entry[]): string => {
+    const out: string[] = [];
+    for (let i = 0; i < entries.length; i++) {
+      const first = entries[i]!;
+      const m = numbered(first.key);
+      let last = i;
+      if (m) {
+        // Following siblings that continue the count and hold the same parts.
+        while (last + 1 < entries.length) {
+          const next = numbered(entries[last + 1]!.key);
+          if (
+            !next ||
+            next[1] !== m[1] ||
+            Number(next[2]) !== Number(m[2]) + (last + 1 - i) ||
+            shape(entries[last + 1]!) !== shape(first)
+          )
+            break;
+          last++;
+        }
+      }
+      const inner = first.children.length ? render(first.children) : '';
+      if (last > i) {
+        out.push(`${first.key} … ${entries[last]!.key}${inner ? ` (each: ${inner})` : ''}`);
+        i = last;
+      } else out.push(`${first.key}${inner ? ` (${inner})` : ''}`);
+    }
+    return out.join(', ');
+  };
+  return render(root.children);
+}
+
 function describeSection(def: SectionDef, detailed: boolean): string {
+  const variants = Object.entries(def.variants ?? {});
+  const variantText = variants.map(([k, vs]) => `${k}=${vs.join('|')}`).join('; ');
+  if (!detailed) {
+    // The catalog: what it is and what can be filled in. Variables come with the full details.
+    return [
+      `${def.name} — ${def.title}${def.category ? ` (${def.category})` : ''}: ${def.description}`,
+      ...(variantText ? [`  variants: ${variantText}`] : []),
+      `  parts: ${compactParts(sectionParts(def).map((p) => p.path))}`,
+    ].join('\n');
+  }
   const lines = [
     `${def.name} — ${def.title}${def.category ? ` (${def.category})` : ''}`,
     `  ${def.description}`,
   ];
-  const variants = Object.entries(def.variants ?? {});
-  if (variants.length)
-    lines.push(
-      `  variants: ${variants.map(([k, vs]) => `${k}=${vs.join('|')}`).join('; ')} (first is default)`,
-    );
+  if (variants.length) lines.push(`  variants: ${variantText} (first is default)`);
   const vars = Object.entries(def.vars ?? {});
   if (vars.length)
     lines.push(
       `  vars: ${vars.map(([n, s]) => `${n} (${s.type}, default ${s.default})`).join('; ')}`,
     );
-  if (detailed) {
-    const combos = variants.length
-      ? variants[0]![1].map((value) => ({ [variants[0]![0]]: value }))
-      : [{}];
-    for (const combo of combos) {
-      const label = Object.keys(combo).length
-        ? ` [${Object.entries(combo)
-            .map(([k, v]) => `${k}=${v}`)
-            .join(',')}]`
-        : '';
-      lines.push(`  parts${label}:`);
-      for (const p of sectionParts(def, combo)) lines.push(`    ${p.path}  ${p.summary}`);
-    }
-  } else {
-    lines.push(
-      `  parts: ${sectionParts(def)
-        .map((p) => p.path)
-        .join(', ')}`,
-    );
+  const combos = variants.length
+    ? variants[0]![1].map((value) => ({ [variants[0]![0]]: value }))
+    : [{}];
+  for (const combo of combos) {
+    const label = Object.keys(combo).length
+      ? ` [${Object.entries(combo)
+          .map(([k, v]) => `${k}=${v}`)
+          .join(',')}]`
+      : '';
+    lines.push(`  parts${label}:`);
+    for (const p of sectionParts(def, combo)) lines.push(`    ${p.path}  ${p.summary}`);
   }
   return lines.join('\n');
 }
@@ -708,7 +760,7 @@ export function createAgentTools(options: AgentToolsOptions): AgentTool[] {
       name: 'list_sections',
       title: 'List sections',
       description:
-        'Prebuilt sections you can insert with section.insert: purpose, variants, style variables and part paths (for "content" and later edits). Give "name" for full part details.',
+        'Prebuilt sections you can insert with section.insert: purpose, variants (first is the default) and part paths (for "content" and later edits). "item-1 … item-3 (each: title, body)" means paths like "item-2/title". Give "name" for a section\'s style variables and what each part holds.',
       input: z.object({
         query: z
           .string()

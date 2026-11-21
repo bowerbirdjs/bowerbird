@@ -77,6 +77,12 @@ export function measureLayout(root: Element, options: MeasureOptions = {}): Layo
     return out;
   };
 
+  /** False for what the browser skips: inside `display: none`, or folded away (a closed `<details>`). */
+  const shown = (e: Element): boolean => {
+    const check = (e as Element & { checkVisibility?: () => boolean }).checkVisibility;
+    return typeof check === 'function' ? check.call(e) : e.getClientRects().length > 0;
+  };
+
   const boxes: LayoutSnapshot['boxes'] = [];
   const all = [root, ...root.querySelectorAll(`[${attr}]`)];
   let maxRight = 0;
@@ -100,7 +106,7 @@ export function measureLayout(root: Element, options: MeasureOptions = {}): Layo
       w: round(w),
       h: round(h),
     };
-    if (cs.display === 'none' || cs.visibility === 'hidden' || (w === 0 && h === 0))
+    if (cs.display === 'none' || cs.visibility === 'hidden' || (w === 0 && h === 0) || !shown(el))
       box.hidden = true;
     if (cs.position === 'absolute' || cs.position === 'fixed' || cs.position === 'sticky')
       box.positioned = true;
@@ -151,7 +157,7 @@ export function measureLayout(root: Element, options: MeasureOptions = {}): Layo
         const style = getComputedStyle(inner);
         if (style.display === 'none' || style.visibility === 'hidden') continue;
         // What isn't shown isn't read: an option list, or content folded away.
-        if (/^(option|optgroup)$/i.test(inner.tagName) || !inner.getClientRects().length) continue;
+        if (/^(option|optgroup)$/i.test(inner.tagName) || !shown(inner)) continue;
         generated.push({
           size: Number.parseFloat(style.fontSize) || 16,
           contrast: contrastOf(inner, style),

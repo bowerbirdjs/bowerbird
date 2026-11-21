@@ -8,7 +8,7 @@ export interface LayoutBox {
   y: number;
   w: number;
   h: number;
-  /** Not rendered (display: none, or zero size with no visible content). */
+  /** Not rendered (display: none, folded away in a closed accordion item, or zero size). */
   hidden?: boolean;
   /** Positioned out of flow (absolute, fixed or sticky). */
   positioned?: boolean;
