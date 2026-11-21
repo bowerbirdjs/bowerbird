@@ -34,6 +34,7 @@ export {
   formatIssue,
   type Issue,
   type IssueCode,
+  listPreview,
 } from './errors.js';
 export {
   ICON_NAME,

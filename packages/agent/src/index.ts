@@ -12,6 +12,7 @@ import {
   instancesOf,
   type LintIssue,
   lintPage,
+  listPreview,
   OpSchema,
   outline,
   overridesOf,
@@ -625,7 +626,7 @@ export function createAgentTools(options: AgentToolsOptions): AgentTool[] {
             .map((c) => c.name)
             .join(', ')}`,
           ...(store.registry.listIcons().length
-            ? [`Icons (for icon nodes): ${store.registry.listIcons().join(', ')}`]
+            ? [`Icons (for icon nodes): ${listPreview(store.registry.listIcons(), 120)}`]
             : []),
           `Tokens: ${[...families].map(([f, n]) => `${f} (${n})`).join(', ')} (list_tokens to see them)`,
           `Themes: ${Object.keys(doc.themes).join(', ') || 'none'}`,

@@ -136,7 +136,7 @@ function toJsx(nodes: ChildNode[], indent: string, top = false, dropNewlines = f
     const attrs = attribs
       .filter(([name]) => !(node.name === 'option' && name === 'selected'))
       .map(([name, value]) => {
-        let prop = PROP_NAMES[name] ?? name;
+        let prop = Object.hasOwn(PROP_NAMES, name) ? PROP_NAMES[name]! : name;
         if (name === 'defaultvalue') prop = 'defaultValue';
         else if (node.name === 'input' && name === 'checked') prop = 'defaultChecked';
         else if (

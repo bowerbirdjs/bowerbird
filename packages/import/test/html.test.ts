@@ -132,7 +132,7 @@ describe('htmlToNodes', () => {
       type: 'text',
       props: { tag: 'span', text: 'Buy now' },
     });
-    expect(warnings).toContain('Links or buttons inside a link were kept as text.');
+    expect(warnings).toContain('Links, buttons and form fields inside a link were kept as text.');
     const store = createStore({ registry: createDefaultRegistry(), doc: createStarterDoc() });
     store.apply({ ops: [{ op: 'page.create', path: '/', title: 'Home' }] });
     const res = store.apply({

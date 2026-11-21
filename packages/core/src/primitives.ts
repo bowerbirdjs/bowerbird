@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { didYouMean, listPreview } from './errors.js';
 import { ICON_NAME } from './icons.js';
-import type { ComponentDef, ElementSpec } from './registry.js';
+import type { ComponentDef, ElementSpec, RenderContext } from './registry.js';
 import { RICH_TEXT_TAGS, sanitizeRichText } from './richtext.js';
 import type { BNode } from './types.js';
 
@@ -231,7 +231,9 @@ export const details: ComponentDef = {
       tag: 'details',
       attrs: {
         open: open || editing,
-        name: str(node.props.group),
+        // Browsers keep only one item of a group open, so the group waits for preview too.
+        name: editing ? undefined : str(node.props.group),
+        'data-bb-group': editing ? str(node.props.group) : undefined,
         'data-bb-closed': editing && !open ? '' : undefined,
       },
     };
@@ -286,13 +288,19 @@ const stringList = (v: unknown): string[] =>
   Array.isArray(v) ? v.filter((o): o is string => typeof o === 'string') : [];
 
 /** A form field: its label and its control as one element, so the label always names the control. */
-function renderField(node: BNode, editing: boolean): ElementSpec {
+function renderField(node: BNode, ctx: RenderContext): ElementSpec {
+  const editing = ctx.mode === 'editor';
   const p = node.props;
   const type = pick(p.type, FIELD_TYPES, 'text');
   const name = str(p.name) ?? '';
   const required = p.required === true;
   const value = str(p.value);
   const options = stringList(p.options);
+  // In a translation the choices read in that language, but what is sent (and what the preset
+  // names) stays the choice in the site's default language, so answers mean the same everywhere.
+  const original = ctx.locale ? stringList(ctx.view.node(node.id)?.props.options) : options;
+  const sent = original.length === options.length ? original : options;
+  const translated = sent !== options;
   const labelSpec = (tag: string): ElementSpec => ({
     tag,
     attrs: { class: 'bb-field__label' },
@@ -344,7 +352,7 @@ function renderField(node: BNode, editing: boolean): ElementSpec {
       children: [
         labelSpec('legend'),
         ...options.map(
-          (option): ElementSpec => ({
+          (option, i): ElementSpec => ({
             tag: 'label',
             attrs: { class: 'bb-field__option' },
             children: [
@@ -355,11 +363,11 @@ function renderField(node: BNode, editing: boolean): ElementSpec {
                   class: 'bb-field__box',
                   type,
                   name,
-                  value: option,
+                  value: sent[i],
                   // One required radio makes the group required; required checkboxes would all
                   // have to be ticked.
                   required: required && type === 'radio',
-                  checked: option === value,
+                  checked: sent[i] === value,
                 },
               },
               { tag: 'span', text: option },
@@ -392,9 +400,9 @@ function renderField(node: BNode, editing: boolean): ElementSpec {
           ? [{ tag: 'option', attrs: { value: '' }, text: str(p.placeholder)! }]
           : []),
         ...options.map(
-          (option): ElementSpec => ({
+          (option, i): ElementSpec => ({
             tag: 'option',
-            attrs: { selected: option === value },
+            attrs: { value: translated ? sent[i] : undefined, selected: sent[i] === value },
             text: option,
           }),
         ),
@@ -468,7 +476,7 @@ export const field: ComponentDef = {
     }
     return [];
   },
-  render: (node, ctx) => renderField(node, ctx.mode === 'editor'),
+  render: (node, ctx) => renderField(node, ctx),
 };
 
 export const icon: ComponentDef = {

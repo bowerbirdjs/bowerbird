@@ -189,3 +189,90 @@ describe('accordion items in imported HTML', () => {
     ]);
   });
 });
+
+describe('review findings: controls in odd places', () => {
+  const accepted = (html: string) => {
+    const { nodes, warnings } = htmlToNodes(html);
+    const store = createStore({ registry: createDefaultRegistry(), doc: createStarterDoc() });
+    const res = store.apply({
+      ops: [
+        { op: 'page.create', id: 'home', path: '/', title: 'Home' },
+        ...nodes.map((node) => ({ op: 'node.insert', parent: 'root-home', node })),
+      ],
+    });
+    if (!res.ok) throw new Error(JSON.stringify(res.errors, null, 1));
+    const all = Object.values(store.doc.nodes);
+    return { store, warnings, all, types: all.map((n) => n.type) };
+  };
+
+  it('fields and submit buttons inside paragraphs and spans are kept', () => {
+    const { all } = accepted(
+      '<form action="/c"><p><label for=a>Name</label> <input id=a name=author></p>' +
+        '<p><input type=submit value=Post></p><span><input name=q aria-label="Search"></span></form>',
+    );
+    const fields = all.filter((n) => n.type === 'field').map((n) => n.props);
+    expect(fields).toMatchObject([
+      { name: 'author', label: 'Name' },
+      { name: 'q', label: 'Search' },
+    ]);
+    expect(all.find((n) => n.type === 'button')?.props).toMatchObject({
+      text: 'Post',
+      type: 'submit',
+    });
+    // The label became the field's label, not a text of its own.
+    expect(all.some((n) => n.type === 'text' && n.props.text === 'Name')).toBe(false);
+  });
+
+  it('a label keeps its own words, not the choices of a select nested in it', () => {
+    const { all } = accepted(
+      '<form><label>Size <span><select name=size><option value="">Pick</option><option selected>Small</option><option>Large</option></select></span></label></form>',
+    );
+    expect(all.find((n) => n.type === 'field')?.props).toMatchObject({
+      type: 'select',
+      label: 'Size',
+      options: ['Small', 'Large'],
+      placeholder: 'Pick',
+      value: 'Small',
+    });
+  });
+
+  it('form parts inside a link are flattened so the store takes the import', () => {
+    const { types, warnings } = accepted(
+      '<a href="/s"><div>Search</div><input name=b aria-label="Query"><details><summary>More</summary><p>Text</p></details></a>',
+    );
+    expect(types).not.toContain('field');
+    expect(types).not.toContain('details');
+    expect(warnings.join(' ')).toContain('inside a link');
+  });
+
+  it('odd input types, picture buttons and presets', () => {
+    const { all, warnings } = accepted(
+      '<form action="/x"><input type="constructor" name=a aria-label="A">' +
+        '<textarea name=note aria-label="Note">Hello\nthere</textarea>' +
+        '<input type=checkbox name=ok value=yes checked aria-label="OK">' +
+        '<input type=radio name=r><input type=radio name=r>' +
+        '<input type=image alt="Send it" src="/go.png"></form><constructor>Odd tag</constructor>',
+    );
+    const props = all.filter((n) => n.type === 'field').map((n) => n.props);
+    expect(props).toMatchObject([
+      { type: 'text', name: 'a' },
+      { type: 'textarea', value: 'Hello\nthere' },
+      { type: 'checkbox', name: 'ok', value: 'yes' },
+    ]);
+    expect(all.find((n) => n.type === 'button')?.props).toMatchObject({
+      text: 'Send it',
+      type: 'submit',
+    });
+    expect(warnings.join(' ')).toContain('without labels or values');
+    expect(warnings.join(' ')).toContain('start unticked');
+  });
+
+  it('scanning stays fast on large, deep or repetitive markup', () => {
+    const radios = '<input type=radio name=r value=x>'.repeat(20_000);
+    const deep = `${'<div>'.repeat(20_000)}${'<input type=radio name=q value=y>'.repeat(5_000)}`;
+    const started = performance.now();
+    htmlToNodes(`<form><fieldset><legend>Pick</legend>${radios}</fieldset></form>`);
+    htmlToNodes(deep);
+    expect(performance.now() - started).toBeLessThan(3000);
+  });
+});

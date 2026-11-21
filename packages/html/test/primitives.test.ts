@@ -162,7 +162,10 @@ describe('form fields', () => {
     });
     const de = renderPage(store.doc, store.registry, 'home', { locale: 'de' }).html;
     expect(de).toContain('<span class="bb-field__label">Wähle</span>');
-    expect(de).toContain('<option>Eins</option><option>Zwei</option>');
+    // Shown in German; sent as the choice in the default language (escaped like everything else).
+    expect(de).toContain(
+      '<option value="&lt;script&gt;alert(1)&lt;/script&gt;">Eins</option><option value="Tom &amp; Jerry">Zwei</option>',
+    );
   });
 
   it('where a form is sent is sanitised like a link, and only the form says where', () => {
@@ -337,5 +340,99 @@ describe('base styles for the new elements', () => {
     expect(editor).toContain('.bb-page :where(.bb-field__control)');
     // rem is converted for the canvas, so the host's root font size can't rescale fields.
     expect(editor).toContain('min-height: calc(2.75 * 16px)');
+  });
+});
+
+describe('review findings', () => {
+  it('a textarea preset that starts with a line break keeps it', () => {
+    const store = site([
+      t.form({ action: '/x' }, [
+        t.field({ field: 'note', type: 'textarea', label: 'Note', value: '\nsecond line' }),
+      ]),
+    ]);
+    expect(published(store)).toContain('rows="4">\n\nsecond line</textarea>');
+  });
+
+  it('translated choices show in that language but send, and preset, the original', () => {
+    const store = site([
+      t.form({ action: '/rsvp' }, [
+        t.field({
+          field: 'come',
+          type: 'radio',
+          label: 'Coming?',
+          options: ['Yes', 'No'],
+          value: 'Yes',
+        }),
+        t.field({
+          field: 'meal',
+          type: 'select',
+          label: 'Meal',
+          options: ['Fish', 'Veg'],
+          value: 'Veg',
+        }),
+      ]),
+    ]);
+    const res = store.apply({
+      ops: [
+        { op: 'locale.set', add: ['de'] },
+        { op: 'props.set', id: 'field-1', locale: 'de', props: { options: ['Ja', 'Nein'] } },
+        {
+          op: 'props.set',
+          id: 'field-2',
+          locale: 'de',
+          props: { options: ['Fisch', 'Vegetarisch'] },
+        },
+      ],
+    });
+    expect(res.ok).toBe(true);
+    const de = renderPage(store.doc, store.registry, 'home', { locale: 'de' }).html;
+    expect(de).toContain('value="Yes" checked><span>Ja</span>');
+    expect(de).toContain('value="No"><span>Nein</span>');
+    expect(de).toContain('<option value="Veg" selected>Vegetarisch</option>');
+    // The default language is written as before.
+    expect(published(store)).toContain('<option selected>Veg</option>');
+  });
+
+  it('grouped accordion items all stay open while editing; the group applies when published', () => {
+    const item = (q: string) =>
+      t.details({ group: 'faq' }, [
+        t.text({ tag: 'summary', text: q }),
+        t.text({ text: 'Answer' }),
+      ]);
+    const store = site([item('One'), item('Two')]);
+    expect(editing(store)).not.toContain('name="faq"');
+    expect(editing(store).match(/data-bb-group="faq"/g)).toHaveLength(2);
+    expect(published(store).match(/name="faq"/g)).toHaveLength(2);
+    expect(published(store)).not.toContain('data-bb-group');
+  });
+
+  it("a host's custom element keeps props named like form attributes", () => {
+    const registry = createDefaultRegistry({
+      components: [
+        {
+          name: 'cart-button',
+          kind: 'code',
+          tag: 'x-cart',
+          description: 'Adds to the cart.',
+          props: z.strictObject({ action: z.string(), formaction: z.string() }),
+          children: false,
+        },
+      ],
+    });
+    const store = createStore({ registry, doc: createStarterDoc() });
+    const res = store.apply({
+      ops: [
+        { op: 'page.create', path: '/', title: 'Home' },
+        {
+          op: 'node.insert',
+          parent: 'root-home',
+          node: { type: 'cart-button', props: { action: 'cart:add', formaction: 'keep' } },
+        },
+      ],
+    });
+    expect(res.ok).toBe(true);
+    expect(renderPage(store.doc, registry, 'home').html).toContain(
+      '<x-cart action="cart:add" formaction="keep"',
+    );
   });
 });

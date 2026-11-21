@@ -518,9 +518,12 @@ export class CanvasView {
     this.prepareContent();
     // While editing, every accordion item is open so its content can be reached; preview shows
     // them as published.
-    if (c.preview)
+    if (c.preview) {
       for (const item of this.content.querySelectorAll('details[data-bb-closed]'))
         item.removeAttribute('open');
+      for (const item of this.content.querySelectorAll('details[data-bb-group]'))
+        item.setAttribute('name', item.getAttribute('data-bb-group') ?? '');
+    }
     if (c.theme) this.frame.setAttribute('data-theme', c.theme);
     else this.frame.removeAttribute('data-theme');
     this.frame.toggleAttribute('data-preview', c.preview);

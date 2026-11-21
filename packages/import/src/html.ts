@@ -111,11 +111,23 @@ const INPUT_BUTTONS = new Set(['submit', 'button', 'reset', 'image']);
 const INPUT_SKIPPED = new Set(['file', 'password']);
 const FIELD_NAME = /^[A-Za-z_][A-Za-z0-9_.[\]-]*$/;
 const MAX_DEPTH = 30;
+/** Controls whose inner text (a select's options, a textarea's preset) isn't part of a label. */
+/** Elements that become a field, a button or an accordion item wherever they sit. */
+const CONTROLS: ReadonlySet<string> = new Set([
+  'input',
+  'select',
+  'textarea',
+  'button',
+  'label',
+  'details',
+  'form',
+]);
+const CONTROL_TEXT: ReadonlySet<string> = new Set(['select', 'textarea']);
 
 const collapse = (s: string) => s.replace(/\s+/g, ' ');
 
 /** Text content, skipping scripts, styles and other dropped elements. Iterative, so deep markup is safe. */
-function textOf(node: ChildNode): string {
+function textExcept(node: ChildNode, except?: ReadonlySet<string>): string {
   let out = '';
   const stack: ChildNode[] = [node];
   while (stack.length) {
@@ -124,12 +136,14 @@ function textOf(node: ChildNode): string {
     else if (isTag(n)) {
       const name = n.name.toLowerCase();
       if (name === 'br') out += ' ';
-      else if (!SKIP.has(name))
+      else if (!SKIP.has(name) && !except?.has(name))
         for (let i = n.children.length - 1; i >= 0; i--) stack.push(n.children[i]!);
     }
   }
   return out;
 }
+
+const textOf = (node: ChildNode): string => textExcept(node);
 
 /** Formatting rich text keeps (other inline tags, like <span>, are unwrapped). */
 const RICH = new Set<string>(RICH_TEXT_TAGS);
@@ -209,7 +223,7 @@ export function htmlToNodes(html: string, options: HtmlImportOptions = {}): Html
 
   const clip = (text: string, type: string): string => {
     const t = collapse(text).trim();
-    const max = MAX_TEXT[type] ?? 5000;
+    const max = (Object.hasOwn(MAX_TEXT, type) ? MAX_TEXT[type] : undefined) ?? 5000;
     if (t.length <= max) return t;
     warnings.add(`Some text was longer than ${max} characters and was shortened.`);
     return `${t.slice(0, max - 1)}…`;
@@ -271,11 +285,37 @@ export function htmlToNodes(html: string, options: HtmlImportOptions = {}): Html
     for (let p = el.parent; p && isTag(p); p = p.parent) if (p.name === name) return p;
     return undefined;
   };
+  /** Elements with a form control or button somewhere inside: never just text. */
+  const holders = new WeakSet<Element>();
+  /** The nearest form at or above each element, remembered so deep markup is walked once. */
+  const formMemo = new WeakMap<Element, Element | null>();
+  const formOf = (el: Element): Element | undefined => {
+    const path: Element[] = [];
+    let found: Element | null = null;
+    for (let p = el.parent; p && isTag(p); p = p.parent) {
+      const memo = formMemo.get(p);
+      if (memo !== undefined) {
+        found = memo;
+        break;
+      }
+      path.push(p);
+      if (p.name === 'form') {
+        found = p;
+        break;
+      }
+    }
+    // Everything below the form found (or below the top) shares the answer.
+    for (const p of path) formMemo.set(p, found);
+    return found ?? undefined;
+  };
   const inputType = (el: Element) => (el.attribs.type ?? 'text').toLowerCase();
 
   /** Reads which labels name which controls, and which radios or checkboxes are one question. */
   const scanForms = (root: { children: ChildNode[] }): void => {
     const controls = elementsIn(root, ['input', 'select', 'textarea']);
+    for (const el of [...controls, ...elementsIn(root, ['button', 'details', 'form'])]) {
+      for (let p = el.parent; p && isTag(p) && !holders.has(p); p = p.parent) holders.add(p);
+    }
     const ids = new Set(controls.map((c) => c.attribs.id).filter(Boolean));
     for (const label of elementsIn(root, ['label'])) {
       const target = label.attribs.for;
@@ -285,24 +325,27 @@ export function htmlToNodes(html: string, options: HtmlImportOptions = {}): Html
     }
     // Radios or checkboxes that share a name in a form are one question.
     const byKey = new Map<string, Element[]>();
-    const forms: (Element | undefined)[] = [];
+    const forms = new Map<Element | undefined, number>();
     for (const control of controls) {
       const type = control.name === 'input' ? inputType(control) : '';
       const name = control.attribs.name ?? '';
       if ((type !== 'radio' && type !== 'checkbox') || !name) continue;
-      const form = ancestor(control, 'form');
-      if (!forms.includes(form)) forms.push(form);
-      const key = `${forms.indexOf(form)}:${type}:${name}`;
-      byKey.set(key, [...(byKey.get(key) ?? []), control]);
+      const form = formOf(control);
+      if (!forms.has(form)) forms.set(form, forms.size);
+      const key = `${forms.get(form)}:${type}:${name}`;
+      const list = byKey.get(key);
+      if (list) list.push(control);
+      else byKey.set(key, [control]);
     }
     for (const members of byKey.values()) {
+      const memberSet = new Set(members);
       // One on its own is a yes-or-no question, not a group.
       if (members.length < 2) continue;
       // The question is the legend of a fieldset that holds this group and nothing else.
       const fieldset = ancestor(members[0]!, 'fieldset');
       const alone =
         fieldset &&
-        elementsIn(fieldset, ['input', 'select', 'textarea']).every((c) => members.includes(c));
+        elementsIn(fieldset, ['input', 'select', 'textarea']).every((c) => memberSet.has(c));
       const legend = alone
         ? fieldset.children.find((c): c is Element => isTag(c) && c.name === 'legend')
         : undefined;
@@ -318,8 +361,8 @@ export function htmlToNodes(html: string, options: HtmlImportOptions = {}): Html
     if (around) {
       // The label's own words, without those of the control inside it (a select's options).
       const own = around.children
-        .filter((c) => c !== control && !(isTag(c) && ['select', 'textarea'].includes(c.name)))
-        .map(textOf)
+        .filter((c) => c !== control)
+        .map((c) => textExcept(c, CONTROL_TEXT))
         .join(' ');
       return collapse(own).trim();
     }
@@ -333,10 +376,12 @@ export function htmlToNodes(html: string, options: HtmlImportOptions = {}): Html
     const tag = control.name.toLowerCase();
     const raw = inputType(control);
     if (tag === 'input' && INPUT_BUTTONS.has(raw)) {
-      if (raw === 'image') return undefined;
       count++;
-      const text = clip(control.attribs.value ?? (raw === 'reset' ? 'Reset' : 'Submit'), 'button');
-      return { type: 'button', props: { text, ...(raw === 'button' ? {} : { type: raw }) } };
+      // A picture that sends the form becomes an ordinary submit button with its words.
+      const words = raw === 'image' ? control.attribs.alt : control.attribs.value;
+      const text = clip(words || (raw === 'reset' ? 'Reset' : 'Submit'), 'button') || 'Submit';
+      const kind = raw === 'image' ? 'submit' : raw;
+      return { type: 'button', props: { text, ...(kind === 'button' ? {} : { type: kind }) } };
     }
     if (tag === 'input' && INPUT_SKIPPED.has(raw)) {
       warnings.add(
@@ -349,7 +394,8 @@ export function htmlToNodes(html: string, options: HtmlImportOptions = {}): Html
       if (doneGroups.has(group)) return undefined;
       doneGroups.add(group);
     }
-    const type = tag === 'input' ? (INPUT_TYPES[raw] ?? 'text') : tag;
+    const type =
+      tag === 'input' ? (Object.hasOwn(INPUT_TYPES, raw) ? INPUT_TYPES[raw]! : 'text') : tag;
     const name = control.attribs.name?.trim() ?? '';
     const props: Record<string, unknown> = {
       type,
@@ -371,7 +417,12 @@ export function htmlToNodes(html: string, options: HtmlImportOptions = {}): Html
       const options = group.controls
         .map((c) => (labelOf(c) || c.attribs.value || '').slice(0, 200))
         .filter(Boolean);
-      if (!options.length) return undefined;
+      if (!options.length) {
+        warnings.add(
+          'A group of radio buttons or checkboxes without labels or values was skipped.',
+        );
+        return undefined;
+      }
       props.options = [...new Set(options)].slice(0, 100);
       const checked = group.controls.find((c) => 'checked' in c.attribs);
       if (checked && type === 'radio') props.value = labelOf(checked) || checked.attribs.value;
@@ -391,10 +442,18 @@ export function htmlToNodes(html: string, options: HtmlImportOptions = {}): Html
       const prompt = all.find((o) => o.attribs.value === '');
       if (prompt && options.length)
         props.placeholder = collapse(textOf(prompt)).trim().slice(0, 200) || undefined;
-    } else if (type === 'hidden' || (control.attribs.value && type !== 'checkbox')) {
+      const chosen = all.find((o) => 'selected' in o.attribs && o.attribs.value !== '');
+      const preset = chosen ? collapse(textOf(chosen)).trim().slice(0, 200) : '';
+      if (preset && options.includes(preset)) props.value = preset;
+    } else if (type === 'textarea') {
+      const preset = textOf(control).replace(/^\n/, '');
+      if (preset.trim() && preset.length <= 2000) props.value = preset;
+    } else if (type === 'hidden' || control.attribs.value) {
       const value = control.attribs.value ?? '';
       if (value.length <= 2000) props.value = value;
     }
+    if (type === 'checkbox' && !group && 'checked' in control.attribs)
+      warnings.add('Checkboxes that were ticked in the HTML start unticked here.');
     if (type === 'textarea') {
       const rows = Number(control.attribs.rows);
       if (Number.isInteger(rows) && rows >= 2 && rows <= 20) props.rows = rows;
@@ -423,7 +482,8 @@ export function htmlToNodes(html: string, options: HtmlImportOptions = {}): Html
         break;
       }
       const blockLink = isTag(child) && child.name === 'a';
-      if (isInline(child) && !blockLink) {
+      const control = isTag(child) && (holders.has(child) || CONTROLS.has(child.name));
+      if (isInline(child) && !blockLink && !control) {
         run.push(child);
         continue;
       }
@@ -544,19 +604,28 @@ export function htmlToNodes(html: string, options: HtmlImportOptions = {}): Html
           },
         ];
       // Links can't hold links or buttons: keep their text instead.
-      const flatten = (n: NodeInput): NodeInput => {
-        if (n.type === 'link' || n.type === 'button') {
-          warnings.add('Links or buttons inside a link were kept as text.');
-          const text = typeof n.props?.text === 'string' ? n.props.text : '';
-          return { type: 'text', props: { tag: 'span', text } };
+      const flatten = (n: NodeInput): NodeInput[] => {
+        if (n.type === 'link' || n.type === 'button' || n.type === 'field') {
+          warnings.add('Links, buttons and form fields inside a link were kept as text.');
+          const words = n.type === 'field' ? n.props?.label : n.props?.text;
+          const text = typeof words === 'string' ? words : '';
+          return text ? [{ type: 'text', props: { tag: 'span', text } }] : [];
         }
-        return n.children ? { ...n, children: n.children.map(flatten) } : n;
+        const inner = (n.children ?? []).flatMap(flatten);
+        if (n.type === 'form' || n.type === 'details') {
+          warnings.add('Forms and accordion items inside a link were kept as plain blocks.');
+          return [{ type: 'box', props: {}, children: inner }];
+        }
+        // A summary only works in an accordion item.
+        if (n.type === 'text' && n.props?.tag === 'summary')
+          return [{ ...n, props: { ...n.props, tag: 'p' } }];
+        return [n.children ? { ...n, children: inner } : n];
       };
       return [
         {
           type: 'link',
           props,
-          children: children(node, depth).map(flatten),
+          children: children(node, depth).flatMap(flatten),
           ...common(node),
         },
       ];
@@ -564,9 +633,7 @@ export function htmlToNodes(html: string, options: HtmlImportOptions = {}): Html
     if (tag === 'button') {
       count++;
       // A button in a form sends it unless it says otherwise.
-      const kind = (
-        node.attribs.type ?? (ancestor(node, 'form') ? 'submit' : 'button')
-      ).toLowerCase();
+      const kind = (node.attribs.type ?? (formOf(node) ? 'submit' : 'button')).toLowerCase();
       return [
         {
           type: 'button',
@@ -578,7 +645,9 @@ export function htmlToNodes(html: string, options: HtmlImportOptions = {}): Html
         },
       ];
     }
-    const textTag = TEXT_TAGS[tag];
+    // An element with a field or button inside is a container, whatever its tag says.
+    const holds = holders.has(node);
+    const textTag = !holds && Object.hasOwn(TEXT_TAGS, tag) ? TEXT_TAGS[tag] : undefined;
     if (textTag) {
       // <strong>, <em>… on their own are text in that tag; inside a paragraph they are formatting.
       const t = RICH.has(tag)
@@ -595,13 +664,14 @@ export function htmlToNodes(html: string, options: HtmlImportOptions = {}): Html
         { type: 'box', props: { tag: 'li' }, children: convert(only, depth + 1), ...common(node) },
       ];
     }
-    if (tag === 'li' && node.children.every(isInline)) {
+    if (tag === 'li' && !holds && node.children.every(isInline)) {
       const t = inlineNode(node.children, 'li', node);
       return t ? [t] : [];
     }
     let boxTag = tag;
     if (!BOX_TAGS.has(tag)) {
-      if (tag !== 'body' && tag !== 'html') warnings.add(`<${tag}> was converted to a <div>.`);
+      if (tag !== 'body' && tag !== 'html' && !holds)
+        warnings.add(`<${tag}> was converted to a <div>.`);
       boxTag = 'div';
       if (tag === 'body' || tag === 'html') return children(node, depth);
     }

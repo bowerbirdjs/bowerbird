@@ -164,7 +164,11 @@ function renderContext(view: DocView, mode: CssMode, locale?: string): RenderCon
 }
 
 /** Attributes as written, minus editor-only marks outside the editor, with URLs sanitized. */
-function cleanAttrs(ctx: Ctx, attrs: Record<string, unknown>): Record<string, unknown> {
+function cleanAttrs(
+  ctx: Ctx,
+  tag: string,
+  attrs: Record<string, unknown>,
+): Record<string, unknown> {
   const out = { ...attrs };
   if (ctx.mode !== 'editor') {
     delete out['data-bb-data'];
@@ -174,6 +178,9 @@ function cleanAttrs(ctx: Ctx, attrs: Record<string, unknown>): Record<string, un
   }
   if (typeof out.href === 'string') out.href = sanitizeUrl(out.href, 'href');
   if (typeof out.src === 'string') out.src = sanitizeUrl(out.src, 'src');
+  // The rest is about what browsers do with native elements; a host's custom element may use
+  // these names for its own props.
+  if (tag.includes('-')) return out;
   if (typeof out.poster === 'string') out.poster = sanitizeUrl(out.poster, 'src');
   // Where a form is sent: a web address like a link's (a blocked one sends nowhere), and only the
   // form says so: a button can't redirect it.
@@ -215,16 +222,20 @@ function dataMarks(ctx: Ctx, spec: ElementSpec): Record<string, unknown> {
   };
 }
 
+/** Parsers drop a newline right after `<textarea>` or `<pre>`; a second one keeps the text's own. */
+const keepFirstNewline = (tag: string, inner: string) =>
+  (tag === 'textarea' || tag === 'pre') && inner.startsWith('\n') ? `\n${inner}` : inner;
+
 /** Elements a component generated from data (see `ElementSpec.children`). */
 function renderSpec(ctx: Ctx, spec: ElementSpec | string, depth: number, inLink: boolean): string {
   if (typeof spec === 'string') return escapeHtml(spec);
   if (depth > 200) return '';
   const tag = TAG_RE.test(spec.tag) && !DENIED_TAGS.has(spec.tag) ? spec.tag : 'div';
   const attrs = { ...(spec.attrs ?? {}), ...dataMarks(ctx, spec) };
-  const open = `<${tag}${attrString(cleanAttrs(ctx, attrs))}${varsAttr(spec.vars)}>`;
+  const open = `<${tag}${attrString(cleanAttrs(ctx, tag, attrs))}${varsAttr(spec.vars)}>`;
   if (spec.void || VOID.has(tag)) return open;
   const linked = inLink || tag === 'a';
-  return `${open}${specInner(ctx, spec, depth, linked)}</${tag}>`;
+  return `${open}${keepFirstNewline(tag, specInner(ctx, spec, depth, linked))}</${tag}>`;
 }
 
 function specInner(ctx: Ctx, spec: ElementSpec, depth: number, linked: boolean): string {
@@ -281,7 +292,7 @@ function renderNode(
   // Host code components keep the host's own styling inside the editor canvas (see the reset).
   if (ctx.mode === 'editor' && def?.kind === 'code') attrs['data-bb-code'] = node.type;
 
-  const open = `<${tag}${attrString(cleanAttrs(ctx, attrs))}>`;
+  const open = `<${tag}${attrString(cleanAttrs(ctx, tag, attrs))}>`;
   if (spec.void || VOID.has(tag)) return open;
   const hostDrawn = ctx.mode === 'editor' && ctx.hostChildren && def?.kind === 'code';
   const children = hostDrawn ? [] : ctx.view.children(node.id);
@@ -291,7 +302,7 @@ function renderNode(
     ? children
         .map((c) => renderNode(ctx, c, scope, depth + 1, linked))
         .join(node.parent === null ? '\n' : '')
-    : specInner(ctx, spec, depth, linked);
+    : keepFirstNewline(tag, specInner(ctx, spec, depth, linked));
   if (node.parent !== null) return `${open}${inner}</${tag}>`;
   return `${open}\n${framed(ctx, inner)}\n</${tag}>`;
 }
