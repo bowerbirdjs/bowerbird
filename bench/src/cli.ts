@@ -39,7 +39,12 @@ const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'] as const;
 
 async function main() {
   loadDotEnv();
+  // pnpm hands a script the `--` typed before its options (`pnpm bench -- --scripted`); npm
+  // swallows it. Both spellings work.
+  const args = process.argv.slice(2);
+  if (args[0] === '--') args.shift();
   const { values } = parseArgs({
+    args,
     options: {
       model: { type: 'string', default: 'claude-opus-5-5' },
       effort: { type: 'string', default: 'high' },
@@ -88,6 +93,9 @@ async function main() {
       'Note: some tasks were answered by a fallback model; exclude them when comparing models.',
     );
   }
+  // A reference solution that fails its own task means the suite is broken, so that run fails
+  // (CI relies on it). A model failing tasks is a result, not an error.
+  if (values.scripted && results.some((r) => !r.passed)) process.exitCode = 1;
 }
 
 main().catch((error) => {
