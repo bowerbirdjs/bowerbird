@@ -23,14 +23,21 @@ describe.skipIf(!hasPlaywright())('rendered layout in Chromium', { timeout: 30_0
     newPage(options: { viewport: { width: number; height: number } }): Promise<Page>;
     close(): Promise<void>;
   };
-  const { chromium } = createRequire(import.meta.url)('playwright') as {
-    chromium: { launch(): Promise<Browser> };
+  // Started by the first test that needs it: a skipped suite still runs this function to collect
+  // its tests, and must not try to load a Playwright that isn't there.
+  let browser: Promise<Browser> | undefined;
+  const launch = (): Promise<Browser> => {
+    browser ??= (
+      createRequire(import.meta.url)('playwright') as {
+        chromium: { launch(): Promise<Browser> };
+      }
+    ).chromium.launch();
+    return browser;
   };
-  const browser = chromium.launch();
-  afterAll(async () => (await browser).close());
+  afterAll(async () => (await browser)?.close());
 
   async function measure(body: string, width = 390) {
-    const page = await (await browser).newPage({ viewport: { width, height: 800 } });
+    const page = await (await launch()).newPage({ viewport: { width, height: 800 } });
     await page.setContent(
       `<body style="margin:0"><div class="bb-page" data-bb-node="root">${body}</div></body>`,
     );
