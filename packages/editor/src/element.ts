@@ -151,6 +151,8 @@ const VAR_FAMILY: Record<string, string> = {
 /** Shortest and tallest a section preview gets in its card (px). */
 const THUMB_MIN = 36;
 const THUMB_MAX = 148;
+/** How long (ms) the site has to stay unchanged before previews are redrawn with its new look. */
+const THUMB_DELAY = 300;
 
 /** Below this width (px) of its own, the editor lays its panels over the canvas. */
 const NARROW_WIDTH = 900;
@@ -303,6 +305,7 @@ export class BowerbirdEditor extends LitElement {
   private thumbSheet: CSSStyleSheet | HTMLStyleElement | undefined;
   private thumbCss = '';
   private thumbFrame = 0;
+  private thumbTimer: ReturnType<typeof setTimeout> | undefined;
   private lastLook: Pick<EditorUI, 'appearance' | 'density'> = {};
   private visibleRows: {
     id: string;
@@ -375,6 +378,8 @@ export class BowerbirdEditor extends LitElement {
 
   /** Releases the store subscription and canvas. Happens automatically when the element is removed. */
   destroy(): void {
+    clearTimeout(this.thumbTimer);
+    cancelAnimationFrame(this.thumbFrame);
     this.canvas?.destroy();
     this.controller?.destroy();
     this.canvasHost?.remove();
@@ -509,29 +514,45 @@ export class BowerbirdEditor extends LitElement {
     this.layoutThumbs();
   }
 
-  /** The previews for the sections offered, rebuilt only when what they show could have changed. */
+  /**
+   * The previews for the sections offered, rebuilt only when what they show could have changed
+   * (the site's tokens, themes, breakpoints or data), and then only once the site has been quiet
+   * for a moment: typing into a field that changes site data shouldn't redraw every preview on
+   * each key.
+   */
   private sectionThumbs(c: EditorController, sections: SectionDef[]): SectionThumbs {
     const doc = c.doc;
     const key: unknown[] = [
       c.store.registry,
+      sections.map((s) => s.name).join(' '),
       doc.tokens,
       doc.themes,
       doc.breakpoints,
       doc.data,
-      sections.map((s) => s.name).join(' '),
     ];
-    if (!this.thumbs || this.thumbs.key.some((k, i) => k !== key[i])) {
-      let value: SectionThumbs;
+    const build = (): SectionThumbs => {
       try {
-        value = buildSectionThumbs(c.store.registry, doc, sections, '.bb-thumbs');
+        return buildSectionThumbs(c.store.registry, doc, sections, '.bb-thumbs');
       } catch (error) {
         // Previews are a nicety: a registry that can't draw them still gets its cards.
         console.warn('[bowerbird] section previews failed:', error);
-        value = { css: '', html: new Map() };
+        return { css: '', html: new Map() };
       }
-      this.thumbs = { key, value };
+    };
+    const current = this.thumbs;
+    // Another registry or another list of sections: the old previews show something else.
+    if (!current || current.key[0] !== key[0] || current.key[1] !== key[1]) {
+      clearTimeout(this.thumbTimer);
+      this.thumbs = { key, value: build() };
+    } else if (current.key.some((k, i) => k !== key[i])) {
+      clearTimeout(this.thumbTimer);
+      this.thumbTimer = setTimeout(() => {
+        if (!this.isConnected || !this.controller) return;
+        this.thumbs = undefined;
+        this.tick++;
+      }, THUMB_DELAY);
     }
-    return this.thumbs.value;
+    return this.thumbs!.value;
   }
 
   /** Puts the previews' stylesheet into the shadow root (constructed, so no markup is parsed). */
