@@ -1,0 +1,55 @@
+[
+  {
+    "tool": "get_context"
+  },
+  {
+    "tool": "get_outline",
+    "input": {
+      "root": "nav-1"
+    }
+  },
+  {
+    "tool": "apply",
+    "input": {
+      "ops": [
+        {
+          "op": "page.create",
+          "path": "/contact",
+          "title": "Contact"
+        },
+        {
+          "op": "section.insert",
+          "section": "page-header",
+          "page": "contact",
+          "content": {
+            "heading": {
+              "text": "Contact us"
+            },
+            "eyebrow": {
+              "text": "Get in touch"
+            },
+            "intro": {
+              "text": "We answer within one working day."
+            }
+          }
+        },
+        {
+          "op": "section.insert",
+          "section": "contact",
+          "page": "contact"
+        },
+        {
+          "op": "node.insert",
+          "parent": "nav-1/links",
+          "node": {
+            "type": "link",
+            "props": {
+              "text": "Contact",
+              "href": "/contact"
+            }
+          }
+        }
+      ]
+    }
+  }
+]

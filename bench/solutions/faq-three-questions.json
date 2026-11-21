@@ -1,0 +1,44 @@
+[
+  {
+    "tool": "list_sections",
+    "input": {
+      "name": "faq"
+    }
+  },
+  {
+    "tool": "apply",
+    "input": {
+      "ops": [
+        {
+          "op": "section.insert",
+          "section": "faq",
+          "after": "pricing-1",
+          "content": {
+            "item-1/question": {
+              "text": "Is there a free plan?"
+            },
+            "item-1/answer": {
+              "text": "Yes, for one site, for as long as you like."
+            },
+            "item-2/question": {
+              "text": "Can I cancel any time?"
+            },
+            "item-2/answer": {
+              "text": "Yes. You keep access until the end of the billing period."
+            },
+            "item-3/question": {
+              "text": "Do you send invoices?"
+            },
+            "item-3/answer": {
+              "text": "Every payment comes with a PDF invoice."
+            }
+          }
+        },
+        {
+          "op": "node.remove",
+          "id": "faq-1/item-4"
+        }
+      ]
+    }
+  }
+]

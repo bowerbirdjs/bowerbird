@@ -1,0 +1,30 @@
+{
+  "id": "desktop-four-columns",
+  "category": "responsive",
+  "start": "saas-landing",
+  "prompt": "From the lg breakpoint up, lay out the feature grid's cards in four equal columns. Smaller screens stay as they are.",
+  "checks": [
+    {
+      "type": "styleEquals",
+      "id": "features-1/grid",
+      "prop": "grid-template-columns",
+      "bp": "lg",
+      "value": ["repeat(4, minmax(0, 1fr))", "repeat(4, 1fr)", "1fr 1fr 1fr 1fr"]
+    },
+    {
+      "type": "styleAbsent",
+      "id": "features-1/grid",
+      "prop": "grid-template-columns"
+    },
+    {
+      "type": "styleAbsent",
+      "id": "features-1/grid",
+      "prop": "grid-template-columns",
+      "bp": "md"
+    },
+    {
+      "type": "unchangedExcept",
+      "ids": ["features-1/grid"]
+    }
+  ]
+}

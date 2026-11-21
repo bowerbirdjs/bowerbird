@@ -1,0 +1,32 @@
+[
+  {
+    "tool": "get_context"
+  },
+  {
+    "tool": "apply",
+    "input": {
+      "ops": [
+        {
+          "op": "section.insert",
+          "section": "cta",
+          "variant": {
+            "tone": "dark"
+          },
+          "before": "footer-1",
+          "content": {
+            "heading": {
+              "text": "Ready when you are"
+            }
+          }
+        }
+      ],
+      "label": "Add call to action"
+    }
+  },
+  {
+    "tool": "lint",
+    "input": {
+      "changeset": "cs-1"
+    }
+  }
+]

@@ -1,0 +1,27 @@
+{
+  "id": "locked-footer",
+  "category": "policy",
+  "start": "saas-landing",
+  "policy": {
+    "lockedNodes": ["footer-1"]
+  },
+  "prompt": "Update the year in the footer's legal line to 2027 and change the label of the hero's secondary button to \"See pricing\".",
+  "checks": [
+    {
+      "type": "propEquals",
+      "id": "hero-1/secondary",
+      "prop": "text",
+      "value": "See pricing"
+    },
+    {
+      "type": "propEquals",
+      "id": "footer-1/legal",
+      "prop": "text",
+      "value": "© 2026 Acme, Inc. All rights reserved."
+    },
+    {
+      "type": "unchangedExcept",
+      "ids": ["hero-1/secondary"]
+    }
+  ]
+}

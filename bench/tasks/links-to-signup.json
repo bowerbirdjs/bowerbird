@@ -1,0 +1,36 @@
+{
+  "id": "links-to-signup",
+  "category": "precise",
+  "start": "saas-landing",
+  "prompt": "Point both \"Get started\" buttons (the one in the navigation bar and the hero's primary button) at /signup. Keep their labels.",
+  "checks": [
+    {
+      "type": "propEquals",
+      "id": "nav-1/cta",
+      "prop": "href",
+      "value": "/signup"
+    },
+    {
+      "type": "propEquals",
+      "id": "hero-1/primary",
+      "prop": "href",
+      "value": "/signup"
+    },
+    {
+      "type": "propEquals",
+      "id": "nav-1/cta",
+      "prop": "text",
+      "value": "Get started"
+    },
+    {
+      "type": "propEquals",
+      "id": "hero-1/primary",
+      "prop": "text",
+      "value": "Get started"
+    },
+    {
+      "type": "unchangedExcept",
+      "ids": ["nav-1/cta", "hero-1/primary"]
+    }
+  ]
+}

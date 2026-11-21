@@ -1,0 +1,56 @@
+[
+  {
+    "tool": "list_tokens",
+    "input": {
+      "prefix": "color.brand"
+    }
+  },
+  {
+    "tool": "apply",
+    "input": {
+      "ops": [
+        {
+          "op": "token.set",
+          "path": "color.brand.50",
+          "value": "#f0fdf4"
+        },
+        {
+          "op": "token.set",
+          "path": "color.brand.100",
+          "value": "#dcfce7"
+        },
+        {
+          "op": "token.set",
+          "path": "color.brand.200",
+          "value": "#bbf7d0"
+        },
+        {
+          "op": "token.set",
+          "path": "color.brand.300",
+          "value": "#86efac"
+        },
+        {
+          "op": "token.set",
+          "path": "color.brand.400",
+          "value": "#4ade80"
+        },
+        {
+          "op": "token.set",
+          "path": "color.brand.500",
+          "value": "#22c55e"
+        },
+        {
+          "op": "token.set",
+          "path": "color.brand.600",
+          "value": "#15803d"
+        },
+        {
+          "op": "token.set",
+          "path": "color.brand.700",
+          "value": "#166534"
+        }
+      ],
+      "label": "Green brand"
+    }
+  }
+]

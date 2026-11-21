@@ -1,0 +1,105 @@
+[
+  {
+    "tool": "get_outline",
+    "input": {
+      "root": "features-1"
+    }
+  },
+  {
+    "tool": "apply",
+    "input": {
+      "ops": [
+        {
+          "op": "props.set",
+          "id": "features-1/item-1/title",
+          "props": {
+            "text": "Sections you can open!"
+          }
+        },
+        {
+          "op": "props.set",
+          "id": "features-1/item-2/title",
+          "props": {
+            "text": "On-brand by default!"
+          }
+        },
+        {
+          "op": "props.set",
+          "id": "features-1/item-3/title",
+          "props": {
+            "text": "Undo the agent, keep yours!"
+          }
+        },
+        {
+          "op": "props.set",
+          "id": "features-1/item-4/title",
+          "props": {
+            "text": "Any framework!"
+          }
+        },
+        {
+          "op": "props.set",
+          "id": "features-1/item-5/title",
+          "props": {
+            "text": "Agent-ready API!"
+          }
+        },
+        {
+          "op": "props.set",
+          "id": "features-1/item-6/title",
+          "props": {
+            "text": "Open source!"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "tool": "get_outline",
+    "input": {
+      "root": "features-1"
+    }
+  },
+  {
+    "tool": "apply",
+    "input": {
+      "ops": [
+        {
+          "op": "props.set",
+          "id": "features-1/item-1/title",
+          "props": {
+            "text": "Sections you can open!"
+          }
+        },
+        {
+          "op": "props.set",
+          "id": "features-1/item-2/title",
+          "props": {
+            "text": "On-brand by default!"
+          }
+        },
+        {
+          "op": "props.set",
+          "id": "features-1/item-3/title",
+          "props": {
+            "text": "Undo the agent, keep yours!"
+          }
+        },
+        {
+          "op": "props.set",
+          "id": "features-1/item-4/title",
+          "props": {
+            "text": "Any framework!"
+          }
+        },
+        {
+          "op": "props.set",
+          "id": "features-1/item-5/title",
+          "props": {
+            "text": "Agent-ready API!"
+          }
+        }
+      ]
+    }
+  }
+]

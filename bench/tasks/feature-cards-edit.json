@@ -1,0 +1,70 @@
+{
+  "id": "feature-cards-edit",
+  "category": "precise",
+  "start": "saas-landing",
+  "prompt": "In the feature grid, remove the \"Any framework\" card and add a new card at the end with the icon \"★\", the title \"Live preview\" and the text \"See every change as it happens.\"",
+  "checks": [
+    {
+      "type": "find",
+      "query": {
+        "root": "features-1",
+        "textIncludes": "Any framework"
+      },
+      "count": {
+        "equals": 0
+      }
+    },
+    {
+      "type": "childCount",
+      "id": "features-1/grid",
+      "count": {
+        "equals": 6
+      }
+    },
+    {
+      "type": "texts",
+      "query": {
+        "root": "features-1/grid",
+        "part": "title"
+      },
+      "equals": [
+        "Sections you can open",
+        "On-brand by default",
+        "Undo the agent, keep yours",
+        "Agent-ready API",
+        "Open source",
+        "Live preview"
+      ]
+    },
+    {
+      "type": "find",
+      "query": {
+        "root": "features-1/grid",
+        "part": "body",
+        "props": {
+          "text": "See every change as it happens."
+        }
+      },
+      "count": {
+        "equals": 1
+      }
+    },
+    {
+      "type": "find",
+      "query": {
+        "root": "features-1/grid",
+        "part": "icon",
+        "props": {
+          "text": "★"
+        }
+      },
+      "count": {
+        "equals": 1
+      }
+    },
+    {
+      "type": "unchangedExcept",
+      "ids": ["features-1/grid"]
+    }
+  ]
+}

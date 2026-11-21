@@ -1,0 +1,35 @@
+{
+  "id": "concurrent-insert",
+  "category": "concurrency",
+  "start": "saas-landing",
+  "during": [
+    {
+      "before": "apply",
+      "actor": {
+        "kind": "user",
+        "id": "sam",
+        "name": "Sam"
+      },
+      "label": "Add logos",
+      "ops": [
+        {
+          "op": "section.insert",
+          "section": "logos",
+          "after": "hero-1"
+        }
+      ]
+    }
+  ],
+  "prompt": "Add a testimonials section directly after the hero.",
+  "checks": [
+    {
+      "type": "sectionOrder",
+      "page": "home",
+      "sections": ["nav", "hero", "testimonials", "logos", "features", "pricing", "footer"]
+    },
+    {
+      "type": "unchangedExcept",
+      "ids": ["testimonials-1", "logos-1"]
+    }
+  ]
+}

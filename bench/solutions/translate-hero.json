@@ -1,0 +1,63 @@
+[
+  {
+    "tool": "get_context"
+  },
+  {
+    "tool": "apply",
+    "input": {
+      "ops": [
+        {
+          "op": "locale.set",
+          "add": ["de"]
+        },
+        {
+          "op": "props.set",
+          "id": "hero-1/eyebrow",
+          "locale": "de",
+          "props": {
+            "text": "Neu"
+          }
+        },
+        {
+          "op": "props.set",
+          "id": "hero-1/heading",
+          "locale": "de",
+          "props": {
+            "text": "Wissen, wohin jede Stunde geht"
+          }
+        },
+        {
+          "op": "props.set",
+          "id": "hero-1/subheading",
+          "locale": "de",
+          "props": {
+            "text": "Zeiterfassung, aus der Rechnungen werden."
+          }
+        },
+        {
+          "op": "props.set",
+          "id": "hero-1/primary",
+          "locale": "de",
+          "props": {
+            "text": "Loslegen"
+          }
+        },
+        {
+          "op": "props.set",
+          "id": "hero-1/secondary",
+          "locale": "de",
+          "props": {
+            "text": "Mehr erfahren"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "tool": "get_outline",
+    "input": {
+      "root": "hero-1",
+      "locale": "de"
+    }
+  }
+]

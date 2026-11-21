@@ -1,0 +1,38 @@
+{
+  "id": "concurrent-text-edit",
+  "category": "concurrency",
+  "start": "saas-landing",
+  "during": [
+    {
+      "before": "apply",
+      "actor": {
+        "kind": "user",
+        "id": "sam",
+        "name": "Sam"
+      },
+      "label": "Rewrite subheading",
+      "ops": [
+        {
+          "op": "props.set",
+          "id": "hero-1/subheading",
+          "props": {
+            "text": "Tracked hours become invoices automatically."
+          }
+        }
+      ]
+    }
+  ],
+  "prompt": "In the hero's subheading, change the word \"invoices\" to \"paid invoices\". Leave the rest of the sentence alone.",
+  "checks": [
+    {
+      "type": "propEquals",
+      "id": "hero-1/subheading",
+      "prop": "text",
+      "value": "Tracked hours become paid invoices automatically."
+    },
+    {
+      "type": "unchangedExcept",
+      "ids": ["hero-1/subheading"]
+    }
+  ]
+}

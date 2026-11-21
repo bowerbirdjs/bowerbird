@@ -1,0 +1,93 @@
+[
+  {
+    "tool": "get_context"
+  },
+  {
+    "tool": "apply",
+    "input": {
+      "ops": [
+        {
+          "op": "section.insert",
+          "section": "nav",
+          "page": "home",
+          "content": {
+            "brand": {
+              "text": "Crumb"
+            }
+          }
+        },
+        {
+          "op": "section.insert",
+          "section": "hero",
+          "page": "home",
+          "content": {
+            "heading": {
+              "text": "Bread worth getting up for"
+            },
+            "subheading": {
+              "text": "Sourdough, pastries and coffee, baked every morning on Mill Lane."
+            }
+          }
+        },
+        {
+          "op": "section.insert",
+          "section": "gallery",
+          "page": "home"
+        },
+        {
+          "op": "section.insert",
+          "section": "footer",
+          "page": "home",
+          "content": {
+            "brand": {
+              "text": "Crumb"
+            }
+          }
+        },
+        {
+          "op": "page.create",
+          "id": "about",
+          "path": "/about",
+          "title": "About"
+        },
+        {
+          "op": "symbol.create",
+          "id": "nav-1",
+          "name": "Site navigation",
+          "symbol": "site-nav"
+        },
+        {
+          "op": "symbol.create",
+          "id": "footer-1",
+          "name": "Site footer",
+          "symbol": "site-footer"
+        },
+        {
+          "op": "symbol.insert",
+          "symbol": "site-nav",
+          "page": "about"
+        },
+        {
+          "op": "section.insert",
+          "section": "page-header",
+          "page": "about",
+          "content": {
+            "heading": {
+              "text": "About Crumb"
+            }
+          }
+        },
+        {
+          "op": "section.insert",
+          "section": "content",
+          "page": "about"
+        },
+        {
+          "op": "symbol.insert",
+          "symbol": "site-footer",
+          "page": "about"
+        }
+      ]
+    }
+  }
+]

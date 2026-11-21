@@ -1,0 +1,15 @@
+[
+  {
+    "tool": "apply",
+    "input": {
+      "ops": [
+        {
+          "op": "style.set",
+          "id": "hero-1/secondary",
+          "state": "hover",
+          "css": "color: var(--color-accent)"
+        }
+      ]
+    }
+  }
+]

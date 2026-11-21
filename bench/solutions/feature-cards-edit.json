@@ -1,0 +1,44 @@
+[
+  {
+    "tool": "get_outline",
+    "input": {
+      "root": "features-1"
+    }
+  },
+  {
+    "tool": "apply",
+    "input": {
+      "ops": [
+        {
+          "op": "node.remove",
+          "id": "features-1/item-4"
+        },
+        {
+          "op": "node.duplicate",
+          "id": "features-1/item-6"
+        },
+        {
+          "op": "props.set",
+          "id": "features-1/item-7/icon",
+          "props": {
+            "text": "★"
+          }
+        },
+        {
+          "op": "props.set",
+          "id": "features-1/item-7/title",
+          "props": {
+            "text": "Live preview"
+          }
+        },
+        {
+          "op": "props.set",
+          "id": "features-1/item-7/body",
+          "props": {
+            "text": "See every change as it happens."
+          }
+        }
+      ]
+    }
+  }
+]

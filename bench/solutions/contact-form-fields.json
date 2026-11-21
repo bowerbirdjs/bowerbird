@@ -1,0 +1,43 @@
+[
+  {
+    "tool": "get_outline",
+    "input": {
+      "root": "contact-1",
+      "depth": 4
+    }
+  },
+  {
+    "tool": "apply",
+    "input": {
+      "ops": [
+        {
+          "op": "node.insert",
+          "parent": "contact-1/form",
+          "after": "contact-1/name",
+          "node": {
+            "type": "field",
+            "props": {
+              "type": "text",
+              "name": "company",
+              "label": "Company"
+            }
+          }
+        },
+        {
+          "op": "props.set",
+          "id": "contact-1/message",
+          "props": {
+            "required": false
+          }
+        },
+        {
+          "op": "props.set",
+          "id": "contact-1/form",
+          "props": {
+            "action": "https://example.com/api/contact"
+          }
+        }
+      ]
+    }
+  }
+]

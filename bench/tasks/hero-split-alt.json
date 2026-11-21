@@ -1,0 +1,31 @@
+{
+  "id": "hero-split-alt",
+  "category": "precise",
+  "start": "saas-landing",
+  "prompt": "Switch the hero to its split layout and give its image the alt text \"Clockwise timer on a laptop\". Keep the hero's texts.",
+  "checks": [
+    {
+      "type": "variant",
+      "id": "hero-1",
+      "variant": {
+        "layout": "split"
+      }
+    },
+    {
+      "type": "propEquals",
+      "id": "hero-1/media",
+      "prop": "alt",
+      "value": "Clockwise timer on a laptop"
+    },
+    {
+      "type": "propEquals",
+      "id": "hero-1/heading",
+      "prop": "text",
+      "value": "Know where every hour goes"
+    },
+    {
+      "type": "unchangedExcept",
+      "ids": ["hero-1"]
+    }
+  ]
+}

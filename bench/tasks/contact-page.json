@@ -1,0 +1,62 @@
+{
+  "id": "contact-page",
+  "category": "build",
+  "start": "saas-landing",
+  "prompt": "Add a page at /contact titled \"Contact\". It holds a page header with the heading \"Contact us\", then the contact section. On the home page, add a link labelled \"Contact\" that goes to /contact as the last link in the navigation bar's links.",
+  "checks": [
+    {
+      "type": "pageExists",
+      "path": "/contact",
+      "title": "Contact"
+    },
+    {
+      "type": "sectionOrder",
+      "page": "/contact",
+      "sections": ["page-header", "contact"]
+    },
+    {
+      "type": "find",
+      "query": {
+        "page": "/contact",
+        "type": "text",
+        "props": {
+          "text": "Contact us",
+          "tag": "h1"
+        }
+      },
+      "count": {
+        "equals": 1
+      }
+    },
+    {
+      "type": "children",
+      "id": "nav-1/links",
+      "sequence": [
+        {
+          "type": "link"
+        },
+        {
+          "type": "link"
+        },
+        {
+          "type": "link"
+        },
+        {
+          "type": "link",
+          "props": {
+            "text": "Contact",
+            "href": "/contact"
+          }
+        }
+      ]
+    },
+    {
+      "type": "unchangedExcept",
+      "ids": ["nav-1/links"],
+      "allow": ["pages"]
+    },
+    {
+      "type": "noLintErrors"
+    }
+  ]
+}

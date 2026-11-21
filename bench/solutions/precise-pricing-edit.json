@@ -1,0 +1,33 @@
+[
+  {
+    "tool": "apply",
+    "input": {
+      "ops": [
+        {
+          "op": "props.set",
+          "id": "pricing-1/tier-pro/price",
+          "props": {
+            "text": "$39"
+          }
+        },
+        {
+          "op": "node.duplicate",
+          "id": "pricing-1/tier-pro/feature-4"
+        },
+        {
+          "op": "props.set",
+          "id": "pricing-1/tier-pro/feature-5",
+          "props": {
+            "text": "SSO"
+          }
+        },
+        {
+          "op": "node.move",
+          "id": "pricing-1/tier-pro/badge",
+          "parent": "pricing-1/tier-team",
+          "before": "pricing-1/tier-team/name"
+        }
+      ]
+    }
+  }
+]

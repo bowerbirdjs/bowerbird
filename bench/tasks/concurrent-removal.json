@@ -1,0 +1,47 @@
+{
+  "id": "concurrent-removal",
+  "category": "concurrency",
+  "start": "saas-landing",
+  "during": [
+    {
+      "before": "apply",
+      "actor": {
+        "kind": "user",
+        "id": "sam",
+        "name": "Sam"
+      },
+      "label": "Remove a card",
+      "ops": [
+        {
+          "op": "node.remove",
+          "id": "features-1/item-6"
+        }
+      ]
+    }
+  ],
+  "prompt": "Add an exclamation mark to the end of every feature card's title.",
+  "checks": [
+    {
+      "type": "texts",
+      "query": {
+        "root": "features-1/grid",
+        "part": "title"
+      },
+      "equals": [
+        "Sections you can open!",
+        "On-brand by default!",
+        "Undo the agent, keep yours!",
+        "Any framework!",
+        "Agent-ready API!"
+      ]
+    },
+    {
+      "type": "notExists",
+      "id": "features-1/item-6"
+    },
+    {
+      "type": "unchangedExcept",
+      "ids": ["features-1/grid"]
+    }
+  ]
+}

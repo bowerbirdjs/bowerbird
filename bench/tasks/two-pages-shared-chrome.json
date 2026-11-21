@@ -1,0 +1,61 @@
+{
+  "id": "two-pages-shared-chrome",
+  "category": "build",
+  "start": "empty",
+  "prompt": "Build a two-page site for Crumb, a neighbourhood bakery. Home (/): navigation bar, hero, gallery, footer. About (/about, titled \"About\"): navigation bar, page header, text section, footer. The navigation bar and the footer must each be one linked component used on both pages, so a change to it shows on both. The brand in the navigation bar reads \"Crumb\".",
+  "checks": [
+    {
+      "type": "pageExists",
+      "path": "/about",
+      "title": "About"
+    },
+    {
+      "type": "sectionOrder",
+      "page": "home",
+      "sections": ["nav", "hero", "gallery", "footer"]
+    },
+    {
+      "type": "sectionOrder",
+      "page": "/about",
+      "sections": ["nav", "page-header", "content", "footer"]
+    },
+    {
+      "type": "linked",
+      "queries": [
+        {
+          "page": "home",
+          "section": "nav"
+        },
+        {
+          "page": "/about",
+          "section": "nav"
+        }
+      ]
+    },
+    {
+      "type": "linked",
+      "queries": [
+        {
+          "page": "home",
+          "section": "footer"
+        },
+        {
+          "page": "/about",
+          "section": "footer"
+        }
+      ]
+    },
+    {
+      "type": "find",
+      "query": {
+        "page": "/about",
+        "part": "brand",
+        "type": "link",
+        "textIncludes": "Crumb"
+      }
+    },
+    {
+      "type": "noLintErrors"
+    }
+  ]
+}

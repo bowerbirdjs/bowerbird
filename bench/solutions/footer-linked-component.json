@@ -1,0 +1,30 @@
+[
+  {
+    "tool": "get_outline",
+    "input": {
+      "depth": 1
+    }
+  },
+  {
+    "tool": "apply",
+    "input": {
+      "ops": [
+        {
+          "op": "symbol.create",
+          "id": "footer-1",
+          "name": "Site footer",
+          "symbol": "site-footer"
+        },
+        {
+          "op": "node.remove",
+          "id": "footer-2"
+        },
+        {
+          "op": "symbol.insert",
+          "symbol": "site-footer",
+          "page": "about"
+        }
+      ]
+    }
+  }
+]

@@ -1,0 +1,58 @@
+{
+  "id": "rebrand-palette",
+  "category": "restyle",
+  "start": "saas-landing",
+  "prompt": "Rebrand the site to green by changing the brand palette (the design tokens), not individual elements. Use these values: 50 #f0fdf4, 100 #dcfce7, 200 #bbf7d0, 300 #86efac, 400 #4ade80, 500 #22c55e, 600 #15803d, 700 #166534.",
+  "checks": [
+    {
+      "type": "tokenEquals",
+      "path": "color.brand.50",
+      "value": "#f0fdf4"
+    },
+    {
+      "type": "tokenEquals",
+      "path": "color.brand.100",
+      "value": "#dcfce7"
+    },
+    {
+      "type": "tokenEquals",
+      "path": "color.brand.200",
+      "value": "#bbf7d0"
+    },
+    {
+      "type": "tokenEquals",
+      "path": "color.brand.300",
+      "value": "#86efac"
+    },
+    {
+      "type": "tokenEquals",
+      "path": "color.brand.400",
+      "value": "#4ade80"
+    },
+    {
+      "type": "tokenEquals",
+      "path": "color.brand.500",
+      "value": "#22c55e"
+    },
+    {
+      "type": "tokenEquals",
+      "path": "color.brand.600",
+      "value": "#15803d"
+    },
+    {
+      "type": "tokenEquals",
+      "path": "color.brand.700",
+      "value": "#166534"
+    },
+    {
+      "type": "tokenEquals",
+      "path": "color.accent",
+      "value": "{color.brand.600}"
+    },
+    {
+      "type": "unchangedExcept",
+      "ids": [],
+      "allow": ["tokens"]
+    }
+  ]
+}

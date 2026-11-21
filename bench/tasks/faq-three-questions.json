@@ -1,0 +1,53 @@
+{
+  "id": "faq-three-questions",
+  "category": "build",
+  "start": "saas-landing",
+  "prompt": "Add a questions and answers section between pricing and the footer. It must hold exactly these three questions with these answers, in this order:\n1. \"Is there a free plan?\" → \"Yes, for one site, for as long as you like.\"\n2. \"Can I cancel any time?\" → \"Yes. You keep access until the end of the billing period.\"\n3. \"Do you send invoices?\" → \"Every payment comes with a PDF invoice.\"\nDon't change the rest of the page.",
+  "checks": [
+    {
+      "type": "sectionOrder",
+      "page": "home",
+      "sections": ["nav", "hero", "features", "pricing", "faq", "footer"]
+    },
+    {
+      "type": "find",
+      "query": {
+        "page": "home",
+        "type": "details"
+      },
+      "count": {
+        "equals": 3
+      }
+    },
+    {
+      "type": "texts",
+      "query": {
+        "page": "home",
+        "type": "text",
+        "props": {
+          "tag": "summary"
+        }
+      },
+      "equals": ["Is there a free plan?", "Can I cancel any time?", "Do you send invoices?"]
+    },
+    {
+      "type": "texts",
+      "query": {
+        "page": "home",
+        "part": "answer"
+      },
+      "equals": [
+        "Yes, for one site, for as long as you like.",
+        "Yes. You keep access until the end of the billing period.",
+        "Every payment comes with a PDF invoice."
+      ]
+    },
+    {
+      "type": "unchangedExcept",
+      "ids": ["faq-1"]
+    },
+    {
+      "type": "noLintErrors"
+    }
+  ]
+}

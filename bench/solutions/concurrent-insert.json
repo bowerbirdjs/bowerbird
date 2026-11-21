@@ -1,0 +1,20 @@
+[
+  {
+    "tool": "get_outline",
+    "input": {
+      "depth": 1
+    }
+  },
+  {
+    "tool": "apply",
+    "input": {
+      "ops": [
+        {
+          "op": "section.insert",
+          "section": "testimonials",
+          "after": "hero-1"
+        }
+      ]
+    }
+  }
+]

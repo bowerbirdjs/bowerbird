@@ -1,0 +1,35 @@
+{
+  "id": "fix-typos",
+  "category": "precise",
+  "start": "saas-landing",
+  "setup": [
+    {
+      "actor": {
+        "kind": "system",
+        "id": "pagebench"
+      },
+      "ops": [
+        {
+          "op": "props.set",
+          "id": "hero-1/subheading",
+          "props": {
+            "text": "Time traking that turns into invoicess."
+          }
+        }
+      ]
+    }
+  ],
+  "prompt": "The hero's subheading has two typos. Fix them and change nothing else.",
+  "checks": [
+    {
+      "type": "propEquals",
+      "id": "hero-1/subheading",
+      "prop": "text",
+      "value": "Time tracking that turns into invoices."
+    },
+    {
+      "type": "unchangedExcept",
+      "ids": ["hero-1/subheading"]
+    }
+  ]
+}

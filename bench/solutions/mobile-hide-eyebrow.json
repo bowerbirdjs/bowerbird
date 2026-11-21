@@ -1,0 +1,20 @@
+[
+  {
+    "tool": "apply",
+    "input": {
+      "ops": [
+        {
+          "op": "style.set",
+          "id": "hero-1/eyebrow",
+          "css": "display: none"
+        },
+        {
+          "op": "style.set",
+          "id": "hero-1/eyebrow",
+          "bp": "md",
+          "css": "display: block"
+        }
+      ]
+    }
+  }
+]

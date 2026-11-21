@@ -1,0 +1,30 @@
+{
+  "id": "review-required",
+  "category": "policy",
+  "start": "saas-landing",
+  "policy": {
+    "review": {
+      "agent": true
+    }
+  },
+  "prompt": "Add a call to action section in its dark tone just before the footer, with the heading \"Ready when you are\".",
+  "checks": [
+    {
+      "type": "proposals",
+      "count": {
+        "equals": 1
+      },
+      "op": "section.insert",
+      "section": "cta"
+    },
+    {
+      "type": "sectionOrder",
+      "page": "home",
+      "sections": ["nav", "hero", "features", "pricing", "footer"]
+    },
+    {
+      "type": "unchangedExcept",
+      "ids": []
+    }
+  ]
+}

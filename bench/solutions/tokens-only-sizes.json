@@ -1,0 +1,36 @@
+[
+  {
+    "tool": "apply",
+    "input": {
+      "ops": [
+        {
+          "op": "style.set",
+          "id": "hero-1/heading",
+          "css": "font-size: 36px"
+        },
+        {
+          "op": "style.set",
+          "id": "hero-1/content",
+          "css": "gap: 24px"
+        }
+      ]
+    }
+  },
+  {
+    "tool": "apply",
+    "input": {
+      "ops": [
+        {
+          "op": "style.set",
+          "id": "hero-1/heading",
+          "css": "font-size: var(--text-4xl)"
+        },
+        {
+          "op": "style.set",
+          "id": "hero-1/content",
+          "css": "gap: var(--space-lg)"
+        }
+      ]
+    }
+  }
+]

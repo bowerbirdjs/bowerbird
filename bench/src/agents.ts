@@ -44,7 +44,8 @@ const emptyUsage = (): Usage => ({
 export const SYSTEM_PROMPT =
   'You are editing a website in Bowerbird through tools. Call get_context first. Make the requested changes, ' +
   'check the result with get_outline and lint, then reply with one short sentence saying what you changed. ' +
-  "Don't change anything the task doesn't ask for.";
+  "Don't change anything the task doesn't ask for. Nobody can answer questions while you work: if part of a " +
+  'request is refused (permissions, locks, review), do the part you can and say what was refused.';
 
 export interface ClaudeAgentOptions {
   model?: string;
@@ -75,6 +76,7 @@ export function claudeAgent(options: ClaudeAgentOptions = {}): BenchAgent {
       let toolErrors = 0;
       let stopReason = 'max_turns';
       let servedBy: string | undefined;
+      let finalText = '';
       const started = Date.now();
 
       while (turns < maxTurns) {
@@ -97,6 +99,11 @@ export function claudeAgent(options: ClaudeAgentOptions = {}): BenchAgent {
         usage.cacheWriteTokens += response.usage.cache_creation_input_tokens ?? 0;
         if (response.model !== model) servedBy = response.model;
         stopReason = response.stop_reason ?? 'unknown';
+        const said = response.content
+          .flatMap((block) => (block.type === 'text' ? [block.text] : []))
+          .join('\n')
+          .trim();
+        if (said) finalText = said;
         if (turns >= maxTurns && stopReason === 'tool_use') {
           stopReason = 'max_turns';
           break;
@@ -137,6 +144,7 @@ export function claudeAgent(options: ClaudeAgentOptions = {}): BenchAgent {
         latencyMs: Date.now() - started,
         stopReason,
         ...(servedBy ? { servedBy } : {}),
+        ...(finalText ? { finalText: finalText.slice(0, 2000) } : {}),
       };
     },
   };

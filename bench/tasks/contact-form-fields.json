@@ -1,0 +1,98 @@
+{
+  "id": "contact-form-fields",
+  "category": "precise",
+  "start": "saas-contact",
+  "prompt": "Change the contact form: add an optional text field labelled \"Company\" (sent as \"company\") between the Name and Email fields, make the message field optional, and send the form to https://example.com/api/contact.",
+  "checks": [
+    {
+      "type": "children",
+      "id": "contact-1/form",
+      "sequence": [
+        {
+          "type": "field",
+          "props": {
+            "name": "name"
+          }
+        },
+        {
+          "type": "field",
+          "props": {
+            "name": "company",
+            "type": "text",
+            "label": "Company"
+          }
+        },
+        {
+          "type": "field",
+          "props": {
+            "name": "email"
+          }
+        },
+        {
+          "type": "field",
+          "props": {
+            "name": "message"
+          }
+        },
+        {
+          "type": "button"
+        }
+      ]
+    },
+    {
+      "type": "find",
+      "query": {
+        "root": "contact-1/form",
+        "type": "field",
+        "props": {
+          "name": "company",
+          "required": true
+        }
+      },
+      "count": {
+        "equals": 0
+      }
+    },
+    {
+      "type": "find",
+      "query": {
+        "root": "contact-1/form",
+        "type": "field",
+        "props": {
+          "name": "message",
+          "required": true
+        }
+      },
+      "count": {
+        "equals": 0
+      }
+    },
+    {
+      "type": "find",
+      "query": {
+        "root": "contact-1/form",
+        "type": "field",
+        "props": {
+          "name": "name",
+          "required": true
+        }
+      },
+      "count": {
+        "equals": 1
+      }
+    },
+    {
+      "type": "propEquals",
+      "id": "contact-1/form",
+      "prop": "action",
+      "value": "https://example.com/api/contact"
+    },
+    {
+      "type": "unchangedExcept",
+      "ids": ["contact-1/form"]
+    },
+    {
+      "type": "noLintErrors"
+    }
+  ]
+}

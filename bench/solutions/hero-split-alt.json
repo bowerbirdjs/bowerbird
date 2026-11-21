@@ -1,0 +1,23 @@
+[
+  {
+    "tool": "apply",
+    "input": {
+      "ops": [
+        {
+          "op": "section.variant",
+          "id": "hero-1",
+          "variant": {
+            "layout": "split"
+          }
+        },
+        {
+          "op": "props.set",
+          "id": "hero-1/media",
+          "props": {
+            "alt": "Clockwise timer on a laptop"
+          }
+        }
+      ]
+    }
+  }
+]

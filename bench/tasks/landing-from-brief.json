@@ -9,10 +9,31 @@
       "page": "home",
       "sections": ["nav", "hero", "features", "pricing", "cta", "footer"]
     },
-    { "type": "variant", "id": "hero-1", "variant": { "layout": "split" } },
-    { "type": "variant", "id": "cta-1", "variant": { "tone": "dark" } },
-    { "type": "textIncludes", "id": "nav-1/brand", "anyOf": ["Clockwise"] },
-    { "type": "noPlaceholderText", "ids": ["hero-1/heading", "hero-1/subheading"] },
-    { "type": "noLintErrors" }
+    {
+      "type": "variant",
+      "id": "hero-1",
+      "variant": {
+        "layout": "split"
+      }
+    },
+    {
+      "type": "variant",
+      "id": "cta-1",
+      "variant": {
+        "tone": "dark"
+      }
+    },
+    {
+      "type": "textIncludes",
+      "id": "nav-1/brand",
+      "anyOf": ["Clockwise"]
+    },
+    {
+      "type": "noPlaceholderText",
+      "ids": ["hero-1/heading", "hero-1/subheading"]
+    },
+    {
+      "type": "noLintErrors"
+    }
   ]
 }

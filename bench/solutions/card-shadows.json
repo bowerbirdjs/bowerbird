@@ -1,0 +1,45 @@
+[
+  {
+    "tool": "list_tokens",
+    "input": {
+      "prefix": "shadow"
+    }
+  },
+  {
+    "tool": "apply",
+    "input": {
+      "ops": [
+        {
+          "op": "style.set",
+          "id": "features-1/item-1",
+          "css": "box-shadow: var(--shadow-lg)"
+        },
+        {
+          "op": "style.set",
+          "id": "features-1/item-2",
+          "css": "box-shadow: var(--shadow-lg)"
+        },
+        {
+          "op": "style.set",
+          "id": "features-1/item-3",
+          "css": "box-shadow: var(--shadow-lg)"
+        },
+        {
+          "op": "style.set",
+          "id": "features-1/item-4",
+          "css": "box-shadow: var(--shadow-lg)"
+        },
+        {
+          "op": "style.set",
+          "id": "features-1/item-5",
+          "css": "box-shadow: var(--shadow-lg)"
+        },
+        {
+          "op": "style.set",
+          "id": "features-1/item-6",
+          "css": "box-shadow: var(--shadow-lg)"
+        }
+      ]
+    }
+  }
+]

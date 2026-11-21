@@ -10,5 +10,5 @@ export {
 } from './agents.js';
 export { runCheck } from './checks.js';
 export { FIXTURE_NAMES, fixtureStore } from './fixtures.js';
-export { formatResults, loadTasks, runTask } from './runner.js';
+export { CATEGORIES, formatResults, loadSolutions, loadTasks, runTask } from './runner.js';
 export type * from './types.js';

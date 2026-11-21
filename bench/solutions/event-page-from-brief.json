@@ -1,0 +1,220 @@
+[
+  {
+    "tool": "get_context"
+  },
+  {
+    "tool": "list_sections"
+  },
+  {
+    "tool": "apply",
+    "input": {
+      "ops": [
+        {
+          "op": "section.insert",
+          "section": "nav",
+          "content": {
+            "brand": {
+              "text": "Glow Conf"
+            },
+            "cta": {
+              "text": "Get tickets",
+              "href": "#tickets"
+            }
+          }
+        },
+        {
+          "op": "section.insert",
+          "section": "hero",
+          "content": {
+            "eyebrow": {
+              "text": "12 June 2027 · Porto"
+            },
+            "heading": {
+              "text": "A day about design that glows"
+            },
+            "subheading": {
+              "text": "Eight talks and four workshops on colour, light and interfaces people love."
+            },
+            "primary": {
+              "text": "Get tickets",
+              "href": "#tickets"
+            },
+            "secondary": {
+              "text": "See the schedule",
+              "href": "#schedule"
+            }
+          }
+        },
+        {
+          "op": "section.insert",
+          "section": "schedule",
+          "content": {
+            "heading": {
+              "text": "Schedule"
+            },
+            "intro": {
+              "text": "One room, one track."
+            },
+            "entry-1/time": {
+              "text": "09:30"
+            },
+            "entry-1/title": {
+              "text": "Registration"
+            },
+            "entry-1/detail": {
+              "text": "Badges and pastel de nata."
+            },
+            "entry-2/time": {
+              "text": "10:30"
+            },
+            "entry-2/title": {
+              "text": "Keynote: colour after dark mode"
+            },
+            "entry-2/detail": {
+              "text": "What a decade of dark themes taught us."
+            },
+            "entry-3/time": {
+              "text": "13:00"
+            },
+            "entry-3/title": {
+              "text": "Lunch by the river"
+            },
+            "entry-3/detail": {
+              "text": "Grilled fish and vegetables on the terrace."
+            },
+            "entry-4/time": {
+              "text": "14:30"
+            },
+            "entry-4/title": {
+              "text": "Afternoon workshops"
+            },
+            "entry-4/detail": {
+              "text": "Four rooms, twenty seats each."
+            }
+          }
+        },
+        {
+          "op": "section.insert",
+          "section": "team",
+          "content": {
+            "heading": {
+              "text": "Speakers"
+            },
+            "intro": {
+              "text": "Designers who ship."
+            },
+            "person-1/name": {
+              "text": "Inês Carvalho"
+            },
+            "person-1/role": {
+              "text": "Colour scientist"
+            },
+            "person-1/bio": {
+              "text": "Writes the palettes other people copy."
+            },
+            "person-1/photo": {
+              "alt": "Portrait of Inês Carvalho"
+            },
+            "person-2/name": {
+              "text": "Oluwaseun Adeyemi"
+            },
+            "person-2/role": {
+              "text": "Design engineer"
+            },
+            "person-2/bio": {
+              "text": "Builds tools for building interfaces."
+            },
+            "person-2/photo": {
+              "alt": "Portrait of Oluwaseun Adeyemi"
+            },
+            "person-3/name": {
+              "text": "Hana Kobayashi"
+            },
+            "person-3/role": {
+              "text": "Type designer"
+            },
+            "person-3/bio": {
+              "text": "Draws letters for small screens."
+            },
+            "person-3/photo": {
+              "alt": "Portrait of Hana Kobayashi"
+            },
+            "person-4/name": {
+              "text": "Mateo Fernández"
+            },
+            "person-4/role": {
+              "text": "Motion lead"
+            },
+            "person-4/bio": {
+              "text": "Makes things move for a reason."
+            },
+            "person-4/photo": {
+              "alt": "Portrait of Mateo Fernández"
+            }
+          }
+        },
+        {
+          "op": "section.insert",
+          "section": "faq",
+          "content": {
+            "item-1/question": {
+              "text": "Where is the venue?"
+            },
+            "item-1/answer": {
+              "text": "At the old customs house, ten minutes from São Bento station."
+            },
+            "item-2/question": {
+              "text": "Are talks in English?"
+            },
+            "item-2/answer": {
+              "text": "Yes, with live captions."
+            },
+            "item-3/question": {
+              "text": "Can I get a refund?"
+            },
+            "item-3/answer": {
+              "text": "Until 12 May; after that you can pass your ticket on."
+            },
+            "item-4/question": {
+              "text": "Is lunch included?"
+            },
+            "item-4/answer": {
+              "text": "Lunch and coffee are part of every ticket."
+            }
+          }
+        },
+        {
+          "op": "section.insert",
+          "section": "newsletter",
+          "content": {
+            "heading": {
+              "text": "Hear about the next Glow first"
+            },
+            "form": {
+              "action": "/subscribe"
+            }
+          }
+        },
+        {
+          "op": "section.insert",
+          "section": "footer",
+          "content": {
+            "brand": {
+              "text": "Glow Conf"
+            },
+            "tagline": {
+              "text": "Design, in a good light."
+            },
+            "legal": {
+              "text": "© 2027 Glow Conf."
+            }
+          }
+        }
+      ],
+      "label": "Build the Glow Conf page"
+    }
+  },
+  {
+    "tool": "lint"
+  }
+]

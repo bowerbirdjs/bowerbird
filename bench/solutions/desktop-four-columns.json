@@ -1,0 +1,15 @@
+[
+  {
+    "tool": "apply",
+    "input": {
+      "ops": [
+        {
+          "op": "style.set",
+          "id": "features-1/grid",
+          "bp": "lg",
+          "css": "grid-template-columns: repeat(4, minmax(0, 1fr))"
+        }
+      ]
+    }
+  }
+]

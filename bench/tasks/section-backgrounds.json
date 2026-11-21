@@ -1,0 +1,56 @@
+{
+  "id": "section-backgrounds",
+  "category": "restyle",
+  "start": "saas-landing",
+  "prompt": "Give the pricing section the muted surface colour as its background, and switch the navigation bar to its dark tone.",
+  "checks": [
+    {
+      "type": "anyOf",
+      "checks": [
+        {
+          "type": "varEquals",
+          "id": "pricing-1",
+          "name": "--pricing-bg",
+          "value": "var(--color-surface-muted)"
+        },
+        {
+          "type": "styleEquals",
+          "id": "pricing-1",
+          "prop": "background",
+          "value": "var(--color-surface-muted)"
+        },
+        {
+          "type": "styleEquals",
+          "id": "pricing-1",
+          "prop": "background-color",
+          "value": "var(--color-surface-muted)"
+        }
+      ]
+    },
+    {
+      "type": "anyOf",
+      "checks": [
+        {
+          "type": "variant",
+          "id": "nav-1",
+          "variant": {
+            "tone": "dark"
+          }
+        },
+        {
+          "type": "varEquals",
+          "id": "nav-1",
+          "name": "--nav-bg",
+          "value": "var(--color-surface-inverse)"
+        }
+      ]
+    },
+    {
+      "type": "noRawValues"
+    },
+    {
+      "type": "unchangedExcept",
+      "ids": ["pricing-1", "nav-1"]
+    }
+  ]
+}

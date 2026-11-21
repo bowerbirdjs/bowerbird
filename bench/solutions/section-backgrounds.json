@@ -1,0 +1,29 @@
+[
+  {
+    "tool": "list_sections",
+    "input": {
+      "name": "pricing"
+    }
+  },
+  {
+    "tool": "apply",
+    "input": {
+      "ops": [
+        {
+          "op": "vars.set",
+          "id": "pricing-1",
+          "vars": {
+            "--pricing-bg": "var(--color-surface-muted)"
+          }
+        },
+        {
+          "op": "section.variant",
+          "id": "nav-1",
+          "variant": {
+            "tone": "dark"
+          }
+        }
+      ]
+    }
+  }
+]

@@ -5,8 +5,8 @@ import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs, parseEnv } from 'node:util';
 import Anthropic from '@anthropic-ai/sdk';
-import { claudeAgent } from './agents.js';
-import { formatResults, loadTasks, runTask } from './runner.js';
+import { claudeAgent, scriptedAgent } from './agents.js';
+import { formatResults, loadSolutions, loadTasks, runTask } from './runner.js';
 import type { TaskResult } from './types.js';
 
 const USAGE = `pagebench: run page-editing tasks against Claude
@@ -15,6 +15,9 @@ Options:
   --model <id>        Model (default claude-opus-5-5)
   --effort <level>    low | medium | high | xhigh | max (default high)
   --task <id>         Run only these tasks (repeatable)
+  --category <name>   Run only these categories (repeatable): build, precise, restyle,
+                      responsive, policy, concurrency
+  --scripted          Replay the reference solutions instead of calling a model (no key needed)
   --max-turns <n>     Turn limit per task (default 40)
   --no-fallbacks      Disable server-side refusal fallbacks
   --out <file>        Write full results as JSON
@@ -41,6 +44,8 @@ async function main() {
       model: { type: 'string', default: 'claude-opus-5-5' },
       effort: { type: 'string', default: 'high' },
       task: { type: 'string', multiple: true },
+      category: { type: 'string', multiple: true },
+      scripted: { type: 'boolean', default: false },
       'max-turns': { type: 'string', default: '40' },
       'no-fallbacks': { type: 'boolean', default: false },
       out: { type: 'string' },
@@ -56,16 +61,20 @@ async function main() {
 
   const tasksDir = fileURLToPath(new URL('../tasks', import.meta.url));
   const tasks = loadTasks(tasksDir).filter(
-    (t) => !values.task?.length || values.task.includes(t.id),
+    (t) =>
+      (!values.task?.length || values.task.includes(t.id)) &&
+      (!values.category?.length || values.category.includes(t.category)),
   );
   if (!tasks.length) throw new Error('No tasks matched.');
 
-  const agent = claudeAgent({
-    model: values.model,
-    effort,
-    maxTurns: Number(values['max-turns']),
-    fallbacks: !values['no-fallbacks'],
-  });
+  const agent = values.scripted
+    ? scriptedAgent(loadSolutions(fileURLToPath(new URL('../solutions', import.meta.url))))
+    : claudeAgent({
+        model: values.model,
+        effort,
+        maxTurns: Number(values['max-turns']),
+        fallbacks: !values['no-fallbacks'],
+      });
   const results: TaskResult[] = [];
   for (const task of tasks) {
     console.error(`running ${task.id}…`);

@@ -1,0 +1,37 @@
+{
+  "id": "footer-linked-component",
+  "category": "precise",
+  "start": "two-pages",
+  "prompt": "Turn the home page's footer into a linked component named \"Site footer\", and use it on the About page in place of that page's own footer.",
+  "checks": [
+    {
+      "type": "linked",
+      "queries": [
+        {
+          "page": "home",
+          "section": "footer"
+        },
+        {
+          "page": "about",
+          "section": "footer"
+        }
+      ],
+      "symbolName": "Site footer"
+    },
+    {
+      "type": "sectionOrder",
+      "page": "home",
+      "sections": ["nav", "hero", "features", "pricing", "footer"]
+    },
+    {
+      "type": "sectionOrder",
+      "page": "about",
+      "sections": ["nav", "page-header", "content", "footer"]
+    },
+    {
+      "type": "unchangedExcept",
+      "ids": ["footer-1", "footer-2"],
+      "allow": ["created", "symbols"]
+    }
+  ]
+}

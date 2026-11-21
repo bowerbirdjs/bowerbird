@@ -1,0 +1,24 @@
+[
+  {
+    "tool": "get_outline"
+  },
+  {
+    "tool": "apply",
+    "input": {
+      "ops": [
+        {
+          "op": "text.edit",
+          "id": "hero-1/subheading",
+          "find": "traking",
+          "replace": "tracking"
+        },
+        {
+          "op": "text.edit",
+          "id": "hero-1/subheading",
+          "find": "invoicess",
+          "replace": "invoices"
+        }
+      ]
+    }
+  }
+]

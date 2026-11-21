@@ -1,0 +1,26 @@
+[
+  {
+    "tool": "list_sections",
+    "input": {
+      "name": "hero"
+    }
+  },
+  {
+    "tool": "apply",
+    "input": {
+      "ops": [
+        {
+          "op": "style.set",
+          "id": "hero-1",
+          "css": "padding-block: var(--space-2xl)"
+        },
+        {
+          "op": "style.set",
+          "id": "hero-1",
+          "bp": "md",
+          "css": "padding-block: var(--hero-pad-block)"
+        }
+      ]
+    }
+  }
+]

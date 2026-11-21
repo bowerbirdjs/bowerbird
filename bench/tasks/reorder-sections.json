@@ -1,0 +1,17 @@
+{
+  "id": "reorder-sections",
+  "category": "precise",
+  "start": "saas-landing",
+  "prompt": "Move the pricing section so that it comes directly before the feature grid. Don't change anything else.",
+  "checks": [
+    {
+      "type": "sectionOrder",
+      "page": "home",
+      "sections": ["nav", "hero", "pricing", "features", "footer"]
+    },
+    {
+      "type": "unchangedExcept",
+      "ids": ["pricing-1", "features-1"]
+    }
+  ]
+}

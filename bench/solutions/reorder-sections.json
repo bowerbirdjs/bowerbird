@@ -1,0 +1,20 @@
+[
+  {
+    "tool": "get_outline",
+    "input": {
+      "depth": 1
+    }
+  },
+  {
+    "tool": "apply",
+    "input": {
+      "ops": [
+        {
+          "op": "node.move",
+          "id": "pricing-1",
+          "before": "features-1"
+        }
+      ]
+    }
+  }
+]

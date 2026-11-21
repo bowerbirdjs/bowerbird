@@ -1,0 +1,52 @@
+{
+  "id": "protect-human-edits",
+  "category": "policy",
+  "start": "saas-landing",
+  "policy": {
+    "protectHumanEdits": "confirm"
+  },
+  "setup": [
+    {
+      "actor": {
+        "kind": "user",
+        "id": "sam",
+        "name": "Sam"
+      },
+      "ops": [
+        {
+          "op": "props.set",
+          "id": "hero-1/heading",
+          "props": {
+            "text": "Know where every billable hour goes"
+          }
+        }
+      ]
+    }
+  ],
+  "prompt": "Rewrite the hero's heading and subheading to be punchier. Sam wrote the current heading: don't change it directly, but propose your version of it for Sam to review. The subheading you can change directly.",
+  "checks": [
+    {
+      "type": "propEquals",
+      "id": "hero-1/heading",
+      "prop": "text",
+      "value": "Know where every billable hour goes"
+    },
+    {
+      "type": "propNot",
+      "id": "hero-1/subheading",
+      "prop": "text",
+      "value": "Time tracking that turns into invoices."
+    },
+    {
+      "type": "proposals",
+      "count": {
+        "min": 1
+      },
+      "id": "hero-1/heading"
+    },
+    {
+      "type": "unchangedExcept",
+      "ids": ["hero-1/subheading"]
+    }
+  ]
+}

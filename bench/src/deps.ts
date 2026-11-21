@@ -1,4 +1,15 @@
-export { lintPage, type SiteDoc, type Store } from '@bowerbirdjs/core';
+export {
+  type BNode,
+  descendants,
+  findRawValue,
+  getTokenLeaf,
+  lintPage,
+  pageNodes,
+  richTextToPlain,
+  type SiteDoc,
+  type Store,
+  toCssValue,
+} from '@bowerbirdjs/core';
 
 /** Structural equality for JSON-like values (key order doesn't matter). */
 export function deepEqualJson(a: unknown, b: unknown): boolean {

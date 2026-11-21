@@ -1,0 +1,26 @@
+[
+  {
+    "tool": "get_outline",
+    "input": {
+      "root": "hero-1"
+    }
+  },
+  {
+    "tool": "apply",
+    "input": {
+      "ops": [
+        {
+          "op": "style.set",
+          "id": "hero-1/actions",
+          "css": "flex-direction: column"
+        },
+        {
+          "op": "style.set",
+          "id": "hero-1/actions",
+          "bp": "md",
+          "css": "flex-direction: row"
+        }
+      ]
+    }
+  }
+]

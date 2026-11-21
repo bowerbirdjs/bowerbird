@@ -1,0 +1,19 @@
+{
+  "id": "page-settings",
+  "category": "precise",
+  "start": "saas-landing",
+  "prompt": "Set the home page's title to \"Clockwise: time tracking for freelancers\" and its description to \"Track hours, send invoices and get paid on time.\"",
+  "checks": [
+    {
+      "type": "pageExists",
+      "path": "/",
+      "title": "Clockwise: time tracking for freelancers",
+      "description": "Track hours, send invoices and get paid on time."
+    },
+    {
+      "type": "unchangedExcept",
+      "ids": [],
+      "allow": ["pages"]
+    }
+  ]
+}

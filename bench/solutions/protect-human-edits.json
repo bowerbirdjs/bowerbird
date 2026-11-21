@@ -1,0 +1,38 @@
+[
+  {
+    "tool": "get_outline",
+    "input": {
+      "root": "hero-1"
+    }
+  },
+  {
+    "tool": "apply",
+    "input": {
+      "ops": [
+        {
+          "op": "props.set",
+          "id": "hero-1/subheading",
+          "props": {
+            "text": "Track it. Bill it. Done."
+          }
+        }
+      ]
+    }
+  },
+  {
+    "tool": "apply",
+    "input": {
+      "ops": [
+        {
+          "op": "props.set",
+          "id": "hero-1/heading",
+          "props": {
+            "text": "Every billable hour, accounted for"
+          }
+        }
+      ],
+      "propose": true,
+      "label": "Punchier heading"
+    }
+  }
+]

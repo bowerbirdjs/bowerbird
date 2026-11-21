@@ -1,0 +1,40 @@
+{
+  "id": "translate-hero",
+  "category": "precise",
+  "start": "saas-landing",
+  "prompt": "Add German (de) as a second language of the site and translate the hero into German: its eyebrow, heading, subheading and both buttons. Leave the English text as it is.",
+  "checks": [
+    {
+      "type": "localeExists",
+      "locale": "de"
+    },
+    {
+      "type": "translated",
+      "locale": "de",
+      "ids": [
+        "hero-1/eyebrow",
+        "hero-1/heading",
+        "hero-1/subheading",
+        "hero-1/primary",
+        "hero-1/secondary"
+      ]
+    },
+    {
+      "type": "propEquals",
+      "id": "hero-1/heading",
+      "prop": "text",
+      "value": "Know where every hour goes"
+    },
+    {
+      "type": "propEquals",
+      "id": "hero-1/subheading",
+      "prop": "text",
+      "value": "Time tracking that turns into invoices."
+    },
+    {
+      "type": "unchangedExcept",
+      "ids": ["hero-1"],
+      "allow": ["locales"]
+    }
+  ]
+}

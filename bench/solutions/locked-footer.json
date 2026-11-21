@@ -1,0 +1,39 @@
+[
+  {
+    "tool": "get_outline"
+  },
+  {
+    "tool": "apply",
+    "input": {
+      "ops": [
+        {
+          "op": "text.edit",
+          "id": "footer-1/legal",
+          "find": "2026",
+          "replace": "2027"
+        },
+        {
+          "op": "props.set",
+          "id": "hero-1/secondary",
+          "props": {
+            "text": "See pricing"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "tool": "apply",
+    "input": {
+      "ops": [
+        {
+          "op": "props.set",
+          "id": "hero-1/secondary",
+          "props": {
+            "text": "See pricing"
+          }
+        }
+      ]
+    }
+  }
+]

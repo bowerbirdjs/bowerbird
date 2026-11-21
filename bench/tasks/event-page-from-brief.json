@@ -1,0 +1,62 @@
+{
+  "id": "event-page-from-brief",
+  "category": "build",
+  "start": "empty",
+  "prompt": "Build the page for Glow Conf, a one-day design conference in Porto on 12 June 2027. In this order: navigation bar, hero, a schedule with exactly four entries, the speakers (use the people section, exactly four speakers), questions and answers, a newsletter signup and a footer. Write real copy for the event: none of the template's example text may be left in the hero's eyebrow, heading and subheading, in the schedule's titles and details, or in the speakers' names, roles and bios.",
+  "checks": [
+    {
+      "type": "sectionOrder",
+      "page": "home",
+      "sections": ["nav", "hero", "schedule", "team", "faq", "newsletter", "footer"]
+    },
+    {
+      "type": "find",
+      "query": {
+        "page": "home",
+        "part": "brand",
+        "textIncludes": "Glow"
+      }
+    },
+    {
+      "type": "noPlaceholderIn",
+      "page": "home",
+      "sections": ["hero"],
+      "parts": ["eyebrow", "heading", "subheading"]
+    },
+    {
+      "type": "noPlaceholderIn",
+      "page": "home",
+      "sections": ["schedule"],
+      "parts": ["title", "detail"]
+    },
+    {
+      "type": "noPlaceholderIn",
+      "page": "home",
+      "sections": ["team"],
+      "parts": ["name", "role", "bio"]
+    },
+    {
+      "type": "find",
+      "query": {
+        "page": "home",
+        "part": "entry"
+      },
+      "count": {
+        "equals": 4
+      }
+    },
+    {
+      "type": "find",
+      "query": {
+        "page": "home",
+        "part": "person"
+      },
+      "count": {
+        "equals": 4
+      }
+    },
+    {
+      "type": "noLintErrors"
+    }
+  ]
+}

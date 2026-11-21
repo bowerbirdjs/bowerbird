@@ -1,0 +1,27 @@
+[
+  {
+    "tool": "list_tokens",
+    "input": {
+      "prefix": "color"
+    }
+  },
+  {
+    "tool": "apply",
+    "input": {
+      "ops": [
+        {
+          "op": "token.set",
+          "path": "color.accent",
+          "theme": "dark",
+          "value": "{color.brand.300}"
+        },
+        {
+          "op": "token.set",
+          "path": "color.accent-hover",
+          "theme": "dark",
+          "value": "{color.brand.200}"
+        }
+      ]
+    }
+  }
+]

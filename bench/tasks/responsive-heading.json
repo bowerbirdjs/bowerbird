@@ -1,0 +1,24 @@
+{
+  "id": "responsive-heading",
+  "category": "responsive",
+  "start": "saas-landing",
+  "prompt": "From the md breakpoint up, make the feature grid's heading use the 4xl text size. On mobile it must stay as it is.",
+  "checks": [
+    {
+      "type": "styleEquals",
+      "id": "features-1/heading",
+      "prop": "font-size",
+      "value": "var(--text-4xl)",
+      "bp": "md"
+    },
+    {
+      "type": "styleAbsent",
+      "id": "features-1/heading",
+      "prop": "font-size"
+    },
+    {
+      "type": "unchangedExcept",
+      "ids": ["features-1/heading"]
+    }
+  ]
+}

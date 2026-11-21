@@ -1,0 +1,28 @@
+{
+  "id": "mobile-padding",
+  "category": "responsive",
+  "start": "saas-landing",
+  "prompt": "On mobile, set the hero's padding-block to the 2xl space token. From the md breakpoint up it keeps the padding it has now (the section's own --hero-pad-block variable).",
+  "checks": [
+    {
+      "type": "styleEquals",
+      "id": "hero-1",
+      "prop": "padding-block",
+      "value": "var(--space-2xl)"
+    },
+    {
+      "type": "styleEquals",
+      "id": "hero-1",
+      "prop": "padding-block",
+      "bp": "md",
+      "value": ["var(--hero-pad-block)", "var(--space-4xl)"]
+    },
+    {
+      "type": "noRawValues"
+    },
+    {
+      "type": "unchangedExcept",
+      "ids": ["hero-1"]
+    }
+  ]
+}

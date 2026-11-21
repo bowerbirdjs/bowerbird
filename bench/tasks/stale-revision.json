@@ -1,0 +1,44 @@
+{
+  "id": "stale-revision",
+  "category": "concurrency",
+  "start": "saas-landing",
+  "during": [
+    {
+      "before": "apply",
+      "actor": {
+        "kind": "user",
+        "id": "sam",
+        "name": "Sam"
+      },
+      "label": "Edit heading",
+      "ops": [
+        {
+          "op": "props.set",
+          "id": "hero-1/heading",
+          "props": {
+            "text": "Hours in, invoices out"
+          }
+        }
+      ]
+    }
+  ],
+  "prompt": "Change the label of the hero's primary button to \"Start free\". Pass the revision you read as baseRevision, so you never overwrite a change you haven't seen.",
+  "checks": [
+    {
+      "type": "propEquals",
+      "id": "hero-1/primary",
+      "prop": "text",
+      "value": "Start free"
+    },
+    {
+      "type": "propEquals",
+      "id": "hero-1/heading",
+      "prop": "text",
+      "value": "Hours in, invoices out"
+    },
+    {
+      "type": "unchangedExcept",
+      "ids": ["hero-1/primary", "hero-1/heading"]
+    }
+  ]
+}

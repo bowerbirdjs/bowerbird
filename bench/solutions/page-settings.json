@@ -1,0 +1,18 @@
+[
+  {
+    "tool": "get_context"
+  },
+  {
+    "tool": "apply",
+    "input": {
+      "ops": [
+        {
+          "op": "page.update",
+          "id": "home",
+          "title": "Clockwise: time tracking for freelancers",
+          "description": "Track hours, send invoices and get paid on time."
+        }
+      ]
+    }
+  }
+]

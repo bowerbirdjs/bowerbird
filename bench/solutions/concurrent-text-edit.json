@@ -1,0 +1,21 @@
+[
+  {
+    "tool": "get_outline",
+    "input": {
+      "root": "hero-1"
+    }
+  },
+  {
+    "tool": "apply",
+    "input": {
+      "ops": [
+        {
+          "op": "text.edit",
+          "id": "hero-1/subheading",
+          "find": "invoices",
+          "replace": "paid invoices"
+        }
+      ]
+    }
+  }
+]

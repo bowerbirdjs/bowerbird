@@ -1,0 +1,38 @@
+[
+  {
+    "tool": "get_context"
+  },
+  {
+    "tool": "apply",
+    "input": {
+      "ops": [
+        {
+          "op": "props.set",
+          "id": "hero-1/heading",
+          "props": {
+            "text": "Bill by the hour, not by the guess"
+          }
+        },
+        {
+          "op": "section.insert",
+          "section": "testimonials",
+          "after": "features-1"
+        }
+      ]
+    }
+  },
+  {
+    "tool": "apply",
+    "input": {
+      "ops": [
+        {
+          "op": "props.set",
+          "id": "hero-1/heading",
+          "props": {
+            "text": "Bill by the hour, not by the guess"
+          }
+        }
+      ]
+    }
+  }
+]

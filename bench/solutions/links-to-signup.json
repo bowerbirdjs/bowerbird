@@ -1,0 +1,26 @@
+[
+  {
+    "tool": "get_outline"
+  },
+  {
+    "tool": "apply",
+    "input": {
+      "ops": [
+        {
+          "op": "props.set",
+          "id": "nav-1/cta",
+          "props": {
+            "href": "/signup"
+          }
+        },
+        {
+          "op": "props.set",
+          "id": "hero-1/primary",
+          "props": {
+            "href": "/signup"
+          }
+        }
+      ]
+    }
+  }
+]

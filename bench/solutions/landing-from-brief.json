@@ -1,0 +1,55 @@
+[
+  {
+    "tool": "get_context"
+  },
+  {
+    "tool": "apply",
+    "input": {
+      "ops": [
+        {
+          "op": "section.insert",
+          "section": "nav",
+          "content": {
+            "brand": {
+              "text": "Clockwise"
+            }
+          }
+        },
+        {
+          "op": "section.insert",
+          "section": "hero",
+          "variant": {
+            "layout": "split"
+          },
+          "content": {
+            "heading": {
+              "text": "Track time without thinking about it"
+            },
+            "subheading": {
+              "text": "Clockwise logs your hours and turns them into invoices."
+            }
+          }
+        },
+        {
+          "op": "section.insert",
+          "section": "features"
+        },
+        {
+          "op": "section.insert",
+          "section": "pricing"
+        },
+        {
+          "op": "section.insert",
+          "section": "cta",
+          "variant": {
+            "tone": "dark"
+          }
+        },
+        {
+          "op": "section.insert",
+          "section": "footer"
+        }
+      ]
+    }
+  }
+]

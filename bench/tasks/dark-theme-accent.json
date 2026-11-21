@@ -1,0 +1,35 @@
+{
+  "id": "dark-theme-accent",
+  "category": "restyle",
+  "start": "saas-landing",
+  "prompt": "In the dark theme only, make the accent colour brand step 300 and the accent hover colour brand step 200. The default (light) values stay as they are.",
+  "checks": [
+    {
+      "type": "tokenEquals",
+      "path": "color.accent",
+      "theme": "dark",
+      "value": ["{color.brand.300}", "#a5b4fc"]
+    },
+    {
+      "type": "tokenEquals",
+      "path": "color.accent-hover",
+      "theme": "dark",
+      "value": ["{color.brand.200}", "#c7d2fe"]
+    },
+    {
+      "type": "tokenEquals",
+      "path": "color.accent",
+      "value": "{color.brand.600}"
+    },
+    {
+      "type": "tokenEquals",
+      "path": "color.accent-hover",
+      "value": "{color.brand.700}"
+    },
+    {
+      "type": "unchangedExcept",
+      "ids": [],
+      "allow": ["tokens"]
+    }
+  ]
+}

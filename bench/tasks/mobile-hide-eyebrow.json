@@ -1,0 +1,25 @@
+{
+  "id": "mobile-hide-eyebrow",
+  "category": "responsive",
+  "start": "saas-landing",
+  "prompt": "Hide the hero's eyebrow line on mobile only. From the md breakpoint up it must show as it does now.",
+  "checks": [
+    {
+      "type": "styleEquals",
+      "id": "hero-1/eyebrow",
+      "prop": "display",
+      "value": "none"
+    },
+    {
+      "type": "styleEquals",
+      "id": "hero-1/eyebrow",
+      "prop": "display",
+      "bp": "md",
+      "value": ["block", "revert", "revert-layer", "initial", "unset"]
+    },
+    {
+      "type": "unchangedExcept",
+      "ids": ["hero-1/eyebrow"]
+    }
+  ]
+}

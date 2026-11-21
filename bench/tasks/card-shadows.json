@@ -1,0 +1,51 @@
+{
+  "id": "card-shadows",
+  "category": "restyle",
+  "start": "saas-landing",
+  "prompt": "Give each of the six feature cards the large shadow token as its box shadow.",
+  "checks": [
+    {
+      "type": "styleEquals",
+      "id": "features-1/item-1",
+      "prop": "box-shadow",
+      "value": "var(--shadow-lg)"
+    },
+    {
+      "type": "styleEquals",
+      "id": "features-1/item-2",
+      "prop": "box-shadow",
+      "value": "var(--shadow-lg)"
+    },
+    {
+      "type": "styleEquals",
+      "id": "features-1/item-3",
+      "prop": "box-shadow",
+      "value": "var(--shadow-lg)"
+    },
+    {
+      "type": "styleEquals",
+      "id": "features-1/item-4",
+      "prop": "box-shadow",
+      "value": "var(--shadow-lg)"
+    },
+    {
+      "type": "styleEquals",
+      "id": "features-1/item-5",
+      "prop": "box-shadow",
+      "value": "var(--shadow-lg)"
+    },
+    {
+      "type": "styleEquals",
+      "id": "features-1/item-6",
+      "prop": "box-shadow",
+      "value": "var(--shadow-lg)"
+    },
+    {
+      "type": "noRawValues"
+    },
+    {
+      "type": "unchangedExcept",
+      "ids": ["features-1/grid"]
+    }
+  ]
+}

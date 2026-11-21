@@ -1,0 +1,24 @@
+{
+  "id": "hover-accent",
+  "category": "restyle",
+  "start": "saas-landing",
+  "prompt": "Make the text of the hero's secondary button turn the accent colour while it is hovered.",
+  "checks": [
+    {
+      "type": "styleEquals",
+      "id": "hero-1/secondary",
+      "prop": "color",
+      "value": "var(--color-accent)",
+      "state": "hover"
+    },
+    {
+      "type": "styleAbsent",
+      "id": "hero-1/secondary",
+      "prop": "color"
+    },
+    {
+      "type": "unchangedExcept",
+      "ids": ["hero-1/secondary"]
+    }
+  ]
+}

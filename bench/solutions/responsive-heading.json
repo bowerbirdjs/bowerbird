@@ -1,0 +1,18 @@
+[
+  {
+    "tool": "get_context"
+  },
+  {
+    "tool": "apply",
+    "input": {
+      "ops": [
+        {
+          "op": "style.set",
+          "id": "features-1/heading",
+          "bp": "md",
+          "css": "font-size: var(--text-4xl)"
+        }
+      ]
+    }
+  }
+]

@@ -1,0 +1,15 @@
+[
+  {
+    "tool": "get_outline",
+    "input": {
+      "depth": 1
+    }
+  },
+  {
+    "tool": "import_html",
+    "input": {
+      "html": "<section><h2>Why teams switch</h2><ul><li><h3>Before</h3><p>Spreadsheets, guesses and late invoices.</p></li><li><h3>After</h3><p>Every hour logged and billed.</p></li></ul></section>",
+      "after": "hero-1"
+    }
+  }
+]
