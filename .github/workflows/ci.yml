@@ -1,0 +1,73 @@
+name: CI
+
+# Every push is checked, so feature branches don't need a pull request to get a result. Pull
+# requests from forks run too; ones from this repository are already covered by their push.
+on:
+  push:
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: Lint, types, unit tests, benchmark self-check
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name != github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm lint
+      # Builds every package too (the benchmark below runs from dist).
+      - run: pnpm typecheck
+      - run: pnpm test
+      # PageBench without a model: every task's reference solution has to pass its own checks.
+      - run: pnpm bench -- --scripted
+
+  browser:
+    name: Browser tests (Chromium)
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name != github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # Playwright is optional for people using the packages, so it isn't a dependency of the
+      # workspace; the browser tests skip themselves without it. Here they have to run.
+      - run: pnpm add --workspace-root --save-dev playwright@1.63.0
+      - run: pnpm exec playwright install --with-deps chromium
+      # Layout lint of every starter section, in a real browser.
+      - run: pnpm vitest run packages/mcp/test/browser.test.ts
+      - run: pnpm test:e2e
+
+  windows:
+    name: Build and unit tests on Windows
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name != github.repository
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - run: pnpm test
+      - run: pnpm bench -- --scripted
