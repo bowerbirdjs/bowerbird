@@ -60,6 +60,13 @@ const SHAPE_ATTRS: Record<IconShapeTag, Record<string, (v: string) => boolean>> 
   polygon: { points: (v) => v.length <= 4000 && NUMBER_LIST.test(v) },
 };
 
+/** The check for an attribute of a shape, if that shape may carry it (own entries only). */
+function attrCheck(tag: IconShapeTag, key: string): ((v: string) => boolean) | undefined {
+  const allowed = SHAPE_ATTRS[tag];
+  if (Object.hasOwn(allowed, key)) return allowed[key];
+  return Object.hasOwn(STYLE_ATTRS, key) ? STYLE_ATTRS[key] : undefined;
+}
+
 const MAX_MARKUP = 20_000;
 const MAX_SHAPES = 64;
 
@@ -68,7 +75,8 @@ const TAG =
 const ATTR = /([A-Za-z_:][-A-Za-z0-9_:.]*)\s*=\s*(?:"([^"]*)"|'([^']*)')/g;
 
 function readAttrs(source: string): Record<string, string> {
-  const out: Record<string, string> = {};
+  // No prototype, so an attribute called `constructor` or `__proto__` is just another name.
+  const out: Record<string, string> = Object.create(null);
   for (const m of source.matchAll(ATTR)) {
     const name = m[1]!;
     if (!Object.hasOwn(out, name)) out[name] = (m[2] ?? m[3] ?? '').trim();
@@ -136,9 +144,8 @@ export function parseIcon(
         if (attrs.fill && !paint(attrs.fill)) return undefined;
         if (attrs.stroke && !paint(attrs.stroke)) return undefined;
         const stroked = !!attrs.stroke && attrs.stroke.toLowerCase() !== 'none';
-        const filled = !!attrs.fill && attrs.fill.toLowerCase() !== 'none';
-        if (stroked || attrs.fill?.toLowerCase() === 'none') style = 'stroke';
-        else if (filled) style = 'fill';
+        // With neither, SVG fills shapes (solid icon sets ship their files that way).
+        style = stroked || attrs.fill?.toLowerCase() === 'none' ? 'stroke' : 'fill';
       }
       if (strokeWidth === undefined && attrs['stroke-width'] && num(attrs['stroke-width']))
         strokeWidth = Number(attrs['stroke-width']);
@@ -158,11 +165,9 @@ export function parseIcon(
     if (!Object.hasOwn(SHAPE_ATTRS, name)) return undefined;
     // `<path …></path>`: the closing tag of a shape opened just before.
     if (closing) continue;
-    const allowed = SHAPE_ATTRS[name as IconShapeTag];
     const clean: Record<string, string> = {};
     for (const [key, value] of Object.entries(attrs)) {
-      const check = allowed[key] ?? STYLE_ATTRS[key];
-      if (!check?.(value)) return undefined;
+      if (!attrCheck(name as IconShapeTag, key)?.(value)) return undefined;
       clean[key] = value;
     }
     if (shapes.length >= MAX_SHAPES) return undefined;
@@ -185,9 +190,10 @@ export function isIconDef(value: unknown): value is IconDef {
     return false;
   return def.shapes.every((shape) => {
     if (!shape || typeof shape !== 'object' || !Object.hasOwn(SHAPE_ATTRS, shape.tag)) return false;
-    const allowed = SHAPE_ATTRS[shape.tag];
-    return Object.entries(shape.attrs ?? {}).every(
-      ([key, v]) => typeof v === 'string' && !!(allowed[key] ?? STYLE_ATTRS[key])?.(v),
+    const { attrs } = shape;
+    if (!attrs || typeof attrs !== 'object' || Array.isArray(attrs)) return false;
+    return Object.entries(attrs).every(
+      ([key, v]) => typeof v === 'string' && attrCheck(shape.tag, key)?.(v) === true,
     );
   });
 }

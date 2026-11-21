@@ -214,3 +214,37 @@ describe('icons in a registry', () => {
     expect(issue).toMatchObject({ severity: 'warning', nodeId: 'icon-1' });
   });
 });
+
+describe('icon data is checked by own entries only (review findings)', () => {
+  it('attribute names from Object.prototype are refused, not looked up', () => {
+    for (const attr of ['constructor', 'valueOf', 'hasOwnProperty', '__proto__', 'toString']) {
+      expect(parseIcon(`<path d="M0 0" ${attr}="x"/>`), attr).toBeUndefined();
+    }
+    const hostile = JSON.parse(
+      '{"viewBox":"0 0 24 24","style":"stroke","strokeWidth":2,"shapes":[{"tag":"path","attrs":{"d":"M0 0","__proto__":{"x":"y"},"constructor":"x"}}]}',
+    );
+    expect(isIconDef(hostile)).toBe(false);
+  });
+
+  it('a shape needs its attrs', () => {
+    const def = {
+      viewBox: '0 0 24 24',
+      style: 'stroke',
+      strokeWidth: 2,
+      shapes: [{ tag: 'path' }],
+    };
+    expect(isIconDef(def)).toBe(false);
+  });
+
+  it('a root without fill or stroke is a solid icon, as SVG draws it', () => {
+    expect(parseIcon('<svg viewBox="0 0 24 24"><path d="M12 2L2 22h20z"/></svg>')?.style).toBe(
+      'fill',
+    );
+    expect(
+      parseIcon('<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M1 1"/></svg>')
+        ?.style,
+    ).toBe('stroke');
+    // Shapes alone (no root) keep the outline default.
+    expect(parseIcon('<path d="M1 1"/>')?.style).toBe('stroke');
+  });
+});

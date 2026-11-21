@@ -1,5 +1,6 @@
 import { ancestors, type DocView, descendants, pageNodes, sectionRootOf } from './doc.js';
 import { untranslatedProps } from './l10n.js';
+import { describeNesting, nestingProblemAt } from './nesting.js';
 import { type Registry, templateParts } from './registry.js';
 import { richTextToPlain } from './richtext.js';
 import type { BNode, PageId } from './types.js';
@@ -78,20 +79,22 @@ function lintForm(view: DocView, form: BNode, issues: LintIssue[]): void {
       hint: 'Add a button with "type": "submit" inside it.',
     });
   }
-  const names = new Map<string, string>();
+  const names = new Map<string, BNode>();
   for (const f of inside) {
     if (f.type !== 'field') continue;
     const name = str(f.props.name);
     const earlier = names.get(name);
-    if (earlier) {
+    if (!earlier) names.set(name, f);
+    // Checkboxes may share a name on purpose: every ticked one is sent ("topics[]").
+    else if (!(earlier.props.type === 'checkbox' && f.props.type === 'checkbox')) {
       issues.push({
         rule: 'field-name',
         severity: 'warning',
         nodeId: f.id,
-        message: `Fields "${earlier}" and "${f.id}" are both sent as "${name}", so one answer hides the other.`,
+        message: `Fields "${earlier.id}" and "${f.id}" are both sent as "${name}", so one answer hides the other.`,
         hint: 'Give each field its own "name".',
       });
-    } else names.set(name, f.id);
+    }
   }
 }
 
@@ -260,6 +263,11 @@ export function lintPage(view: DocView, registry: Registry, pageId: PageId): Lin
           hint: 'Move it there, or change its tag (e.g. to p).',
         });
       }
+    }
+    // The store refuses these; a document loaded from elsewhere may still hold them.
+    const nested = nestingProblemAt(view, n);
+    if (nested) {
+      issues.push({ rule: 'nesting', severity: 'error', nodeId: n.id, ...describeNesting(nested) });
     }
     if (n.type === 'form') lintForm(view, n, issues);
     if (n.type === 'field') {

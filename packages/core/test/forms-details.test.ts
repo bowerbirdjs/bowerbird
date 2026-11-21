@@ -1,4 +1,4 @@
-import { type Issue, lintPage, outline, type Store, t } from '@bowerbirdjs/core';
+import { createStore, type Issue, lintPage, outline, type Store, t } from '@bowerbirdjs/core';
 import { describe, expect, it } from 'vitest';
 import { makeStore } from './fixtures.js';
 
@@ -119,6 +119,54 @@ describe('forms', () => {
     }
   });
 
+  it('nesting is checked inside what is placed too, not only against what is above it', () => {
+    const store = makeStore();
+    const formInForm = errors(store, [
+      insert('root-home', t.form({}, [t.box({}, [t.form({}, [])])])),
+    ])[0];
+    expect(formInForm).toMatchObject({ code: 'invalid_parent' });
+    expect(formInForm?.message).toMatch(/^Form ".+" can't be inside form ".+"/);
+    for (const inner of [
+      t.field({ field: 'q', label: 'Search' }),
+      t.button({ text: 'Go' }),
+      t.details({}, [t.text({ tag: 'summary', text: 'More' })]),
+    ]) {
+      const inLink = errors(store, [
+        insert('root-home', t.link({ href: '/x' }, [t.box({}, [inner])])),
+      ])[0];
+      expect(inLink?.message, inner.type).toMatch(/can't be inside link ".+": links can't/);
+    }
+    // Nothing of the refused inserts is left behind.
+    expect(store.view.children('root-home')).toEqual([]);
+  });
+
+  it('linked components can’t bring a form into a form either', () => {
+    const store = makeStore();
+    ok(store, [
+      insert('root-home', t.form({ action: '/a' }, [t.box({}, [])])),
+      insert('root-home', t.form({ action: '/b' }, [t.field({ field: 'email', label: 'Email' })])),
+      { op: 'symbol.create', id: 'form-2', name: 'Signup' },
+    ]);
+    // An instance of a form symbol, placed inside another form.
+    const placed = errors(store, [{ op: 'symbol.insert', symbol: 'signup', parent: 'box-1' }])[0];
+    expect(placed).toMatchObject({ code: 'invalid_parent' });
+    expect(placed?.message).toMatch(/^Form ".+" can't be inside form "form-1"/);
+
+    // A definition that is fine by itself, with an instance that sits inside a form.
+    ok(store, [
+      insert('root-home', t.box({}, [t.text({ text: 'Note' })])),
+      { op: 'symbol.create', id: 'box-2', name: 'Note' },
+      { op: 'symbol.insert', symbol: 'note', parent: 'box-1' },
+    ]);
+    const definition = store.view.symbol('note')!.rootId;
+    const followed = errors(store, [insert(definition, t.form({}, []))])[0];
+    expect(followed).toMatchObject({ code: 'invalid_parent' });
+    expect(followed?.message).toMatch(/can't be inside form "form-1"/);
+    expect(followed?.hint).toContain('It follows symbol "note"');
+    // Refused as a whole: the definition didn't get the form either.
+    expect(store.view.children(definition).map((c) => c.type)).toEqual(['text']);
+  });
+
   it('only the label, placeholder, help and choices of a field are content', () => {
     const store = makeStore({ levels: { agent: 'content' } });
     ok(store, [insert('root-home', contactForm)]);
@@ -184,6 +232,40 @@ describe('forms', () => {
     expect(after).not.toContain('unsafe-url');
     expect(after).not.toContain('form-action');
     expect(after).not.toContain('form-submit');
+  });
+
+  it('lint: checkboxes may share a name; other fields may not', () => {
+    const store = makeStore();
+    ok(store, [
+      insert(
+        'root-home',
+        t.form({ action: '/prefs' }, [
+          t.field({ field: 'topics[]', type: 'checkbox', label: 'News', value: 'news' }),
+          t.field({ field: 'topics[]', type: 'checkbox', label: 'Offers', value: 'offers' }),
+          t.button({ text: 'Save', type: 'submit' }),
+        ]),
+      ),
+    ]);
+    expect(rules(store)).not.toContain('field-name');
+    ok(store, [insert('form-1', t.field({ field: 'topics[]', label: 'Other topics' }))]);
+    expect(rules(store)).toContain('field-name');
+  });
+
+  it('lint: reports nesting the store would refuse, in documents that came from elsewhere', () => {
+    const store = makeStore();
+    ok(store, [
+      insert('root-home', t.form({ action: '/a' }, [t.box({}, [])])),
+      insert('root-home', t.form({ action: '/b' }, [])),
+    ]);
+    // A stored document edited by hand: the second form moved into the first one's box.
+    const doc = structuredClone(store.doc);
+    doc.nodes['form-2'] = { ...doc.nodes['form-2']!, parent: 'box-1' };
+    const loaded = createStore({ registry: store.registry, doc });
+    const nesting = lintPage(loaded.view, loaded.registry, 'home').filter(
+      (i) => i.rule === 'nesting',
+    );
+    expect(nesting).toMatchObject([{ severity: 'error', nodeId: 'form-2' }]);
+    expect(nesting[0]?.message).toContain('can\'t be inside form "form-1"');
   });
 
   it('translations cover what a visitor reads, choices included', () => {

@@ -14,6 +14,7 @@ import {
 import { Draft } from './draft.js';
 import { didYouMean, type Issue, listPreview } from './errors.js';
 import { isValidId, PAGE_ID_PATTERN, slugify } from './ids.js';
+import { describeNesting, nestingProblem } from './nesting.js';
 import type { Op } from './ops.js';
 import { keyBetween } from './order.js';
 import type { Policy } from './policy.js';
@@ -828,7 +829,7 @@ function sectionInsert(ctx: OpContext, op: OpOf<'section.insert'>) {
     section: { name: def.name, version: def.version, variant },
   });
   if (!root) return;
-  checkLinkNesting(ctx, root);
+  checkNesting(ctx, root);
   for (const [partPath, patch] of Object.entries(op.content ?? {})) {
     const target = draft.node(`${id}/${partPath}`);
     if (!target) {
@@ -856,40 +857,25 @@ function nodeInsert(ctx: OpContext, op: OpOf<'node.insert'>) {
   const node = createTree(ctx, op.node, parent, order, scopeFor(ctx.draft, parent.id), {
     explicit: true,
   });
-  if (node) checkLinkNesting(ctx, node);
+  if (node) checkNesting(ctx, node);
 }
 
-const INTERACTIVE = new Set(['link', 'button', 'form', 'field', 'details']);
-
 /**
- * Fails if `node` (just placed) puts something interactive somewhere inside a link, or a form
- * inside a form: browsers split or drop such nesting, so the page would no longer match the
- * document.
+ * Fails if `node` (just placed, moved or rebuilt) leaves something interactive inside a link, or
+ * a form inside a form, anywhere in its subtree. `why` adds what led there when no op named the
+ * node (an instance following its definition).
  */
-function checkLinkNesting(ctx: OpContext, node: BNode): void {
-  const above = ancestors(ctx.draft, node.id);
-  const subtree = [node, ...descendants(ctx.draft, node.id)];
-  const link = above.find((a) => a.type === 'link');
-  const inLink = link && subtree.find((n) => INTERACTIVE.has(n.type));
-  if (link && inLink) {
-    fail(ctx, {
-      code: 'invalid_parent',
-      nodeId: inLink.id,
-      message: `"${inLink.id}" (${inLink.type}) can't be inside link "${link.id}": links can't contain links, buttons or form parts.`,
-      hint: `Put it next to "${link.id}" instead.`,
-    });
-    return;
-  }
-  const outer = above.find((a) => a.type === 'form');
-  const inner = outer && subtree.find((n) => n.type === 'form');
-  if (outer && inner) {
-    fail(ctx, {
-      code: 'invalid_parent',
-      nodeId: inner.id,
-      message: `Form "${inner.id}" can't be inside form "${outer.id}": browsers drop a form inside a form.`,
-      hint: `Put its fields into "${outer.id}", or place it next to it.`,
-    });
-  }
+export function checkNesting(ctx: OpContext, node: BNode, why?: string): boolean {
+  const problem = nestingProblem(ctx.draft, node);
+  if (!problem) return true;
+  const { message, hint } = describeNesting(problem);
+  fail(ctx, {
+    code: 'invalid_parent',
+    nodeId: problem.node.id,
+    message,
+    hint: why ? `${why} ${hint}` : hint,
+  });
+  return false;
 }
 
 function nodeMove(ctx: OpContext, op: OpOf<'node.move'>) {
@@ -938,7 +924,7 @@ function nodeMove(ctx: OpContext, op: OpOf<'node.move'>) {
   if (order === undefined) return;
   const moved = { ...node, parent: parent.id, order };
   ctx.draft.setNode(moved);
-  checkLinkNesting(ctx, moved);
+  checkNesting(ctx, moved);
 }
 
 function nodeRemove(ctx: OpContext, op: OpOf<'node.remove'>) {
@@ -1915,6 +1901,7 @@ function sectionVariant(ctx: OpContext, op: OpOf<'section.variant'>) {
     });
   }
   draft.setNode({ ...draft.node(root.id)!, section: { ...root.section, variant } });
+  checkNesting(ctx, draft.node(root.id)!);
 }
 
 function propsSet(ctx: OpContext, op: OpOf<'props.set'>) {

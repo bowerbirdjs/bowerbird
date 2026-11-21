@@ -1,6 +1,7 @@
 import {
   allocateCopyId,
   allocateId,
+  checkNesting,
   copySubtree,
   fail,
   guardInstance,
@@ -249,6 +250,8 @@ export function symbolInsert(ctx: OpContext, op: OpOf<'symbol.insert'>) {
     transform: (copy, source) => ({ ...strip(copy), link: { symbol: symbol.id, node: source.id } }),
   });
   for (const [defId, instanceId] of idMap) remember(ctx, instanceId, defId);
+  const instance = draft.node(rootId);
+  if (instance && !checkNesting(ctx, instance)) return;
   for (const [path, patch] of Object.entries(op.content ?? {})) {
     // Parts are named by their place in the definition, and resolved through this copy only.
     const defTarget = path === '' ? defRoot.id : `${defRoot.id}/${path}`;
@@ -530,6 +533,15 @@ export function syncInstances(ctx: OpContext): string[] {
     return true;
   };
 
+  // A definition can be fine on its own and still put a form into a form (or a button into a
+  // link) where one of its instances sits.
+  const fits = (inst: BNode) =>
+    checkNesting(
+      ctx,
+      inst,
+      `It follows symbol "${inst.link!.symbol}", whose instance "${instanceRootIdOf(inst) ?? inst.id}" sits there: move that instance, or keep this out of the definition.`,
+    );
+
   // 1. Created definition nodes, parents first.
   const created = defChanges
     .filter((c) => c.after && !c.before)
@@ -563,6 +575,7 @@ export function syncInstances(ctx: OpContext): string[] {
       index(copy);
       linkBase.set(copy.id, clone(d));
       touched.add(copy.id);
+      if (!fits(copy)) return [...touched];
     }
   }
 
@@ -593,6 +606,7 @@ export function syncInstances(ctx: OpContext): string[] {
       if (!deepEqual(next, current)) {
         draft.setNode(next);
         touched.add(inst.id);
+        if (next.parent !== current.parent && !fits(next)) return [...touched];
       }
     }
   }
