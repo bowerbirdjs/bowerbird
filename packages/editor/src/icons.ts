@@ -46,6 +46,12 @@ const PATHS = {
     '<rect x="3" y="4" width="18" height="16" rx="2.5"/><circle cx="9" cy="10" r="1.8"/><path d="m21 16-5-5-9 9"/>',
   link: '<path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/>',
   button: '<rect x="3" y="7" width="18" height="10" rx="5"/><path d="M9 12h6"/>',
+  star: '<path d="M12 3.6l2.5 5.4 5.9.7-4.4 4 1.2 5.8-5.2-3-5.2 3 1.2-5.8-4.4-4 5.9-.7L12 3.6Z"/>',
+  accordion:
+    '<rect x="3" y="4" width="18" height="7" rx="1.5"/><path d="m14.5 6.7 1.75 1.7L18 6.7M4 15.5h16M4 20h16"/>',
+  form: '<rect x="3.5" y="3.5" width="17" height="17" rx="2.5"/><path d="M7.5 8.5h9M7.5 12.5h9M7.5 16.5h4"/>',
+  field: '<rect x="3" y="7.5" width="18" height="9" rx="2.5"/><path d="M7.5 10.5v3"/>',
+  search: '<circle cx="11" cy="11" r="6.5"/><path d="m16 16 4.5 4.5"/>',
   component:
     '<path d="m12 3 4 4-4 4-4-4 4-4ZM12 13l4 4-4 4-4-4 4-4ZM7 8l4 4-4 4-4-4 4-4ZM17 8l4 4-4 4-4-4 4-4Z"/>',
   blocks:
@@ -112,6 +118,14 @@ export function iconForType(
       return 'link';
     case 'button':
       return 'button';
+    case 'icon':
+      return 'star';
+    case 'details':
+      return 'accordion';
+    case 'form':
+      return 'form';
+    case 'field':
+      return 'field';
     default:
       return 'blocks';
   }

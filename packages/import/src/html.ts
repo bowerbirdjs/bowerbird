@@ -48,6 +48,8 @@ const TEXT_TAGS: Record<string, string> = {
   figcaption: 'figcaption',
   cite: 'cite',
   label: 'label',
+  summary: 'summary',
+  legend: 'p',
 };
 const INLINE = new Set([
   'a',
@@ -86,12 +88,28 @@ const SKIP = new Set([
   'canvas',
   'video',
   'audio',
-  'form',
-  'input',
-  'select',
-  'textarea',
   'picture',
 ]);
+
+/** `<input type>` values a field can be; anything else is imported as a text field (or skipped). */
+const INPUT_TYPES: Record<string, string> = {
+  text: 'text',
+  search: 'text',
+  email: 'email',
+  tel: 'tel',
+  url: 'url',
+  number: 'number',
+  date: 'date',
+  time: 'time',
+  checkbox: 'checkbox',
+  radio: 'radio',
+  hidden: 'hidden',
+};
+/** Inputs that are buttons. */
+const INPUT_BUTTONS = new Set(['submit', 'button', 'reset', 'image']);
+/** Files and secrets: not what a page's form should collect. */
+const INPUT_SKIPPED = new Set(['file', 'password']);
+const FIELD_NAME = /^[A-Za-z_][A-Za-z0-9_.[\]-]*$/;
 const MAX_DEPTH = 30;
 
 const collapse = (s: string) => s.replace(/\s+/g, ' ');
@@ -227,6 +245,169 @@ export function htmlToNodes(html: string, options: HtmlImportOptions = {}): Html
     return textNode(nodes.map(textOf).join(''), tag, el);
   };
 
+  // Filled in by `scanForms` before anything is converted: labels and legends that name a control
+  // become that field's label instead of text of their own, wherever they sit in the markup.
+  /** `<label for>` texts, by the id of the control they point at. */
+  const labelsFor = new Map<string, string>();
+  /** Labels and legends that became a field's label. */
+  const usedLabels = new WeakSet<Element>();
+  /** Radios and same-named checkboxes that are one question: every control → its group. */
+  const groups = new Map<Element, { controls: Element[]; legend: string }>();
+  /** Groups already imported (one field per group). */
+  const doneGroups = new Set<object>();
+
+  const elementsIn = (root: { children: ChildNode[] }, names: string[]): Element[] => {
+    const out: Element[] = [];
+    const stack: ChildNode[] = [...root.children].reverse();
+    while (stack.length) {
+      const n = stack.pop()!;
+      if (!isTag(n)) continue;
+      if (names.includes(n.name.toLowerCase())) out.push(n);
+      for (let i = n.children.length - 1; i >= 0; i--) stack.push(n.children[i]!);
+    }
+    return out;
+  };
+  const ancestor = (el: Element, name: string): Element | undefined => {
+    for (let p = el.parent; p && isTag(p); p = p.parent) if (p.name === name) return p;
+    return undefined;
+  };
+  const inputType = (el: Element) => (el.attribs.type ?? 'text').toLowerCase();
+
+  /** Reads which labels name which controls, and which radios or checkboxes are one question. */
+  const scanForms = (root: { children: ChildNode[] }): void => {
+    const controls = elementsIn(root, ['input', 'select', 'textarea']);
+    const ids = new Set(controls.map((c) => c.attribs.id).filter(Boolean));
+    for (const label of elementsIn(root, ['label'])) {
+      const target = label.attribs.for;
+      if (!target || !ids.has(target) || labelsFor.has(target)) continue;
+      labelsFor.set(target, collapse(textOf(label)).trim());
+      usedLabels.add(label);
+    }
+    // Radios or checkboxes that share a name in a form are one question.
+    const byKey = new Map<string, Element[]>();
+    const forms: (Element | undefined)[] = [];
+    for (const control of controls) {
+      const type = control.name === 'input' ? inputType(control) : '';
+      const name = control.attribs.name ?? '';
+      if ((type !== 'radio' && type !== 'checkbox') || !name) continue;
+      const form = ancestor(control, 'form');
+      if (!forms.includes(form)) forms.push(form);
+      const key = `${forms.indexOf(form)}:${type}:${name}`;
+      byKey.set(key, [...(byKey.get(key) ?? []), control]);
+    }
+    for (const members of byKey.values()) {
+      // One on its own is a yes-or-no question, not a group.
+      if (members.length < 2) continue;
+      // The question is the legend of a fieldset that holds this group and nothing else.
+      const fieldset = ancestor(members[0]!, 'fieldset');
+      const alone =
+        fieldset &&
+        elementsIn(fieldset, ['input', 'select', 'textarea']).every((c) => members.includes(c));
+      const legend = alone
+        ? fieldset.children.find((c): c is Element => isTag(c) && c.name === 'legend')
+        : undefined;
+      if (legend) usedLabels.add(legend);
+      const group = { controls: members, legend: legend ? collapse(textOf(legend)).trim() : '' };
+      for (const member of members) groups.set(member, group);
+    }
+  };
+
+  /** The label of a control: a `<label>` around it or pointing at it, else its ARIA label. */
+  const labelOf = (control: Element): string => {
+    const around = ancestor(control, 'label');
+    if (around) {
+      // The label's own words, without those of the control inside it (a select's options).
+      const own = around.children
+        .filter((c) => c !== control && !(isTag(c) && ['select', 'textarea'].includes(c.name)))
+        .map(textOf)
+        .join(' ');
+      return collapse(own).trim();
+    }
+    const id = control.attribs.id;
+    const pointed = id ? labelsFor.get(id) : undefined;
+    return pointed ?? collapse(control.attribs['aria-label'] ?? '').trim();
+  };
+
+  /** A form control as a field node (label and control in one), or nothing if it isn't one. */
+  const fieldNode = (control: Element): NodeInput | undefined => {
+    const tag = control.name.toLowerCase();
+    const raw = inputType(control);
+    if (tag === 'input' && INPUT_BUTTONS.has(raw)) {
+      if (raw === 'image') return undefined;
+      count++;
+      const text = clip(control.attribs.value ?? (raw === 'reset' ? 'Reset' : 'Submit'), 'button');
+      return { type: 'button', props: { text, ...(raw === 'button' ? {} : { type: raw }) } };
+    }
+    if (tag === 'input' && INPUT_SKIPPED.has(raw)) {
+      warnings.add(
+        `<input type="${raw}"> fields were skipped: forms here can't collect files or passwords.`,
+      );
+      return undefined;
+    }
+    const group = groups.get(control);
+    if (group) {
+      if (doneGroups.has(group)) return undefined;
+      doneGroups.add(group);
+    }
+    const type = tag === 'input' ? (INPUT_TYPES[raw] ?? 'text') : tag;
+    const name = control.attribs.name?.trim() ?? '';
+    const props: Record<string, unknown> = {
+      type,
+      name: FIELD_NAME.test(name) && name.length <= 64 ? name : `field-${count + 1}`,
+      label: (group ? group.legend : labelOf(control)).slice(0, 200),
+    };
+    if (name && props.name !== name)
+      warnings.add("Some field names had characters a field name can't hold and were replaced.");
+    const placeholder = collapse(control.attribs.placeholder ?? '').trim();
+    if (placeholder && type !== 'checkbox' && type !== 'radio' && type !== 'hidden')
+      props.placeholder = placeholder.slice(0, 200);
+    if (
+      (group?.controls ?? [control]).some((c) => 'required' in c.attribs) &&
+      !(group && type === 'checkbox')
+    )
+      props.required = true;
+    if (group) {
+      // Each control of the group is one choice, named by its own label (or its value).
+      const options = group.controls
+        .map((c) => (labelOf(c) || c.attribs.value || '').slice(0, 200))
+        .filter(Boolean);
+      if (!options.length) return undefined;
+      props.options = [...new Set(options)].slice(0, 100);
+      const checked = group.controls.find((c) => 'checked' in c.attribs);
+      if (checked && type === 'radio') props.value = labelOf(checked) || checked.attribs.value;
+    } else if (type === 'radio') {
+      // A lone radio is a yes-or-no question: a checkbox says that better.
+      props.type = 'checkbox';
+    } else if (type === 'select') {
+      const all = elementsIn(control, ['option']);
+      const options = all
+        .filter((o) => o.attribs.value !== '')
+        .map((o) => collapse(textOf(o)).trim().slice(0, 200))
+        .filter(Boolean)
+        .slice(0, 100);
+      // A select without choices can't be one; keep the question as a text field.
+      if (options.length) props.options = [...new Set(options)];
+      else props.type = 'text';
+      const prompt = all.find((o) => o.attribs.value === '');
+      if (prompt && options.length)
+        props.placeholder = collapse(textOf(prompt)).trim().slice(0, 200) || undefined;
+    } else if (type === 'hidden' || (control.attribs.value && type !== 'checkbox')) {
+      const value = control.attribs.value ?? '';
+      if (value.length <= 2000) props.value = value;
+    }
+    if (type === 'textarea') {
+      const rows = Number(control.attribs.rows);
+      if (Number.isInteger(rows) && rows >= 2 && rows <= 20) props.rows = rows;
+    }
+    if (props.placeholder === undefined) delete props.placeholder;
+    if (!props.label && props.type !== 'hidden')
+      warnings.add(
+        'Some form fields had no label; give each a "label" so people know what to enter.',
+      );
+    count++;
+    return { type: 'field', props };
+  };
+
   const children = (parent: Element, depth: number, looseTag = 'p'): NodeInput[] => {
     const out: NodeInput[] = [];
     let run: ChildNode[] = [];
@@ -279,6 +460,49 @@ export function htmlToNodes(html: string, options: HtmlImportOptions = {}): Html
       return [];
     }
     if (tag === 'br' || tag === 'hr') return [];
+
+    if (tag === 'form') {
+      count++;
+      const { action = '', method = '' } = node.attribs;
+      const props: Record<string, unknown> = {};
+      const safe = action.trim() ? safeUrl(action, 'href') : '';
+      if (safe && safe !== '#') props.action = safe;
+      if (method.toLowerCase() === 'get') props.method = 'get';
+      // (A form inside a form never gets here: like browsers, the parser ignores its start tag.)
+      return [{ type: 'form', props, children: children(node, depth), ...common(node) }];
+    }
+    if (tag === 'input' || tag === 'select' || tag === 'textarea') {
+      const fieldInput = fieldNode(node);
+      return fieldInput ? [fieldInput] : [];
+    }
+    // A label around a control is that field; one naming a control elsewhere became its label.
+    if (tag === 'label') {
+      const controls = elementsIn(node, ['input', 'select', 'textarea']);
+      if (controls.length) return controls.flatMap((c) => convert(c, depth + 1));
+      if (usedLabels.has(node)) return [];
+    }
+    if (tag === 'legend' && usedLabels.has(node)) return [];
+    if (tag === 'fieldset') {
+      // A fieldset that is one question (a radio group) is that field; otherwise a box.
+      const inner = children(node, depth);
+      if (inner.length === 1 && inner[0]!.type === 'field') return inner;
+      count++;
+      return [{ type: 'box', props: {}, children: inner, ...common(node) }];
+    }
+    if (tag === 'details') {
+      count++;
+      const summary = node.children.find((c): c is Element => isTag(c) && c.name === 'summary');
+      const rest = { ...node, children: node.children.filter((c) => c !== summary) } as Element;
+      const head = summary ? textNode(textOf(summary), 'summary', summary) : undefined;
+      return [
+        {
+          type: 'details',
+          props: 'open' in node.attribs ? { open: true } : {},
+          children: [...(head ? [head] : []), ...children(rest, depth)],
+          ...common(node),
+        },
+      ];
+    }
 
     if (tag === 'img') {
       count++;
@@ -339,7 +563,20 @@ export function htmlToNodes(html: string, options: HtmlImportOptions = {}): Html
     }
     if (tag === 'button') {
       count++;
-      return [{ type: 'button', props: { text: clip(textOf(node), 'button') }, ...common(node) }];
+      // A button in a form sends it unless it says otherwise.
+      const kind = (
+        node.attribs.type ?? (ancestor(node, 'form') ? 'submit' : 'button')
+      ).toLowerCase();
+      return [
+        {
+          type: 'button',
+          props: {
+            text: clip(textOf(node), 'button'),
+            ...(kind === 'submit' || kind === 'reset' ? { type: kind } : {}),
+          },
+          ...common(node),
+        },
+      ];
     }
     const textTag = TEXT_TAGS[tag];
     if (textTag) {
@@ -378,6 +615,7 @@ export function htmlToNodes(html: string, options: HtmlImportOptions = {}): Html
     return { nodes: [], warnings: ['The HTML is larger than 1 MB; split it into smaller parts.'] };
   }
   const doc = parseDocument(html, { lowerCaseTags: true, lowerCaseAttributeNames: true });
+  scanForms(doc);
   const nodes: NodeInput[] = [];
   for (const child of doc.children) nodes.push(...convert(child, 0));
   return { nodes, warnings: [...warnings] };

@@ -3,6 +3,8 @@ import {
   DocIndex,
   type DocView,
   type ElementSpec,
+  iconSvg,
+  isIconDef,
   localizedPage,
   localizedProps,
   type Page,
@@ -45,7 +47,8 @@ export interface RenderedPage {
 const VOID = new Set(['img', 'br', 'hr', 'input', 'meta', 'link', 'source', 'wbr']);
 /**
  * Never emitted, whatever a component or a stored document says: these run code, load resources
- * or change how the rest of the page is parsed or styled.
+ * or change how the rest of the page is parsed or styled. Icons are the one way to draw SVG: the
+ * renderer writes it from the registry's checked shapes (`ElementSpec.icon`).
  */
 const DENIED_TAGS = new Set([
   'script',
@@ -69,10 +72,6 @@ const DENIED_TAGS = new Set([
   'noscript',
   'xmp',
   'plaintext',
-  'textarea',
-  'form',
-  'input',
-  'select',
   'portal',
 ]);
 const TAG_RE = /^[a-z][a-z0-9-]*$/;
@@ -175,6 +174,15 @@ function cleanAttrs(ctx: Ctx, attrs: Record<string, unknown>): Record<string, un
   }
   if (typeof out.href === 'string') out.href = sanitizeUrl(out.href, 'href');
   if (typeof out.src === 'string') out.src = sanitizeUrl(out.src, 'src');
+  if (typeof out.poster === 'string') out.poster = sanitizeUrl(out.poster, 'src');
+  // Where a form is sent: a web address like a link's (a blocked one sends nowhere), and only the
+  // form says so: a button can't redirect it.
+  if (typeof out.action === 'string') {
+    const action = sanitizeUrl(out.action, 'href');
+    if (action === '#' && out.action.trim() !== '#') delete out.action;
+    else out.action = action;
+  }
+  delete out.formaction;
   return out;
 }
 
@@ -220,6 +228,11 @@ function renderSpec(ctx: Ctx, spec: ElementSpec | string, depth: number, inLink:
 }
 
 function specInner(ctx: Ctx, spec: ElementSpec, depth: number, linked: boolean): string {
+  if (spec.icon !== undefined) {
+    // Drawn from the registry's shapes (checked again: a registry is host code, not a promise).
+    const icon = ctx.registry.icon(spec.icon);
+    return icon && isIconDef(icon) ? iconSvg(icon) : '';
+  }
   if (spec.children?.length)
     return spec.children.map((c) => renderSpec(ctx, c, depth + 1, linked)).join('');
   if (spec.html !== undefined)

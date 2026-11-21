@@ -259,6 +259,19 @@ export const editorStyles = [
   .upload input { position: absolute; width: 1px; height: 1px; opacity: 0; }
   .upload:focus-within { outline: 2px solid var(--bbe-focus); outline-offset: 2px; border-radius: 4px; }
   .linked-panel h3, .linked-panel h3 .bb-icon { color: var(--bbe-linked); }
+  .icon-grid {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(calc(var(--_h) + 2px), 1fr)); gap: 2px;
+    max-height: calc((var(--_h) + 4px) * 5 + var(--_s2)); overflow-y: auto; padding: var(--_s1);
+    border: 1px solid var(--bbe-border-strong); border-radius: var(--bbe-radius); background: var(--bbe-surface);
+    scrollbar-width: thin; scrollbar-color: var(--bbe-border-strong) transparent;
+  }
+  .icon-option {
+    display: grid; place-items: center; aspect-ratio: 1; padding: 0; border: 0; border-radius: min(var(--bbe-radius), 6px);
+    background: none; color: var(--bbe-fg); font-size: calc(var(--_icon) + 2px);
+  }
+  .icon-option:hover { background: var(--bbe-hover); }
+  .icon-option[aria-pressed='true'] { background: var(--bbe-selected); color: var(--bbe-accent-text); box-shadow: inset 0 0 0 1.5px var(--bbe-accent); }
+  .icon-option svg { display: block; }
 
   .decl { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr) auto; gap: var(--_s1); align-items: center; margin-bottom: var(--_s1); }
   .decl code { font-size: var(--_fs-xs); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--bbe-muted); }

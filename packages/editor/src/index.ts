@@ -41,7 +41,15 @@ export {
   presetForLevel,
 } from './features.js';
 export { type EditorIcons, ICON_NAMES, type IconName, iconMarkup, isIconMarkup } from './icons.js';
-export { type Field, type FieldKind, fieldsFor, fieldValue } from './schema-form.js';
+export {
+  type Field,
+  type FieldKind,
+  fieldsFor,
+  fieldsForNode,
+  fieldValue,
+  linesValue,
+  withCompanions,
+} from './schema-form.js';
 export {
   DEFAULT_STRINGS,
   type EditorStrings,

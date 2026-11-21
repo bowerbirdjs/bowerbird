@@ -242,7 +242,20 @@ function validateProps(
   nodeId: string,
 ): Props | undefined {
   const res = def.props.safeParse(input);
-  if (res.success) return res.data as Props;
+  if (res.success) {
+    // What the schema can't know: props against the registry, or against each other.
+    const problems = def.validate?.(res.data as Props, ctx.registry) ?? [];
+    for (const problem of problems) {
+      fail(ctx, {
+        code: 'invalid_props',
+        nodeId,
+        path: problem.path,
+        message: `${def.name}.${problem.path}: ${problem.message}`,
+        ...(problem.hint ? { hint: problem.hint } : {}),
+      });
+    }
+    return problems.length ? undefined : (res.data as Props);
+  }
   const known = Object.keys(def.props.shape);
   for (const zi of res.error.issues) {
     if (zi.code === 'unrecognized_keys') {
@@ -846,23 +859,37 @@ function nodeInsert(ctx: OpContext, op: OpOf<'node.insert'>) {
   if (node) checkLinkNesting(ctx, node);
 }
 
-const INTERACTIVE = new Set(['link', 'button']);
+const INTERACTIVE = new Set(['link', 'button', 'form', 'field', 'details']);
 
 /**
- * Fails if `node` (just placed) puts a link or button somewhere inside a link: browsers split
- * nested interactive content, so the page would no longer match the document.
+ * Fails if `node` (just placed) puts something interactive somewhere inside a link, or a form
+ * inside a form: browsers split or drop such nesting, so the page would no longer match the
+ * document.
  */
 function checkLinkNesting(ctx: OpContext, node: BNode): void {
-  const link = ancestors(ctx.draft, node.id).find((a) => a.type === 'link');
-  if (!link) return;
-  const inner = [node, ...descendants(ctx.draft, node.id)].find((n) => INTERACTIVE.has(n.type));
-  if (!inner) return;
-  fail(ctx, {
-    code: 'invalid_parent',
-    nodeId: inner.id,
-    message: `"${inner.id}" (${inner.type}) can't be inside link "${link.id}": links can't contain links or buttons.`,
-    hint: `Put it next to "${link.id}" instead.`,
-  });
+  const above = ancestors(ctx.draft, node.id);
+  const subtree = [node, ...descendants(ctx.draft, node.id)];
+  const link = above.find((a) => a.type === 'link');
+  const inLink = link && subtree.find((n) => INTERACTIVE.has(n.type));
+  if (link && inLink) {
+    fail(ctx, {
+      code: 'invalid_parent',
+      nodeId: inLink.id,
+      message: `"${inLink.id}" (${inLink.type}) can't be inside link "${link.id}": links can't contain links, buttons or form parts.`,
+      hint: `Put it next to "${link.id}" instead.`,
+    });
+    return;
+  }
+  const outer = above.find((a) => a.type === 'form');
+  const inner = outer && subtree.find((n) => n.type === 'form');
+  if (outer && inner) {
+    fail(ctx, {
+      code: 'invalid_parent',
+      nodeId: inner.id,
+      message: `Form "${inner.id}" can't be inside form "${outer.id}": browsers drop a form inside a form.`,
+      hint: `Put its fields into "${outer.id}", or place it next to it.`,
+    });
+  }
 }
 
 function nodeMove(ctx: OpContext, op: OpOf<'node.move'>) {

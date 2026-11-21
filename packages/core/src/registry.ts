@@ -1,5 +1,6 @@
 import type { z } from 'zod';
 import type { DocView } from './doc.js';
+import { ICON_NAME, type IconDef, isIconDef, parseIcon } from './icons.js';
 import { slugify } from './ids.js';
 import { PRIMITIVES } from './primitives.js';
 import type { BNode, NodeStyles, Props } from './types.js';
@@ -11,6 +12,11 @@ export interface ElementSpec {
   text?: string;
   /** Inner rich text (the safe inline subset); the renderer sanitizes it again. */
   html?: string;
+  /**
+   * The name of a registered icon (`Registry.registerIcons`) drawn inside the element instead of
+   * text or children. The renderer writes the SVG from the registry's checked data.
+   */
+  icon?: string;
   /** Void elements (e.g. `img`) never have children. */
   void?: boolean;
   /**
@@ -121,8 +127,21 @@ export interface ComponentDef {
    */
   insertable?: boolean;
   render?: (node: BNode, ctx: RenderContext) => ElementSpec;
+  /**
+   * Checks the schema can't make: props against the registry (an icon name that exists) or against
+   * each other. Runs on parsed props whenever they are written; each problem refuses the change.
+   */
+  validate?: (props: Props, registry: Registry) => PropProblem[];
   /** Custom element tag for code components. */
   tag?: string;
+}
+
+/** A problem `ComponentDef.validate` found with a prop. */
+export interface PropProblem {
+  /** The prop, e.g. `name`. */
+  path: string;
+  message: string;
+  hint?: string;
 }
 
 /** Input describing a node (and its subtree) to create. Used by `node.insert` and section templates. */
@@ -203,6 +222,36 @@ export class Registry {
   private readonly components = new Map<string, ComponentDef>();
   private readonly sections = new Map<string, SectionDef>();
   private readonly dataDefs = new Map<string, DataDef>();
+  private readonly icons = new Map<string, IconDef>();
+
+  /**
+   * Adds icons by name (`arrow-right`), as SVG markup or as parsed drawings (`parseIcon`). Only
+   * plain drawings are taken (see `parseIcon`); a name or drawing that isn't one throws, so a
+   * broken icon set shows up when the registry is built, not on a published page.
+   */
+  registerIcons(icons: Record<string, string | IconDef>): this {
+    for (const [name, source] of Object.entries(icons)) {
+      if (!ICON_NAME.test(name))
+        throw new Error(`Icon name "${name}" must be lowercase kebab-case, e.g. "arrow-right".`);
+      const def =
+        typeof source === 'string' ? parseIcon(source) : isIconDef(source) ? source : undefined;
+      if (!def)
+        throw new Error(
+          `Icon "${name}" is not a plain SVG drawing: only path, circle, ellipse, rect, line, polyline and polygon shapes with "none" or "currentColor" paint are allowed.`,
+        );
+      this.icons.set(name, def);
+    }
+    return this;
+  }
+
+  icon(name: string): IconDef | undefined {
+    return this.icons.get(name);
+  }
+
+  /** Names of the registered icons, in the order they were added. */
+  listIcons(): string[] {
+    return [...this.icons.keys()];
+  }
 
   /** Declares a site data group (see `defineData`). */
   registerData(def: DataDef): this {
@@ -261,6 +310,8 @@ export interface RegistryOptions {
   components?: ComponentDef[];
   sections?: SectionDef[];
   data?: DataDef[];
+  /** Icons for `icon` nodes, by name: SVG markup or parsed drawings (see `Registry.registerIcons`). */
+  icons?: Record<string, string | IconDef>;
 }
 
 /** A registry with the built-in primitives plus any given components and sections. */
@@ -270,6 +321,7 @@ export function createRegistry(options: RegistryOptions = {}): Registry {
   for (const def of options.components ?? []) registry.registerComponent(def);
   for (const def of options.sections ?? []) registry.registerSection(def);
   for (const def of options.data ?? []) registry.registerData(def);
+  if (options.icons) registry.registerIcons(options.icons);
   return registry;
 }
 

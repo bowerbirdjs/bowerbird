@@ -1,4 +1,4 @@
-import { type DocView, descendants, pageNodes, sectionRootOf } from './doc.js';
+import { ancestors, type DocView, descendants, pageNodes, sectionRootOf } from './doc.js';
 import { untranslatedProps } from './l10n.js';
 import { type Registry, templateParts } from './registry.js';
 import { richTextToPlain } from './richtext.js';
@@ -48,9 +48,56 @@ function templateCopy(registry: Registry, nodes: BNode[]): Map<string, string> {
   return copy;
 }
 
+/** A form's own checks: where it goes, whether it can be sent, and fields that would collide. */
+function lintForm(view: DocView, form: BNode, issues: LintIssue[]): void {
+  const action = str(form.props.action).trim();
+  if (!action) {
+    issues.push({
+      rule: 'form-action',
+      severity: 'info',
+      nodeId: form.id,
+      message: `Form "${form.id}" doesn't send its fields anywhere yet (no action).`,
+      hint: 'Set "action" to the URL that receives the form.',
+    });
+  } else if (isUnsafeUrl(action, 'href') || /^(mailto|tel):/i.test(action)) {
+    issues.push({
+      rule: 'unsafe-url',
+      severity: 'error',
+      nodeId: form.id,
+      message: `Form "${form.id}" has an action that won't work: "${action}".`,
+      hint: 'Use an https:// URL or a /path on this site.',
+    });
+  }
+  const inside = descendants(view, form.id);
+  if (!inside.some((n) => n.type === 'button' && n.props.type === 'submit')) {
+    issues.push({
+      rule: 'form-submit',
+      severity: 'warning',
+      nodeId: form.id,
+      message: `Form "${form.id}" has no submit button.`,
+      hint: 'Add a button with "type": "submit" inside it.',
+    });
+  }
+  const names = new Map<string, string>();
+  for (const f of inside) {
+    if (f.type !== 'field') continue;
+    const name = str(f.props.name);
+    const earlier = names.get(name);
+    if (earlier) {
+      issues.push({
+        rule: 'field-name',
+        severity: 'warning',
+        nodeId: f.id,
+        message: `Fields "${earlier}" and "${f.id}" are both sent as "${name}", so one answer hides the other.`,
+        hint: 'Give each field its own "name".',
+      });
+    } else names.set(name, f.id);
+  }
+}
+
 /**
  * Document-level checks that don't need a browser: accessibility basics, broken or placeholder
- * links, and example copy left over from section templates.
+ * links, forms that can't be sent, and example copy left over from section templates.
  */
 export function lintPage(view: DocView, registry: Registry, pageId: PageId): LintIssue[] {
   const page = view.page(pageId);
@@ -179,6 +226,59 @@ export function lintPage(view: DocView, registry: Registry, pageId: PageId): Lin
           severity: 'error',
           nodeId: n.id,
           message: `Image "${n.id}" uses a URL scheme that will be blocked.`,
+        });
+      }
+    }
+    if (n.type === 'icon' && !registry.icon(str(n.props.name))) {
+      issues.push({
+        rule: 'unknown-icon',
+        severity: 'warning',
+        nodeId: n.id,
+        message: `Icon "${n.id}" names "${str(n.props.name)}", which isn't in this site's icon set, so nothing shows.`,
+      });
+    }
+    if (n.type === 'details') {
+      const first = view.children(n.id)[0];
+      if (first?.type !== 'text' || first.props.tag !== 'summary') {
+        issues.push({
+          rule: 'details-summary',
+          severity: 'warning',
+          nodeId: n.id,
+          message: `Accordion item "${n.id}" doesn't start with a summary, so browsers label it "Details".`,
+          hint: 'Make its first child a text with tag "summary".',
+        });
+      }
+    }
+    if (n.type === 'text' && n.props.tag === 'summary') {
+      const parent = n.parent ? view.node(n.parent) : undefined;
+      if (parent?.type !== 'details' || view.children(parent.id)[0]?.id !== n.id) {
+        issues.push({
+          rule: 'details-summary',
+          severity: 'warning',
+          nodeId: n.id,
+          message: `"${n.id}" is a summary, which only works as the first child of a details node.`,
+          hint: 'Move it there, or change its tag (e.g. to p).',
+        });
+      }
+    }
+    if (n.type === 'form') lintForm(view, n, issues);
+    if (n.type === 'field') {
+      if (n.props.type !== 'hidden' && !str(n.props.label).trim()) {
+        issues.push({
+          rule: 'field-label',
+          severity: 'error',
+          nodeId: n.id,
+          message: `Field "${n.id}" has no label, so nobody (and no screen reader) knows what to enter.`,
+          hint: 'Set its "label" prop; a placeholder is not a label.',
+        });
+      }
+      if (!ancestors(view, n.id).some((a) => a.type === 'form')) {
+        issues.push({
+          rule: 'field-outside-form',
+          severity: 'warning',
+          nodeId: n.id,
+          message: `Field "${n.id}" isn't inside a form, so what people enter is sent nowhere.`,
+          hint: 'Move it into a form node.',
         });
       }
     }

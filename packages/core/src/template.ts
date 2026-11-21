@@ -97,6 +97,91 @@ export function image(
   });
 }
 
+/** Text with inline formatting (the safe subset: bold, italic, links, line breaks). */
+export function richText(opts: Common & { tag?: string; html: string }): NodeInput {
+  const { tag, html, ...common } = opts;
+  return node('rich-text', common, { ...(tag ? { tag } : {}), html });
+}
+
+/** An icon from the registry's icon set (`icon` is its name there, e.g. `bolt`). */
+export function icon(opts: Common & { icon: string; label?: string }): NodeInput {
+  const { icon: iconName, label, ...common } = opts;
+  return node('icon', common, { name: iconName, ...(label ? { label } : {}) });
+}
+
+/**
+ * An accordion item. Its first child is the summary (`text({ tag: 'summary', … })`), the line
+ * that stays visible; the rest shows when it's opened.
+ */
+export function details(
+  opts: Common & { open?: boolean; group?: string } = {},
+  children: Child[] = [],
+): NodeInput {
+  const { open, group, ...common } = opts;
+  return node(
+    'details',
+    common,
+    { ...(open ? { open } : {}), ...(group ? { group } : {}) },
+    children,
+  );
+}
+
+export function form(
+  opts: Common & { action?: string; method?: 'post' | 'get'; label?: string } = {},
+  children: Child[] = [],
+): NodeInput {
+  const { action, method, label, ...common } = opts;
+  return node(
+    'form',
+    common,
+    {
+      ...(action ? { action } : {}),
+      ...(method ? { method } : {}),
+      ...(label ? { label } : {}),
+    },
+    children,
+  );
+}
+
+/** A form field: label and control in one node. `field` is the name it is sent as. */
+export function field(
+  opts: Common & {
+    type?: string;
+    field: string;
+    label: string;
+    placeholder?: string;
+    help?: string;
+    required?: boolean;
+    options?: string[];
+    value?: string;
+    rows?: number;
+  },
+): NodeInput {
+  const {
+    type,
+    field: fieldName,
+    label,
+    placeholder,
+    help,
+    required,
+    options,
+    value,
+    rows,
+    ...common
+  } = opts;
+  return node('field', common, {
+    ...(type ? { type } : {}),
+    name: fieldName,
+    label,
+    ...(placeholder ? { placeholder } : {}),
+    ...(help ? { help } : {}),
+    ...(required ? { required } : {}),
+    ...(options ? { options } : {}),
+    ...(value !== undefined ? { value } : {}),
+    ...(rows ? { rows } : {}),
+  });
+}
+
 /** Any registered component, e.g. a host code component. */
 export function component(
   type: string,

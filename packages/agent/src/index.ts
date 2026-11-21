@@ -572,6 +572,9 @@ export function createAgentTools(options: AgentToolsOptions): AgentTool[] {
             .filter((c) => c.insertable !== false)
             .map((c) => c.name)
             .join(', ')}`,
+          ...(store.registry.listIcons().length
+            ? [`Icons (for icon nodes): ${store.registry.listIcons().join(', ')}`]
+            : []),
           `Tokens: ${[...families].map(([f, n]) => `${f} (${n})`).join(', ')} (list_tokens to see them)`,
           `Themes: ${Object.keys(doc.themes).join(', ') || 'none'}`,
           ...(store.registry.listData().length
@@ -803,7 +806,7 @@ export function createAgentTools(options: AgentToolsOptions): AgentTool[] {
       name: 'import_html',
       title: 'Import HTML',
       description:
-        'Converts an HTML fragment into editable nodes and inserts them as one change. Use it for layouts no section covers. style="…" attributes become node CSS and must use design tokens; class attributes, scripts, forms and SVG are dropped.',
+        'Converts an HTML fragment into editable nodes and inserts them as one change. Use it for layouts no section covers. style="…" attributes become node CSS and must use design tokens; <form>, its controls and <details> become form, field and details nodes; class attributes, scripts and SVG are dropped.',
       input: z.object({
         html: z.string().min(1).max(100_000),
         parent: z.string().optional().describe('Parent node id (default: the page root).'),

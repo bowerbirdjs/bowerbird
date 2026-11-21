@@ -70,6 +70,10 @@ export const EDITOR_ELEMENTS = [
   'link',
   'button',
   'image',
+  'icon',
+  'accordion',
+  'form',
+  'field',
 ] as const;
 export type EditorElementName = (typeof EDITOR_ELEMENTS)[number];
 

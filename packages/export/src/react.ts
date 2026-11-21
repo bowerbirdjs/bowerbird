@@ -1,7 +1,7 @@
 import { localizedPage, type Registry, type SiteDoc } from '@bowerbirdjs/core';
 import { compileCss } from '@bowerbirdjs/css';
 import { renderPage } from '@bowerbirdjs/html';
-import { type ChildNode, isTag, isText } from 'domhandler';
+import { type ChildNode, type Element, isTag, isText } from 'domhandler';
 import { parseDocument } from 'htmlparser2';
 import {
   checkOutputPaths,
@@ -36,7 +36,27 @@ const PROP_NAMES: Record<string, string> = {
   fetchpriority: 'fetchPriority',
   enterkeyhint: 'enterKeyHint',
   autocomplete: 'autoComplete',
+  novalidate: 'noValidate',
+  minlength: 'minLength',
+  inputmode: 'inputMode',
+  enctype: 'encType',
+  'accept-charset': 'acceptCharset',
+  // Icons (inline SVG).
+  viewbox: 'viewBox',
+  'stroke-width': 'strokeWidth',
+  'stroke-linecap': 'strokeLinecap',
+  'stroke-linejoin': 'strokeLinejoin',
+  'stroke-dasharray': 'strokeDasharray',
+  'stroke-opacity': 'strokeOpacity',
+  'fill-rule': 'fillRule',
+  'fill-opacity': 'fillOpacity',
+  'clip-rule': 'clipRule',
 };
+/**
+ * Inputs whose `value` is what they send, not what the visitor types: React takes it as is.
+ * Every other field's preset is a starting value (`defaultValue`), or React would lock the field.
+ */
+const FIXED_VALUE = new Set(['hidden', 'checkbox', 'radio', 'submit', 'button', 'reset', 'image']);
 const VOID = new Set(['img', 'br', 'hr', 'input', 'meta', 'link', 'source', 'wbr']);
 const NUMERIC = new Set(['width', 'height']);
 
@@ -82,6 +102,11 @@ function jsxText(text: string, dropNewlines: boolean): string {
   return /[{}<>&"'`\\\n]/.test(text) || /^\s|\s$/.test(text) ? `{${JSON.stringify(text)}}` : text;
 }
 
+/** The text inside an element (an option's label, a text area's preset). */
+function textContent(node: Element): string {
+  return node.children.map((c) => (isText(c) ? c.data : isTag(c) ? textContent(c) : '')).join('');
+}
+
 /**
  * `top`: the page's root element(s). Line breaks between their children (the sections) are
  * formatting of the generated HTML, not content, so they're dropped.
@@ -95,19 +120,41 @@ function toJsx(nodes: ChildNode[], indent: string, top = false, dropNewlines = f
       continue;
     }
     if (!isTag(node)) continue;
-    const attrs = Object.entries(node.attribs)
+    const attribs: [string, string][] = Object.entries(node.attribs);
+    let children = node.children;
+    // Form controls start from their preset and stay editable (uncontrolled in React's terms).
+    if (node.name === 'select') {
+      const chosen = node.children.find(
+        (c): c is Element => isTag(c) && c.name === 'option' && 'selected' in c.attribs,
+      );
+      if (chosen) attribs.push(['defaultvalue', chosen.attribs.value ?? textContent(chosen)]);
+    } else if (node.name === 'textarea') {
+      const text = textContent(node);
+      if (text) attribs.push(['defaultvalue', text]);
+      children = [];
+    }
+    const attrs = attribs
+      .filter(([name]) => !(node.name === 'option' && name === 'selected'))
       .map(([name, value]) => {
-        const prop = PROP_NAMES[name] ?? name;
+        let prop = PROP_NAMES[name] ?? name;
+        if (name === 'defaultvalue') prop = 'defaultValue';
+        else if (node.name === 'input' && name === 'checked') prop = 'defaultChecked';
+        else if (
+          node.name === 'input' &&
+          name === 'value' &&
+          !FIXED_VALUE.has((node.attribs.type ?? 'text').toLowerCase())
+        )
+          prop = 'defaultValue';
         return value === '' && BOOLEAN_ATTRS.has(name) ? prop : `${prop}=${jsxValue(name, value)}`;
       })
       .join(' ');
     const open = `<${node.name}${attrs ? ` ${attrs}` : ''}`;
-    if (VOID.has(node.name)) {
+    if (VOID.has(node.name) || (node.name === 'textarea' && !children.length)) {
       out.push(`${open} />`);
       continue;
     }
-    const blockChildren = node.children.some((c) => isTag(c));
-    const inner = toJsx(node.children, `${indent}  `, false, top);
+    const blockChildren = children.some((c) => isTag(c));
+    const inner = toJsx(children, `${indent}  `, false, top);
     out.push(
       blockChildren
         ? `${open}>\n${indent}  ${inner}\n${indent}</${node.name}>`

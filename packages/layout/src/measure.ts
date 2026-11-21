@@ -120,26 +120,61 @@ export function measureLayout(root: Element, options: MeasureOptions = {}): Layo
         y: clipsY ? html.scrollHeight - html.clientHeight : 0,
       };
     }
-    let own = '';
-    for (const child of el.childNodes) if (child.nodeType === 3) own += child.textContent ?? '';
-    own = own.trim();
+    const directText = (e: Element) => {
+      let text = '';
+      for (const child of e.childNodes) if (child.nodeType === 3) text += child.textContent ?? '';
+      return text.trim();
+    };
+    const contrastOf = (e: Element, style: CSSStyleDeclaration): number | undefined => {
+      const fg = parseColor(style.color);
+      const bg = backgroundOf(e);
+      // Opacity on the element or its ancestors fades the text into its background.
+      let opacity = 1;
+      for (let a: Element | null = e; a && a !== root.parentElement; a = a.parentElement)
+        opacity *= Number(getComputedStyle(a).opacity);
+      if (!fg || !bg) return undefined;
+      const a = fg[3] * (Number.isFinite(opacity) ? opacity : 1);
+      const blended = [0, 1, 2].map((i) => fg[i]! * a + bg[i]! * (1 - a));
+      const l1 = luminance(blended);
+      const l2 = luminance(bg);
+      return Math.round(((Math.max(l1, l2) + 0.05) / (Math.min(l1, l2) + 0.05)) * 100) / 100;
+    };
+    const own = directText(el);
+    // Text a node generates (a form field's label, a list drawn from site data) sits in elements
+    // of its own: the node reports the smallest and the least readable of it.
+    const generated: { size: number; contrast: number | undefined; chars: number }[] = [];
+    if (!own) {
+      for (const inner of el.querySelectorAll('*')) {
+        if (inner.closest(`[${attr}]`) !== el) continue;
+        const text = directText(inner);
+        if (!text) continue;
+        const style = getComputedStyle(inner);
+        if (style.display === 'none' || style.visibility === 'hidden') continue;
+        // What isn't shown isn't read: an option list, or content folded away.
+        if (/^(option|optgroup)$/i.test(inner.tagName) || !inner.getClientRects().length) continue;
+        generated.push({
+          size: Number.parseFloat(style.fontSize) || 16,
+          contrast: contrastOf(inner, style),
+          chars: text.length,
+        });
+      }
+    }
+    if (generated.length) {
+      const known = generated.map((g) => g.contrast).filter((c): c is number => c !== undefined);
+      const size = Math.min(...generated.map((g) => g.size));
+      box.text = {
+        chars: generated.reduce((sum, g) => sum + g.chars, 0),
+        fontSize: round(size),
+        lineHeight: round(Number.parseFloat(cs.lineHeight) || size * 1.2),
+        lines: generated.length,
+        bold: false,
+        ...(known.length ? { contrast: Math.min(...known) } : {}),
+      };
+    }
     if (own) {
       const fontSize = Number.parseFloat(cs.fontSize) || 16;
       const lineHeight = Number.parseFloat(cs.lineHeight) || fontSize * 1.2;
-      const fg = parseColor(cs.color);
-      const bg = backgroundOf(el);
-      let contrast: number | undefined;
-      // Opacity on the element or its ancestors fades the text into its background.
-      let opacity = 1;
-      for (let a: Element | null = el; a && a !== root.parentElement; a = a.parentElement)
-        opacity *= Number(getComputedStyle(a).opacity);
-      if (fg && bg) {
-        const a = fg[3] * (Number.isFinite(opacity) ? opacity : 1);
-        const blended = [0, 1, 2].map((i) => fg[i]! * a + bg[i]! * (1 - a));
-        const l1 = luminance(blended);
-        const l2 = luminance(bg);
-        contrast = Math.round(((Math.max(l1, l2) + 0.05) / (Math.min(l1, l2) + 0.05)) * 100) / 100;
-      }
+      const contrast = contrastOf(el, cs);
       box.text = {
         chars: own.length,
         fontSize: round(fontSize),
@@ -166,7 +201,10 @@ export function measureLayout(root: Element, options: MeasureOptions = {}): Layo
       tag === 'button' ||
       tag === 'input' ||
       tag === 'select' ||
-      tag === 'textarea'
+      tag === 'textarea' ||
+      tag === 'summary' ||
+      // A form field: the label around its control is the target.
+      (tag === 'label' && !!el.querySelector('input, select, textarea'))
     )
       box.interactive = true;
     if (tag === 'img') {

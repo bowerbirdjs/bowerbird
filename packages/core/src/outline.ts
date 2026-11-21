@@ -58,7 +58,8 @@ export function describeNode(node: BNode, maxText = 60, locale?: string): string
       .join(',');
     parts.push(`section:${n.section.name}${variant ? `[${variant}]` : ''}`);
   } else {
-    parts.push(typeof n.props.tag === 'string' ? `${n.type}<${n.props.tag}>` : n.type);
+    const kind = n.type === 'field' ? n.props.type : n.props.tag;
+    parts.push(typeof kind === 'string' ? `${n.type}<${kind}>` : n.type);
   }
   if (n.type === 'text' || n.type === 'button') parts.push(quote(n.props.text, maxText));
   if (n.type === 'rich-text')
@@ -71,6 +72,20 @@ export function describeNode(node: BNode, maxText = 60, locale?: string): string
     );
   }
   if (n.type === 'image') parts.push(`alt=${quote(n.props.alt, maxText)}`);
+  if (n.type === 'icon')
+    parts.push(
+      `${String(n.props.name)}${n.props.label ? ` ${quote(n.props.label, maxText)}` : ''}`,
+    );
+  if (n.type === 'form')
+    parts.push(
+      `→ ${String(n.props.action || '(no action)')} (${String(n.props.method ?? 'post')})`,
+    );
+  if (n.type === 'field') {
+    parts.push(
+      `${quote(n.props.label, maxText)} name=${String(n.props.name)}${n.props.required ? ' required' : ''}`,
+    );
+  }
+  if (n.type === 'details' && n.props.open) parts.push('open');
   if (n.vars) parts.push(`vars(${Object.keys(n.vars).join(', ')})`);
   if (n.styles) parts.push(`css(${Object.keys(n.styles).join(', ')})`);
   return parts.join('  ');

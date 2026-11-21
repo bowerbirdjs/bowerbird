@@ -17,7 +17,7 @@ import {
 } from './dnd.js';
 import { FIELD_PANEL_CSS, FieldPanel, type PanelField } from './field-panel.js';
 import { type IconName, iconMarkup } from './icons.js';
-import { fieldsFor } from './schema-form.js';
+import { fieldsForNode, linesValue } from './schema-form.js';
 import { DEFAULT_STRINGS, type EditorStrings, resolveStrings } from './strings.js';
 import { CANVAS_TOKEN_CSS } from './theme.js';
 
@@ -96,7 +96,9 @@ ${CANVAS_TOKEN_CSS}
 .bbx-host .bbx-empty { padding: 64px 24px; text-align: center; font: 15px/1.5 var(--bbe-font);
   color: var(--color-on-surface-muted, #64748b); }
 .bbx-host .bbx-content [contenteditable] { outline: 2px solid var(--bbe-selection); outline-offset: 2px; cursor: text; }
-.bbx-host .bbx-content :is(a, button) { cursor: default; }
+.bbx-host .bbx-content :is(a, button, label, summary) { cursor: default; }
+.bbx-host .bbx-frame:not([data-preview]) .bbx-content :is(input, select, textarea) { pointer-events: none; }
+.bbx-host .bbx-frame[data-preview] .bbx-content :is(summary, label:has(input, select)) { cursor: pointer; }
 .bbx-host .bbx-banner { position: sticky; top: 0; z-index: 2; display: flex; gap: 8px; align-items: center; justify-content: center;
   margin: 0 auto; padding: 7px 12px; font: 600 12px/1.4 var(--bbe-font); color: var(--bbe-floating-fg); background: var(--bbe-floating-bg);
   box-shadow: inset 0 -3px 0 var(--bbe-accent); }
@@ -145,6 +147,9 @@ const ITEMBAR: [action: string, label: StringKey, icon: IconName][] = [
 ];
 
 const TEXT_TYPES = new Set(['text', 'button', 'link', 'rich-text']);
+
+/** What works in preview as it does on the published page: form controls and accordion items. */
+const LIVE_IN_PREVIEW = 'input, select, textarea, label, summary';
 
 /** Zero-width space: holds the caret inside an empty inline element; removed when saving. */
 const CARET_HOLDER = String.fromCharCode(0x200b);
@@ -511,6 +516,11 @@ export class CanvasView {
     this.attachSlots();
     this.attachMounts();
     this.prepareContent();
+    // While editing, every accordion item is open so its content can be reached; preview shows
+    // them as published.
+    if (c.preview)
+      for (const item of this.content.querySelectorAll('details[data-bb-closed]'))
+        item.removeAttribute('open');
     if (c.theme) this.frame.setAttribute('data-theme', c.theme);
     else this.frame.removeAttribute('data-theme');
     this.frame.toggleAttribute('data-preview', c.preview);
@@ -924,10 +934,29 @@ export class CanvasView {
     const content = new Set(def.contentProps ?? []);
     const inline = INLINE_PROP[node.type];
     const props = localizedProps(node, c.locale ?? undefined);
-    return fieldsFor(def)
-      .filter((f) => content.has(f.key) && f.key !== inline)
+    return fieldsForNode(def, node.props)
+      .filter((f) => content.has(f.key) && f.key !== inline && f.kind !== 'json')
       .map((f): PanelField => {
         const value = props[f.key];
+        const label = this.strings.editField(f.label);
+        // A list (a field's choices): one per line.
+        if (f.kind === 'lines') {
+          return {
+            label: f.label,
+            kind: 'multiline',
+            value: Array.isArray(value) ? value.join('\n') : '',
+            commit: (v) => !!c.setProps(id, { [f.key]: linesValue(v) }, label).ok,
+          };
+        }
+        if (f.kind === 'icon') {
+          return {
+            label: f.label,
+            kind: 'select',
+            value: typeof value === 'string' ? value : '',
+            options: c.store.registry.listIcons().map((name) => [name, name]),
+            commit: (v) => !!c.setProps(id, { [f.key]: v }, label).ok,
+          };
+        }
         const kind: PanelField['kind'] =
           f.kind === 'image'
             ? 'image'
@@ -1161,11 +1190,18 @@ export class CanvasView {
     content.addEventListener(
       'click',
       (e) => {
-        if (this.editing && (e.target as Element).closest('[contenteditable]')) return;
+        const target = e.target as Element;
+        if (this.editing && target.closest('[contenteditable]')) {
+          // Placing the caret in a summary being edited must not fold its accordion item.
+          if (target.closest('summary')) e.preventDefault();
+          return;
+        }
+        // In preview, forms can be tried out and accordion items opened, as on the published
+        // page (nothing is ever sent: submits are stopped below). Links still go nowhere.
+        if (c.preview && !target.closest('a') && target.closest(LIVE_IN_PREVIEW)) return;
         e.preventDefault();
         if (c.readOnly) return;
         const id = this.idAt(e.target);
-        const target = e.target as Element;
         // A placeholder that adds data (the first item of an empty list, a missing value).
         const adder = target.closest?.<HTMLElement>('[data-bb-add]');
         if (adder && this.content.contains(adder)) {
@@ -1377,8 +1413,14 @@ export class CanvasView {
         }
         return;
       }
-      // An editable <button> takes Space as a click instead of typing it.
-      if (e.key === ' ' && el.localName === 'button' && !e.metaKey && !e.ctrlKey) {
+      // An editable <button> takes Space as a click instead of typing it, and a <summary> as
+      // folding its accordion item.
+      if (
+        e.key === ' ' &&
+        (el.localName === 'button' || el.closest('summary')) &&
+        !e.metaKey &&
+        !e.ctrlKey
+      ) {
         e.preventDefault();
         doc.execCommand('insertText', false, ' ');
         return;

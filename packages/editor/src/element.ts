@@ -8,6 +8,7 @@ import {
   flattenTokens,
   formatIssue,
   type Issue,
+  iconSvg,
   instanceRootOf,
   localizedProps,
   type NodeInput,
@@ -25,7 +26,7 @@ import { EditorController, type EditorEvent, type Position } from './controller.
 import { currentDrag, type DragPayload, endDrag, performDrop, startDrag } from './dnd.js';
 import type { EditorElementName, EditorPreset, EditorUI } from './features.js';
 import { ICON_NAMES, type IconName, iconForType, iconMarkup, isIconMarkup } from './icons.js';
-import { type Field, fieldsFor, fieldValue } from './schema-form.js';
+import { type Field, fieldsForNode, fieldValue, withCompanions } from './schema-form.js';
 import { editorStyles } from './styles.js';
 import {
   EDITOR_TOKENS,
@@ -43,6 +44,10 @@ const ELEMENT_ICONS: Record<EditorElementName, IconName> = {
   link: 'link',
   button: 'button',
   image: 'image',
+  icon: 'star',
+  accordion: 'accordion',
+  form: 'form',
+  field: 'field',
 };
 
 /** Icon for a breakpoint: by its name, else by its width. */
@@ -66,7 +71,37 @@ const ELEMENTS: [EditorElementName, string, NodeInput][] = [
   ['link', 'Link', { type: 'link', props: { text: 'Link', href: '#' } }],
   ['button', 'Button', { type: 'button', props: { text: 'Button' } }],
   ['image', 'Image', { type: 'image', props: { src: PLACEHOLDER_IMAGE, alt: '' } }],
+  // The icon's name is filled in from the registry's icon set when it is offered.
+  ['icon', 'Icon', { type: 'icon', props: { name: 'star' } }],
+  [
+    'accordion',
+    'Accordion item',
+    {
+      type: 'details',
+      children: [
+        { type: 'text', props: { tag: 'summary', text: 'A question people ask' } },
+        { type: 'text', props: { text: 'The answer, shown when the question is opened.' } },
+      ],
+    },
+  ],
+  [
+    'form',
+    'Form',
+    {
+      type: 'form',
+      children: [
+        { type: 'field', props: { type: 'email', name: 'email', label: 'Email', required: true } },
+        { type: 'button', props: { type: 'submit', text: 'Send' } },
+      ],
+    },
+  ],
+  ['field', 'Form field', { type: 'field', props: { name: 'field', label: 'Label' } }],
 ];
+
+/** The icon a new icon element starts with: a familiar one if the site's set has it. */
+function starterIcon(names: string[]): string | undefined {
+  return names.includes('star') ? 'star' : names[0];
+}
 
 const COMMON_PROPS = [
   'display',
@@ -741,10 +776,28 @@ export class BowerbirdEditor extends LitElement {
     const f = c.features;
     if (!f.on('insert')) return false;
     return (
-      ELEMENTS.some(([name]) => f.element(name)) ||
+      this.offeredElements(c).length > 0 ||
       c.store.registry.listSections().some((s) => f.section(s.name)) ||
       (f.on('insert.components') && Object.keys(c.doc.symbols ?? {}).length > 0)
     );
+  }
+
+  /**
+   * Elements the Insert tab offers: what the host left on and the registry can make (a registry
+   * without icons offers no icon; a host may have replaced a primitive with a stricter one).
+   */
+  private offeredElements(c: EditorController): [EditorElementName, string, NodeInput][] {
+    const registry = c.store.registry;
+    const icon = starterIcon(registry.listIcons());
+    const known = (input: NodeInput): boolean =>
+      registry.component(input.type)?.insertable !== false &&
+      !!registry.component(input.type) &&
+      (input.children ?? []).every(known);
+    return ELEMENTS.filter(([name, , input]) => c.features.element(name) && known(input))
+      .filter(([name]) => name !== 'icon' || !!icon)
+      .map(([name, label, input]) =>
+        name === 'icon' ? [name, label, { ...input, props: { name: icon } }] : [name, label, input],
+      );
   }
 
   private renderToolbar(c: EditorController): TemplateResult {
@@ -1191,7 +1244,7 @@ export class BowerbirdEditor extends LitElement {
       : c.store.registry.listSections().filter((s) => f.section(s.name));
     const symbols =
       c.symbolView || !f.on('insert.components') ? [] : Object.values(c.doc.symbols ?? {});
-    const elements = ELEMENTS.filter(([name]) => f.element(name));
+    const elements = this.offeredElements(c);
     const target = c.selectedNode;
     const off = c.previewing;
     return html`
@@ -1618,7 +1671,7 @@ export class BowerbirdEditor extends LitElement {
   ): TemplateResult | typeof nothing {
     // Without advanced fields, only content (text, links, images) can be changed.
     const content = new Set(def.contentProps ?? []);
-    const fields = fieldsFor(def).filter(
+    const fields = fieldsForNode(def, node.props).filter(
       (f) => c.can('inspector.content.advanced') || content.has(f.key),
     );
     if (!fields.length) return nothing;
@@ -1643,7 +1696,13 @@ export class BowerbirdEditor extends LitElement {
         this.tick++;
         return;
       }
-      c.setProps(node.id, { [field.key]: value }, `Edit ${field.label.toLowerCase()}`);
+      const def = c.store.registry.component(node.type);
+      const patch = { [field.key]: value };
+      c.setProps(
+        node.id,
+        def ? withCompanions(def, node.props, patch) : patch,
+        `Edit ${field.label.toLowerCase()}`,
+      );
     };
     let control: TemplateResult;
     if (field.kind === 'select') {
@@ -1661,6 +1720,11 @@ export class BowerbirdEditor extends LitElement {
         .value=${live(value === undefined ? '' : JSON.stringify(value, null, 2))}
         @change=${onChange}
       ></textarea>`;
+    } else if (field.kind === 'lines') {
+      const lines = Array.isArray(value) ? value.filter((v) => typeof v === 'string') : [];
+      control = html`<textarea part="input" id=${id} .value=${live(lines.join('\n'))} @change=${onChange}></textarea>`;
+    } else if (field.kind === 'icon') {
+      control = this.renderIconPicker(c, node, field, typeof value === 'string' ? value : '');
     } else if (field.kind === 'textarea') {
       control = html`<textarea part="input" id=${id} .value=${live(String(value ?? ''))} @change=${onChange}></textarea>`;
     } else if (field.kind === 'checkbox') {
@@ -1699,6 +1763,32 @@ export class BowerbirdEditor extends LitElement {
         ? html` <span class="override" title="Differs from the linked component">●</span>`
         : nothing
     }</label>${control}</div>`;
+  }
+
+  /** The site's icons as a grid of buttons; the chosen one is pressed. */
+  private renderIconPicker(
+    c: EditorController,
+    node: BNode,
+    field: Field,
+    current: string,
+  ): TemplateResult {
+    const registry = c.store.registry;
+    return html`<div class="icon-grid" role="group" aria-label=${field.label} id=${`f-${field.key}`}>
+      ${registry.listIcons().map((name) => {
+        const icon = registry.icon(name);
+        return html`<button
+          type="button"
+          class="icon-option"
+          part="button"
+          title=${name}
+          aria-label=${name}
+          aria-pressed=${name === current}
+          @click=${() => c.setProps(node.id, { [field.key]: name }, `Change ${field.label.toLowerCase()}`)}
+        >
+          ${icon ? unsafeHTML(iconSvg(icon)) : nothing}
+        </button>`;
+      })}
+    </div>`;
   }
 
   private renderStyles(c: EditorController, node: BNode): TemplateResult {

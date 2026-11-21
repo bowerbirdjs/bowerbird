@@ -18,7 +18,11 @@ export interface LayoutBox {
   inline?: boolean;
   /** Content wider/taller than the box while overflow is clipped. */
   clipped?: { x: number; y: number };
-  /** Own text content (direct text, not descendants'). */
+  /**
+   * Own text content (direct text, not that of nodes inside it). For a node that generates its
+   * text in elements of its own (a form field's label and help, a list drawn from site data), the
+   * smallest font size and lowest contrast among them; `lines` then counts those elements.
+   */
   text?: {
     chars: number;
     fontSize: number;
@@ -28,7 +32,7 @@ export interface LayoutBox {
     /** Contrast ratio against the effective background; absent when it can't be determined. */
     contrast?: number;
   };
-  /** Links, buttons and form controls. */
+  /** Links, buttons, accordion summaries and form fields. */
   interactive?: boolean;
   image?: { loaded: boolean; naturalWidth: number; naturalHeight: number };
 }

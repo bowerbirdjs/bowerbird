@@ -39,6 +39,37 @@ export interface CompileCssOptions {
  */
 const OWN = ':where(:not([data-bb-code] *, [data-bb-host] *))';
 
+/**
+ * Form fields (`field` nodes): a label over its control, readable on any section background. The
+ * control keeps the page's own surface and text colours whatever the section around it uses, and
+ * its border is mixed from its text colour, so it shows in light and dark themes.
+ */
+const FIELD_CSS = `.bb-page :where(.bb-field)${OWN} {
+  display: grid; gap: var(--space-2xs, 0.25rem); min-width: 0; margin: 0; padding: 0; border: 0;
+  font-size: var(--text-sm, 0.875rem); text-align: start;
+}
+.bb-page :where(.bb-field__label)${OWN} { padding: 0; font-weight: var(--weight-medium, 500); }
+.bb-page :where(.bb-field--required > .bb-field__label)${OWN}::after { content: " *"; }
+.bb-page :where(.bb-field__control)${OWN} {
+  width: 100%; min-height: 2.75rem; margin: 0; padding: var(--space-xs, 0.5rem) var(--space-sm, 0.75rem);
+  border: 1px solid color-mix(in srgb, currentColor 45%, transparent); border-radius: var(--radius-md, 0.5rem);
+  background: var(--color-surface, Canvas); color: var(--color-on-surface, CanvasText);
+  font-size: var(--text-md, 1rem); line-height: var(--leading-snug, 1.35);
+}
+.bb-page :where(textarea.bb-field__control)${OWN} { min-height: 6rem; resize: vertical; }
+.bb-page :where(.bb-field__control)${OWN}::placeholder { color: color-mix(in srgb, currentColor 62%, transparent); opacity: 1; }
+.bb-page :where(.bb-field__control, .bb-field__box)${OWN}:focus-visible { outline: 2px solid var(--color-accent, Highlight); outline-offset: 2px; }
+.bb-page :where(.bb-field--check, .bb-field__option)${OWN} {
+  display: flex; align-items: flex-start; gap: var(--space-xs, 0.5rem); font-weight: var(--weight-regular, 400);
+}
+.bb-page :where(.bb-field--check > .bb-field__label)${OWN} { font-weight: inherit; }
+.bb-page :where(.bb-field__box)${OWN} { flex: none; width: 1.125rem; height: 1.125rem; margin: 0.15em 0 0; accent-color: var(--color-accent, auto); }
+.bb-page :where(.bb-field__help)${OWN} { color: color-mix(in srgb, currentColor 72%, transparent); }
+.bb-page :where(.bb-field--hidden)${OWN} {
+  display: inline-block; padding: var(--space-2xs, 0.25rem) var(--space-xs, 0.5rem); border: 1px dashed currentColor;
+  border-radius: var(--radius-sm, 0.375rem); font-size: var(--text-xs, 0.75rem); opacity: 0.7;
+}`;
+
 /** Reset and page-level defaults. Uses `:where()` so sections override them easily. */
 export const BASE_CSS = `.bb-page {
   container: ${PAGE_CONTAINER} / inline-size;
@@ -60,7 +91,13 @@ export const BASE_CSS = `.bb-page {
 }
 .bb-page :where(img, svg, video)${OWN} { display: block; max-width: 100%; height: auto; }
 .bb-page :where(a)${OWN} { color: inherit; }
-.bb-page :where(button)${OWN} { font: inherit; }`;
+.bb-page :where(button, input, select, textarea)${OWN} { font: inherit; }
+.bb-page :where(form)${OWN} { display: grid; gap: var(--space-md, 1rem); margin: 0; }
+.bb-page :where(form) > :where(button)${OWN} { justify-self: start; }
+.bb-page :where(summary)${OWN} { cursor: pointer; }
+.bb-page :where(.bb-icon)${OWN} { display: inline-flex; flex: none; vertical-align: middle; }
+.bb-page :where(.bb-icon)${OWN} > svg { width: 1em; height: 1em; }
+${FIELD_CSS}`;
 
 /**
  * Editor mode only: the canvas shares the host document, so host element rules (`h1 { … }`,

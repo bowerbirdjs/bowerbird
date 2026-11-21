@@ -23,6 +23,11 @@ export const AGENT_GUIDE = `## How to edit this site
 - text nodes hold plain text. For inline formatting use a rich-text node: props.html with ${RICH_TAGS} only; other tags are stripped (paragraphs become <br>).
 - Other languages: {"op":"locale.set","default":"en","add":["de"]} (default = the language of the current content), then props.set with "locale":"de" on content props (text, html, href, alt…) and page.update with "locale" for titles. Untranslated content falls back to the default language. get_nodes shows existing translations (l10n).
 
+## Forms, accordions, icons
+- A form node holds field nodes (label and control in one: type text|email|textarea|select|radio|checkbox…, name, label, options) and a button with type "submit". Set the form's "action" to where it is sent.
+- A details node is an accordion item: first child a text with tag "summary", then the content.
+- An icon node shows a named icon in the text colour and size (font-size, color).
+
 ## Styling
 - Use design tokens, not raw values: var(--space-lg), var(--color-accent), var(--text-2xl). Call list_tokens to see them.
 - To rebrand, change the whole palette scale (e.g. color.brand.50…700): themes such as dark reference other steps of it.
@@ -46,5 +51,6 @@ export const AGENT_GUIDE = `## How to edit this site
 {"op":"page.create","path":"/about","title":"About us"}
 {"op":"props.set","id":"hero-1/heading","locale":"de","props":{"text":"Planen Sie gemeinsam"}}
 {"op":"node.insert","parent":"features-1/header","node":{"type":"rich-text","props":{"html":"Free for <strong>small teams</strong>. <a href='/pricing'>See pricing</a>."}}}
+{"op":"node.insert","parent":"cta-1/panel","node":{"type":"form","props":{"action":"/subscribe"},"children":[{"type":"field","props":{"type":"email","name":"email","label":"Email","required":true}},{"type":"button","props":{"type":"submit","text":"Subscribe"}}]}}
 {"op":"symbol.create","id":"footer-1","name":"Site footer"}
 {"op":"symbol.insert","symbol":"site-footer","page":"about"}`;

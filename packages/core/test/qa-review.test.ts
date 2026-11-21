@@ -407,7 +407,7 @@ describe('links', () => {
       }),
     );
     expect(deep[0]?.message).toMatch(
-      /can't be inside link "hero-1\/cta": links can't contain links or buttons/,
+      /can't be inside link "hero-1\/cta": links can't contain links, buttons or form parts/,
     );
     // Moving a link into a link is refused the same way; images and text are fine.
     expect(

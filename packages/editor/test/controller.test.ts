@@ -5,7 +5,7 @@ import { z } from 'zod';
 // DOM-free modules only: the Lit element and canvas need a browser (see e2e/).
 import { EditorController, type EditorEvent } from '../src/controller.js';
 import { performDrop } from '../src/dnd.js';
-import { fieldsFor, fieldValue } from '../src/schema-form.js';
+import { fieldsFor, fieldsForNode, fieldValue, withCompanions } from '../src/schema-form.js';
 
 const SAM = { kind: 'user' as const, id: 'sam', name: 'Sam' };
 const BOT = { kind: 'agent' as const, id: 'bot', name: 'Bot' };
@@ -260,21 +260,83 @@ describe('fieldsFor', () => {
     expect(text.find((f) => f.key === 'tag')?.options).toContain('h1');
   });
 
-  test('array and object props are edited as JSON', () => {
+  test('lists of text are edited one per line; other arrays and objects as JSON', () => {
     const def = defineComponent({
       name: 'plans',
       kind: 'code',
       tag: 'acme-plans',
       description: 'Plans',
       children: false,
-      props: z.object({ plans: z.array(z.string()), title: z.string().optional() }),
+      props: z.object({
+        plans: z.array(z.string()),
+        prices: z.array(z.object({ amount: z.number() })),
+        title: z.string().optional(),
+      }),
     });
     const fields = fieldsFor(def);
     const plans = fields.find((f) => f.key === 'plans')!;
-    expect(plans.kind).toBe('json');
-    expect(fieldValue(plans, { value: '["a","b"]' } as HTMLTextAreaElement)).toEqual(['a', 'b']);
-    expect(() => fieldValue(plans, { value: '[a' } as HTMLTextAreaElement)).toThrow(/JSON/);
+    expect(plans.kind).toBe('lines');
+    expect(fieldValue(plans, { value: ' Free \n\nPro\r\nTeam' } as HTMLTextAreaElement)).toEqual([
+      'Free',
+      'Pro',
+      'Team',
+    ]);
+    // Nothing left removes the prop.
+    expect(fieldValue(plans, { value: ' \n ' } as HTMLTextAreaElement)).toBeNull();
+    const prices = fields.find((f) => f.key === 'prices')!;
+    expect(prices.kind).toBe('json');
+    expect(fieldValue(prices, { value: '[{"amount":1}]' } as HTMLTextAreaElement)).toEqual([
+      { amount: 1 },
+    ]);
+    expect(() => fieldValue(prices, { value: '[a' } as HTMLTextAreaElement)).toThrow(/JSON/);
     expect(fields.find((f) => f.key === 'title')?.kind).toBe('text');
+  });
+
+  test('a form field offers what its kind uses, and changing the kind brings choices along', () => {
+    const def = createDefaultRegistry().component('field')!;
+    const keys = (props: Record<string, unknown>) => fieldsForNode(def, props).map((f) => f.key);
+    expect(keys({ type: 'text' })).toEqual([
+      'type',
+      'name',
+      'label',
+      'placeholder',
+      'help',
+      'required',
+      'value',
+    ]);
+    expect(keys({ type: 'textarea' })).toContain('rows');
+    expect(keys({ type: 'select' })).toEqual(expect.arrayContaining(['options', 'placeholder']));
+    expect(keys({ type: 'radio' })).not.toContain('placeholder');
+    expect(keys({ type: 'hidden' })).toEqual(['type', 'name', 'value']);
+    // Labels say what they are for this component.
+    const byKey = Object.fromEntries(fieldsFor(def).map((f) => [f.key, f]));
+    expect(byKey.label?.label).toBe('Label');
+    expect(byKey.options).toMatchObject({ kind: 'lines', label: 'Choices (one per line)' });
+    expect(fieldsFor(createDefaultRegistry().component('icon')!)[0]).toMatchObject({
+      key: 'name',
+      kind: 'icon',
+      label: 'Icon',
+    });
+
+    // A select can't be one without choices, and a text field can't keep them.
+    expect(withCompanions(def, { type: 'text' }, { type: 'select' })).toEqual({
+      type: 'select',
+      options: ['Option 1', 'Option 2'],
+    });
+    expect(withCompanions(def, { type: 'radio', options: ['A'] }, { type: 'select' })).toEqual({
+      type: 'select',
+    });
+    expect(withCompanions(def, { type: 'select', options: ['A'] }, { type: 'email' })).toEqual({
+      type: 'email',
+      options: null,
+    });
+    expect(withCompanions(def, { type: 'select', options: ['A'] }, { type: 'checkbox' })).toEqual({
+      type: 'checkbox',
+    });
+    expect(withCompanions(def, { type: 'text' }, { label: 'Name' })).toEqual({ label: 'Name' });
+    // Other components are left alone.
+    const text = createDefaultRegistry().component('text')!;
+    expect(withCompanions(text, {}, { tag: 'h2' })).toEqual({ tag: 'h2' });
   });
 });
 

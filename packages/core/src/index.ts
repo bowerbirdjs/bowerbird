@@ -35,6 +35,15 @@ export {
   type Issue,
   type IssueCode,
 } from './errors.js';
+export {
+  ICON_NAME,
+  type IconDef,
+  type IconShape,
+  type IconShapeTag,
+  iconSvg,
+  isIconDef,
+  parseIcon,
+} from './icons.js';
 export { duplicateId, ID_PATTERN, isValidId, nextId, slugify } from './ids.js';
 export {
   checkReadLocale,
@@ -68,7 +77,7 @@ export {
   requiredLevel,
   requiredLevelForChanges,
 } from './policy.js';
-export { PRIMITIVES } from './primitives.js';
+export { FIELD_TYPES, type FieldType, PRIMITIVES } from './primitives.js';
 export { changedFields, humanEditConflicts, stampFor } from './provenance.js';
 export {
   type AddData,
@@ -81,6 +90,7 @@ export {
   type EditField,
   type ElementSpec,
   type NodeInput,
+  type PropProblem,
   Registry,
   type RegistryOptions,
   type RenderContext,
