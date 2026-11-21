@@ -216,6 +216,36 @@ describe('forms', () => {
     ])[0];
     expect(name?.message).toContain('Only content can be translated');
   });
+
+  it('a host can pin where forms post by replacing the form component', () => {
+    const store = makeStore();
+    const builtIn = store.registry.component('form')!;
+    store.registry.registerComponent({
+      ...builtIn,
+      validate: (props) =>
+        String(props.action ?? '').startsWith('/api/')
+          ? []
+          : [
+              {
+                path: 'action',
+                message: 'forms post to this site only',
+                hint: 'Use an address under /api/, e.g. "/api/contact".',
+              },
+            ],
+    });
+    const refused = errors(store, [
+      insert('root-home', t.form({ action: 'https://elsewhere.example/collect' }, [])),
+    ])[0];
+    expect(refused?.code).toBe('invalid_props');
+    expect(refused?.message).toContain('form.action: forms post to this site only');
+    expect(refused?.hint).toContain('/api/');
+    ok(store, [insert('root-home', contactForm)]);
+    // Changing the address later goes through the same rule.
+    const later = errors(store, [
+      { op: 'props.set', id: 'form-1', props: { action: 'https://elsewhere.example/collect' } },
+    ])[0];
+    expect(later?.code).toBe('invalid_props');
+  });
 });
 
 describe('accordion items (details)', () => {
