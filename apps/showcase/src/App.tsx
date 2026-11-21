@@ -102,6 +102,7 @@ const SUGGESTIONS = [
   'Check the mobile layout',
   'Build a page for this event',
   'Add a speakers section',
+  'Add questions and answers',
   'Make the hero split',
   'Use a teal brand',
 ];

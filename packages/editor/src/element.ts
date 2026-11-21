@@ -35,6 +35,13 @@ import {
   type EditorTokens,
   isEditorToken,
 } from './theme.js';
+import {
+  buildSectionThumbs,
+  groupSections,
+  matchesQuery,
+  type SectionThumbs,
+  THUMB_WIDTH,
+} from './thumbnails.js';
 
 const ELEMENT_ICONS: Record<EditorElementName, IconName> = {
   box: 'box',
@@ -140,6 +147,10 @@ const VAR_FAMILY: Record<string, string> = {
   font: '--font-',
   shadow: '--shadow-',
 };
+
+/** Shortest and tallest a section preview gets in its card (px). */
+const THUMB_MIN = 36;
+const THUMB_MAX = 148;
 
 /** Below this width (px) of its own, the editor lays its panels over the canvas. */
 const NARROW_WIDTH = 900;
@@ -285,6 +296,13 @@ export class BowerbirdEditor extends LitElement {
   /** Tokens set from `ui.tokens` (see `applyTokens`). */
   private appliedTokens = new Set<string>();
   private tokenSheet: CSSStyleSheet | undefined;
+  /** What the Insert tab is filtered by. */
+  private insertQuery = '';
+  /** Section previews, kept while the site's tokens, themes, data and sections stay the same. */
+  private thumbs: { key: unknown[]; value: SectionThumbs } | undefined;
+  private thumbSheet: CSSStyleSheet | HTMLStyleElement | undefined;
+  private thumbCss = '';
+  private thumbFrame = 0;
   private lastLook: Pick<EditorUI, 'appearance' | 'density'> = {};
   private visibleRows: {
     id: string;
@@ -487,6 +505,79 @@ export class BowerbirdEditor extends LitElement {
    * Applies ops as the editor's person (one transaction, one undo step). Pass `merge` for edits
    * made on every key in your own form fields: a burst with the same key undoes as one step.
    */
+  protected override updated(): void {
+    this.layoutThumbs();
+  }
+
+  /** The previews for the sections offered, rebuilt only when what they show could have changed. */
+  private sectionThumbs(c: EditorController, sections: SectionDef[]): SectionThumbs {
+    const doc = c.doc;
+    const key: unknown[] = [
+      c.store.registry,
+      doc.tokens,
+      doc.themes,
+      doc.breakpoints,
+      doc.data,
+      sections.map((s) => s.name).join(' '),
+    ];
+    if (!this.thumbs || this.thumbs.key.some((k, i) => k !== key[i])) {
+      let value: SectionThumbs;
+      try {
+        value = buildSectionThumbs(c.store.registry, doc, sections, '.bb-thumbs');
+      } catch (error) {
+        // Previews are a nicety: a registry that can't draw them still gets its cards.
+        console.warn('[bowerbird] section previews failed:', error);
+        value = { css: '', html: new Map() };
+      }
+      this.thumbs = { key, value };
+    }
+    return this.thumbs.value;
+  }
+
+  /** Puts the previews' stylesheet into the shadow root (constructed, so no markup is parsed). */
+  private adoptThumbCss(css: string): void {
+    if (css === this.thumbCss) return;
+    this.thumbCss = css;
+    const root = this.renderRoot;
+    if (!this.thumbSheet) {
+      if (root instanceof ShadowRoot && 'adoptedStyleSheets' in root) {
+        this.thumbSheet = new CSSStyleSheet();
+        root.adoptedStyleSheets = [...root.adoptedStyleSheets, this.thumbSheet];
+      } else {
+        this.thumbSheet = this.ownerDocument.createElement('style');
+        root.append(this.thumbSheet);
+      }
+    }
+    if (this.thumbSheet instanceof CSSStyleSheet) this.thumbSheet.replaceSync(css);
+    else this.thumbSheet.textContent = css;
+  }
+
+  /**
+   * Scales each preview to its card: sections are laid out at a desktop width and shrunk, and a
+   * card is as tall as its section, up to a limit (taller ones are cut off with a fade).
+   */
+  private layoutThumbs(): void {
+    const thumbs = this.renderRoot.querySelectorAll<HTMLElement>('.thumb');
+    if (!thumbs.length) return;
+    const fit = () => {
+      for (const thumb of thumbs) {
+        const page = thumb.firstElementChild as HTMLElement | null;
+        const width = thumb.clientWidth;
+        if (!page || !width) continue;
+        const scale = width / THUMB_WIDTH;
+        page.style.width = `${THUMB_WIDTH}px`;
+        page.style.transform = `scale(${scale})`;
+        const height = Math.round(page.offsetHeight * scale);
+        thumb.style.height = `${Math.max(THUMB_MIN, Math.min(height, THUMB_MAX))}px`;
+        thumb.toggleAttribute('data-cropped', height > THUMB_MAX);
+      }
+    };
+    fit();
+    // Once more after images and fonts have settled.
+    cancelAnimationFrame(this.thumbFrame);
+    this.thumbFrame = requestAnimationFrame(fit);
+  }
+
   apply(ops: unknown[], label?: string, options?: { merge?: { key: string; within?: number } }) {
     return this.controller?.apply(ops, label, options);
   }
@@ -1239,14 +1330,29 @@ export class BowerbirdEditor extends LitElement {
 
   private renderInsert(c: EditorController): TemplateResult {
     const f = c.features;
+    const query = c.can('insert.search') ? this.insertQuery.trim() : '';
     const sections = c.symbolView
       ? []
       : c.store.registry.listSections().filter((s) => f.section(s.name));
     const symbols =
       c.symbolView || !f.on('insert.components') ? [] : Object.values(c.doc.symbols ?? {});
     const elements = this.offeredElements(c);
+    const found = {
+      sections: sections.filter((s) =>
+        matchesQuery(query, s.name, s.title, s.category, s.description, ...(s.tags ?? [])),
+      ),
+      symbols: symbols.filter((sym) => matchesQuery(query, sym.id, sym.name, sym.description)),
+      elements: elements.filter(([name, label]) => matchesQuery(query, name, label)),
+    };
     const target = c.selectedNode;
     const off = c.previewing;
+    // Previews are drawn for every section offered (not just the ones found), so typing in the
+    // search box doesn't rebuild them.
+    const thumbs =
+      c.can('insert.thumbnails') && sections.length ? this.sectionThumbs(c, sections) : undefined;
+    this.adoptThumbCss(thumbs?.css ?? '');
+    const nothing_found =
+      !!query && !found.sections.length && !found.symbols.length && !found.elements.length;
     return html`
       ${
         off
@@ -1254,13 +1360,32 @@ export class BowerbirdEditor extends LitElement {
           : nothing
       }
       ${
-        symbols.length
+        c.can('insert.search') && sections.length + symbols.length + elements.length > 8
+          ? html`<div class="search">
+            ${this.icon('search')}
+            <input
+              part="input"
+              type="search"
+              aria-label="Search sections and elements"
+              placeholder="Search"
+              .value=${live(this.insertQuery)}
+              @input=${(e: Event) => {
+                this.insertQuery = (e.target as HTMLInputElement).value;
+                this.tick++;
+              }}
+            />
+          </div>`
+          : nothing
+      }
+      ${nothing_found ? html`<p class="empty" role="status">Nothing matches “${query}”.</p>` : nothing}
+      ${
+        found.symbols.length
           ? html`<div class="section intro" part="panel-section">
             <h3 part="heading">Linked components</h3>
             <p class="muted hint">Edit one and every copy follows.</p>
           </div>
           <div class="cards">
-            ${symbols.map(
+            ${found.symbols.map(
               (
                 sym,
               ) => html`<button class="card linked" part="card" ?disabled=${off} @click=${() => c.insertSymbol(sym.id)}>
@@ -1272,12 +1397,12 @@ export class BowerbirdEditor extends LitElement {
           </div>`
           : nothing
       }
-      ${sections.length ? this.renderSectionList(c, sections, !!target) : nothing}
+      ${found.sections.length ? this.renderSectionList(c, found.sections, !!target, thumbs) : nothing}
       ${
-        elements.length
+        found.elements.length
           ? html`<div class="section intro" part="panel-section"><h3 part="heading">Elements</h3><p class="muted hint">Added inside the selected container.</p></div>
             <div class="elements">
-              ${elements.map(
+              ${found.elements.map(
                 ([name, label, input]) => html`<button
                   part="button"
                   ?disabled=${off}
@@ -1295,27 +1420,51 @@ export class BowerbirdEditor extends LitElement {
     `;
   }
 
-  private renderSectionList(c: EditorController, sections: SectionDef[], hasTarget: boolean) {
+  private renderSectionList(
+    c: EditorController,
+    sections: SectionDef[],
+    hasTarget: boolean,
+    thumbs: SectionThumbs | undefined,
+  ) {
+    const groups = groupSections(sections);
     return html`<div class="section intro" part="panel-section">
         <h3 part="heading">Sections</h3>
         <p class="muted hint">Click to add ${hasTarget ? 'after the selected section' : 'to the end of the page'}, or drag onto the page.</p>
       </div>
-      <div class="cards">${sections.map((s) => this.renderSectionCard(c, s))}</div>`;
+      ${groups.map(
+        ([label, list]) => html`
+          ${groups.length > 1 ? html`<h4 class="group" part="group">${label}</h4>` : nothing}
+          <div class="cards">${list.map((s) => this.renderSectionCard(c, s, thumbs?.html.get(s.name)))}</div>
+        `,
+      )}`;
   }
 
-  private renderSectionCard(c: EditorController, s: SectionDef): TemplateResult {
+  private renderSectionCard(
+    c: EditorController,
+    s: SectionDef,
+    preview: string | undefined,
+  ): TemplateResult {
     const variants = Object.entries(s.variants ?? {});
     return html`<button
-      class="card"
+      class=${preview ? 'card has-thumb' : 'card'}
       part="card"
       draggable="true"
+      title=${preview ? s.description : nothing}
       ?disabled=${c.previewing}
       @click=${() => c.insertSection(s.name)}
       @dragstart=${(e: DragEvent) => startDrag(e, { kind: 'section', name: s.name })}
       @dragend=${() => endDrag()}
     >
+      ${
+        preview
+          ? // A picture of the section, not content: nothing in it can be focused or clicked.
+            html`<span class="thumb" part="thumbnail" aria-hidden="true" inert
+              ><span class="thumb-page bb-thumbs" data-theme=${c.theme ?? nothing}>${unsafeHTML(preview)}</span></span
+            >`
+          : nothing
+      }
       <strong>${s.title}</strong>
-      <span class="desc" title=${s.description}>${s.description}</span>
+      ${preview ? nothing : html`<span class="desc" title=${s.description}>${s.description}</span>`}
       <span class="add" aria-hidden="true">${this.icon('plus')}</span>
       ${
         variants.length

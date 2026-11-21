@@ -102,24 +102,77 @@ const BUILD: Step[] = [
 ];
 
 const SPEAKERS: Step[] = [
+  { say: 'Looking for a section that fits a speaker list.' },
+  { tool: 'list_sections', input: { query: 'speakers' } },
+  { say: 'The people section fits. Adding it with the speakers filled in.' },
   {
-    say: 'No prebuilt section fits a speaker list, so I will import a small HTML layout using design tokens.',
-  },
-  {
-    tool: 'import_html',
+    tool: 'apply',
     input: {
       label: 'Add speakers',
-      html: `<section style="padding-block: var(--space-3xl); padding-inline: var(--space-lg); display: grid; gap: var(--space-lg)">
-        <h2>Speakers</h2>
-        <ul style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-md)">
-          <li style="padding: var(--space-lg); border-radius: var(--radius-lg); background: var(--color-surface-muted)"><h3>Ana Ruiz</h3><p>Design systems lead</p></li>
-          <li style="padding: var(--space-lg); border-radius: var(--radius-lg); background: var(--color-surface-muted)"><h3>Kofi Mensah</h3><p>Frontend architect</p></li>
-          <li style="padding: var(--space-lg); border-radius: var(--radius-lg); background: var(--color-surface-muted)"><h3>Mei Tanaka</h3><p>Accessibility researcher</p></li>
-        </ul>
-      </section>`,
+      ops: [
+        {
+          op: 'section.insert',
+          section: 'team',
+          content: {
+            heading: { text: 'Speakers' },
+            intro: { text: 'People who build and run design systems every day.' },
+            'person-1/name': { text: 'Ana Ruiz' },
+            'person-1/role': { text: 'Design systems lead' },
+            'person-1/bio': { text: 'On keeping one system across forty products.' },
+            'person-1/photo': { alt: 'Portrait of Ana Ruiz' },
+            'person-2/name': { text: 'Kofi Mensah' },
+            'person-2/role': { text: 'Frontend architect' },
+            'person-2/bio': { text: 'On tokens that survive a rebrand.' },
+            'person-2/photo': { alt: 'Portrait of Kofi Mensah' },
+            'person-3/name': { text: 'Mei Tanaka' },
+            'person-3/role': { text: 'Accessibility researcher' },
+            'person-3/bio': { text: 'On testing components with the people who use them.' },
+            'person-3/photo': { alt: 'Portrait of Mei Tanaka' },
+            'person-4/name': { text: 'Luca Moretti' },
+            'person-4/role': { text: 'Product designer' },
+            'person-4/bio': { text: 'On saying no to the fortieth button variant.' },
+            'person-4/photo': { alt: 'Portrait of Luca Moretti' },
+          },
+        },
+      ],
     },
   },
   { say: 'Added a speakers section.' },
+];
+
+const FAQ: Step[] = [
+  { say: 'Adding questions and answers as an accordion, with the first one open.' },
+  {
+    tool: 'apply',
+    input: {
+      label: 'Add questions and answers',
+      ops: [
+        {
+          op: 'section.insert',
+          section: 'faq',
+          content: {
+            heading: { text: 'Good to know' },
+            intro: { text: 'What people ask before they book.' },
+            'item-1/question': { text: 'Is the venue accessible?' },
+            'item-1/answer': {
+              text: 'Yes. Every room is step-free, and talks are captioned live.',
+            },
+            'item-2/question': { text: 'Can I get a refund?' },
+            'item-2/answer': {
+              text: 'Up to 30 days before the event; after that you can pass your ticket on.',
+            },
+            'item-3/question': { text: 'Will talks be recorded?' },
+            'item-3/answer': { text: 'Yes. Recordings go to every ticket holder two weeks later.' },
+            'item-4/question': { text: 'Is lunch included?' },
+            'item-4/answer': {
+              text: 'Lunch, coffee and the evening reception are part of every ticket.',
+            },
+          },
+        },
+      ],
+    },
+  },
+  { say: 'Added the questions. Open the page in Preview to fold and unfold them.' },
 ];
 
 const REBRAND: Step[] = [
@@ -191,6 +244,7 @@ function scriptFor(prompt: string, store: Store): Step[] {
     (page) => store.view.children(page.rootId).length === 0,
   );
   if (/speaker/.test(p)) return SPEAKERS;
+  if (/faq|question/.test(p)) return FAQ;
   if (/mobile|phone|layout check|check the/.test(p)) return MOBILE;
   if (/teal|brand|colou?r/.test(p)) return REBRAND;
   if (/split|layout|image/.test(p)) return layoutSteps(store);

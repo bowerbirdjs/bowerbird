@@ -41,6 +41,9 @@ export const EDITOR_FEATURES = {
   'canvas.peers': 'Other people’s and agents’ selections on the page.',
   insert: 'Adding content: the Insert tab and dropping new things onto the page.',
   'insert.sections': 'Section templates.',
+  'insert.thumbnails':
+    'Live previews on section templates, drawn with the site’s own colours, fonts and data.',
+  'insert.search': 'Search box over sections, elements and linked components.',
   'insert.elements': 'Single elements (text, image, button…).',
   'insert.components': 'Linked components.',
   move: 'Moving and reordering: drag and drop, ↑/↓ buttons, Alt+arrow keys.',

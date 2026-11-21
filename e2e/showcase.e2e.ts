@@ -35,7 +35,7 @@ describe.skipIf(!apps)('showcase', () => {
     await page.keyboard.press('Enter');
     await expect.poll(() => heading.textContent()).toBe('Edited by Sam');
 
-    // The agent imports a speakers section from HTML.
+    // The agent adds a speakers section (the people section, filled in).
     await page.getByRole('button', { name: 'Add a speakers section' }).click();
     await page
       .locator('.line.agent', { hasText: 'Added a speakers section' })

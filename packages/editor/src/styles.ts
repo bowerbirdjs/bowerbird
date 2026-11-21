@@ -215,6 +215,26 @@ export const editorStyles = [
   .card.linked strong { color: var(--bbe-linked); }
   .card.linked:hover { border-color: var(--bbe-linked); box-shadow: var(--bbe-shadow-card), 0 0 0 3px color-mix(in srgb, var(--bbe-linked) 14%, transparent); }
   .chips { display: flex; flex-wrap: wrap; gap: var(--_s1); margin-top: var(--_s1); }
+  .card.has-thumb { padding: 0 0 var(--_s3); overflow: hidden; }
+  .card.has-thumb > :not(.thumb, .add) { margin-inline: var(--_s3); }
+  .card.has-thumb > strong { margin-top: var(--_s2); }
+  .card.has-thumb .add { top: auto; bottom: var(--_s3); }
+  .thumb {
+    position: relative; display: block; height: 96px; overflow: hidden; pointer-events: none;
+    border-bottom: 1px solid var(--bbe-border); background: var(--bbe-canvas-bg); color-scheme: normal;
+  }
+  .thumb[data-cropped]::after {
+    content: ""; position: absolute; inset: auto 0 0; height: 28px;
+    background: linear-gradient(to bottom, transparent, color-mix(in srgb, var(--bbe-surface) 85%, transparent));
+  }
+  .thumb-page { position: absolute; top: 0; left: 0; display: block; transform-origin: 0 0; }
+  .group {
+    margin: var(--_s2) var(--_s4) var(--_s2); font-size: var(--_fs-xs); font-weight: 600; letter-spacing: .04em;
+    text-transform: uppercase; color: var(--bbe-muted);
+  }
+  .search { position: relative; margin: var(--_s3) var(--_s3) 0; }
+  .search .bb-icon { position: absolute; top: 50%; left: var(--_s2); transform: translateY(-50%); color: var(--bbe-muted); pointer-events: none; }
+  .search input { width: 100%; padding-left: calc(var(--_s2) * 2 + var(--_icon)); }
   .badge {
     display: inline-flex; align-items: center; gap: 4px; height: 18px; padding: 0 7px; border-radius: 999px; white-space: nowrap;
     background: var(--bbe-hover); color: var(--bbe-muted); font-size: var(--_fs-xs); font-weight: 500; line-height: 1;
