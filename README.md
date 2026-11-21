@@ -4,7 +4,7 @@
 
 Bowerbird is a page engine you embed in your own product. Pages are built from large, prebuilt sections (hero, pricing, footer …) that stay fully editable inside. People edit on a visual canvas; AI agents edit through a typed API and MCP. Both go through the same validated, attributed and undoable operations. Styles use CSS custom properties and design tokens, so the output is plain HTML and CSS and stays on-brand.
 
-> **Status: early (Phase 3 of the plan done).** The engine, starter sections, HTML/CSS renderer, agent tools, MCP server and the visual editor (`<bowerbird-editor>`, with React and Vue wrappers) work, with linked components, reviewable agent proposals, protection of people's edits, rendered-layout checks for agents, real-time sync with presence, rich text, translations, static-site and React export, and interop (catalog export, Puck import, MCP Apps). Nothing is published to npm yet. See [`docs/plan.md`](docs/plan.md) and [`docs/progress.md`](docs/progress.md).
+> **Status: early (Phase 3 of the plan done).** The engine, a library of 21 starter sections (with forms, accordions and icons), HTML/CSS renderer, agent tools, MCP server and the visual editor (`<bowerbird-editor>`, with React and Vue wrappers) work, with linked components, reviewable agent proposals, protection of people's edits, rendered-layout checks for agents, real-time sync with presence, rich text, translations, static-site and React export, and interop (catalog export, Puck import, MCP Apps). [PageBench](bench) measures how well an agent edits pages with it. Nothing is published to npm yet. See [`docs/plan.md`](docs/plan.md) and [`docs/progress.md`](docs/progress.md).
 
 ## See it
 
@@ -128,7 +128,7 @@ editor.ui = {
   preset: 'layout', // 'full' | 'layout' | 'content' | 'auto' (default: follows the policy)
   features: { 'toolbar.zoom': false, 'structure.history': false, delete: false },
   sections: ['hero', 'features', 'cta'], // section templates offered in Insert
-  elements: ['text', 'image', 'button'], // single elements offered in Insert
+  elements: ['text', 'image', 'button'], // single elements offered in Insert (`EDITOR_ELEMENTS`)
   styleProperties: ['color', 'background', 'padding'], // what the style editor offers
 };
 ```
@@ -181,7 +181,7 @@ editor.ui = {
 | Density | `space` (spacing unit), `control-height` (buttons, inputs, layer rows)                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | Layout  | `left` (structure panel width), `right` (inspector width)                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 
-`EDITOR_TOKENS` in `@bowerbirdjs/editor` lists each token with its defaults and what it is for. For changes tokens can't make, style parts with `::part()`: `toolbar`, `title` (page title), `structure`, `inspector`, `tabs`, `tab`, `panel-section`, `heading` (panel headings), `layer`, `card`, `button` (variants also `primary`, `danger`), `field`, `label`, `input`, `select`, `toast`. For example, a brand's own corner on the primary button and small-caps headings:
+`EDITOR_TOKENS` in `@bowerbirdjs/editor` lists each token with its defaults and what it is for. For changes tokens can't make, style parts with `::part()`: `toolbar`, `title` (page title), `structure`, `inspector`, `tabs`, `tab`, `panel-section`, `heading` (panel headings), `layer`, `group` (a category heading in Insert), `card`, `thumbnail` (a section's preview on its card), `button` (variants also `primary`, `danger`), `field`, `label`, `input`, `select`, `toast`. For example, a brand's own corner on the primary button and small-caps headings:
 
 ```css
 bowerbird-editor::part(primary) {
@@ -222,6 +222,30 @@ store.apply({ ops: [{ op: 'data.set', key: 'schedule', path: [0, 'time'], value:
 
 `data.set` is a content-level op like any other: validated against the group's schema, attributed, undoable, synced, and open to agents (`get_data`). Components render data as generated elements (escaped, URL-sanitized, colours only through validated custom properties). An element can say which data it shows (`edit: { path: 'schedule.0.time', kind: 'time', value }`) and which list item it is (`item: { path: 'schedule.0' }`): people then edit it right on the canvas (double-click: in place for plain text, a small form for times, dates, links, colours and choices) and move, copy or remove list items there. An element with `add: { path: 'schedule', value: { time: '12:00', title: 'New' }, edit: 'title' }` is a button that appends the item (starting the list if there is none) and opens the new title for typing; with a value's path (`'travel.text'`) it fills in a missing value. Use it for empty states, so the first item is added on the page too. The marks exist only in the editor; a click also fires `bb-data-click`, so a host can show where the value lives. The canvas also offers fields for what isn't text on the selected element (a photo, its alt text, a link's address).
 
+## Sections, forms and icons
+
+`@bowerbirdjs/blocks` comes with 21 sections, each with variants, style knobs (`--hero-bg` …) and example content of its own:
+
+| Category                  | Sections                                                                                             |
+| ------------------------- | ---------------------------------------------------------------------------------------------------- |
+| Navigation                | `banner` (announcement bar), `nav`, `footer`                                                         |
+| Headers                   | `hero`, `page-header`                                                                                |
+| Social proof              | `logos`, `testimonials`                                                                              |
+| Content                   | `features`, `split` (text beside a picture), `steps`, `stats`, `cards`, `schedule`, `faq`, `content` |
+| Media and people          | `gallery`, `team`                                                                                    |
+| Pricing                   | `pricing`                                                                                            |
+| Forms and calls to action | `newsletter`, `contact`, `cta`                                                                       |
+
+In the editor's Insert tab every section shows a live preview drawn with the site's own tokens, themes and data, grouped by category, with a search box. Agents get the same list from `list_sections`.
+
+Sections are built from ten primitives: `box`, `text`, `rich-text`, `link`, `button`, `image`, and
+
+- **`icon`**: a drawing from the registry's icon set, by name (`{ type: 'icon', props: { name: 'calendar' } }`). 80 icons are built in (`ICONS`); add your own with `createDefaultRegistry({ icons: { 'my-logo': '<svg …>' } })` or `registry.registerIcons(…)`. Icons are data, not markup: only plain shapes (`path`, `circle`, `rect`, `line` …) painted in the text colour are taken, so no script, link or style can ride in on one. Nothing else on a page can be SVG.
+- **`details`**: an accordion item (`<details>` with a `summary` text first). Give several the same `group` and opening one closes the others. No script is involved.
+- **`form`** and **`field`**: a form that posts to your endpoint (`action` is URL-sanitised like every link) and its fields. A `field` is one node holding the label and the control (`type`: `text`, `email`, `tel`, `url`, `number`, `date`, `time`, `textarea`, `select`, `radio`, `checkbox`, `hidden`), so a control can't lose its label. Lint reports forms without a submit button, duplicate field names and fields outside a form. Password and file fields are left out on purpose. To pin where forms may post, register your own `form` component with a stricter `action` schema in place of the built-in one.
+
+`import_html` turns existing markup with forms and `<details>` into these nodes, and the React export writes them as uncontrolled inputs.
+
 ## Use the engine in code
 
 ```ts
@@ -256,11 +280,11 @@ const html = renderDocument(store.doc, store.registry, 'home');
 
 | Package                                  | What it does                                                                                                                                                |
 | ---------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| [`@bowerbirdjs/core`](packages/core)     | Document model, operations, validation, transactions, per-actor undo/redo, policy (freedom levels, locks), outline                                          |
+| [`@bowerbirdjs/core`](packages/core)     | Document model, primitives, operations, validation, transactions, per-actor undo/redo, policy (freedom levels, locks), lint, outline                        |
 | [`@bowerbirdjs/css`](packages/css)       | Tokens → CSS variables; section and node styles → CSS with container-query breakpoints (published or editor mode)                                           |
 | [`@bowerbirdjs/html`](packages/html)     | Pages → semantic HTML (escaped, URL-sanitised)                                                                                                              |
-| [`@bowerbirdjs/blocks`](packages/blocks) | Default design tokens, dark theme and starter sections                                                                                                      |
-| [`@bowerbirdjs/import`](packages/import) | HTML → nodes (sanitised; keeps token-based inline styles)                                                                                                   |
+| [`@bowerbirdjs/blocks`](packages/blocks) | Default design tokens, dark theme, 21 starter sections and an icon set                                                                                      |
+| [`@bowerbirdjs/import`](packages/import) | HTML → nodes (sanitised; keeps token-based inline styles; forms and accordions included)                                                                    |
 | [`@bowerbirdjs/agent`](packages/agent)   | Agent tools (`get_context`, `get_outline`, `get_nodes`, `list_sections`, `list_tokens`, `apply`, `import_html`, `lint`, `undo`, `get_layout`, `screenshot`) |
 | [`@bowerbirdjs/layout`](packages/layout) | Rendered-layout snapshots and layout lint (overflow, clipping, overlap, contrast, tap targets), in the browser or headless                                  |
 | [`@bowerbirdjs/mcp`](packages/mcp)       | MCP server (stdio), live preview server, CLI with file persistence                                                                                          |
@@ -269,7 +293,7 @@ const html = renderDocument(store.doc, store.registry, 'home');
 | [`@bowerbirdjs/vue`](packages/vue)       | Vue wrapper                                                                                                                                                 |
 | [`@bowerbirdjs/sync`](packages/sync)     | Server-authoritative real-time sync with presence for people and agents (WebSocket, HTTP/SSE or in-memory transports)                                       |
 | [`@bowerbirdjs/export`](packages/export) | Static site and React export, plus a JSON Schema catalog of sections and components for other generative-UI tools                                           |
-| [`bench`](bench)                         | PageBench: page-editing tasks for agents, with a Claude runner and a scripted offline mode                                                                  |
+| [`bench`](bench)                         | PageBench: 35 page-editing tasks for agents in six categories, with a Claude runner and a scripted offline mode                                             |
 | [`apps/showcase`](apps/showcase)         | Demo product embedding the editor with an assistant panel                                                                                                   |
 
 ## Core ideas
@@ -292,7 +316,10 @@ pnpm test       # vitest (runs against sources)
 pnpm test:e2e   # builds the examples and showcase, drives them in Chromium (needs Playwright)
 pnpm lint       # biome
 pnpm format     # biome --write
+pnpm bench -- --scripted   # PageBench without a model: every task's reference solution must pass
 ```
+
+CI (`.github/workflows/ci.yml`) runs all of these on every push, the browser tests in Chromium, and the build and unit tests on Windows.
 
 Research and design notes: [`docs/research/`](docs/research) and [`docs/plan.md`](docs/plan.md).
 

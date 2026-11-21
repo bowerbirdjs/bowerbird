@@ -264,6 +264,8 @@ editor.registry.component({
   - HTML export.
 - **`examples/`:** minimal embeds in plain HTML, Vue and Svelte, which prove decision 1, plus one deliberately "hostile CSS" host page to test isolation.
 
+> **Block library as built** (after Phase 3, see [`progress.md`](progress.md)): the starter library has 21 sections and ten primitives (forms, accordion items and icons added); the section catalog shows live previews rendered from the site's own tokens instead of stored thumbnail images, so they never go stale and need no asset pipeline. PageBench v0 has 35 tasks and adds a sixth category the first plan didn't have: editing while a person changes the same page.
+
 > **Phase 2 as built:** see [`progress.md`](progress.md). Linked components are stored as linked copies (every instance node points at its definition node) rather than as references expanded at render time, so ids, selection, CSS and every existing op keep working on instances.
 
 > **Phase 3 as built:** see [`progress.md`](progress.md). Sync is server-authoritative with optimistic clients instead of Yjs: every change still goes through the server's store (validation, policy, history, attribution), which a CRDT would bypass. Rich text is a sanitized inline-HTML subset instead of Tiptap/ProseMirror, so it works in the same-document canvas without an editor framework.

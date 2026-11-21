@@ -41,7 +41,7 @@ Engine features this POC added to Bowerbird: site data (`SiteDoc.data`, `data.se
 
 - **Joy's wire format.** The site is a Bowerbird document, not Joy's `SiteDraft`; blocks use the brief's type ids and prop names, but no import/export adapter or compatibility suite exists yet. The block schemas were written from the brief's tables, not copied from joy-phone (which wasn't available here).
 - Joy's seven designs, ornaments and textures, font pairs as a knob, per-design CSS beyond tokens.
-- Hidden sections and "not in the menu" (`hidden`, `menuHidden`), the section toolbar for layout and background on the page, layout sketch cards.
+- Hidden sections and "not in the menu" (`hidden`, `menuHidden`), the section toolbar for layout and background on the page, layout sketch cards (the Insert tab shows a live preview of each block, drawn with the event's design and facts; a block's layouts don't have cards of their own yet).
 - Revisions and conflicts, version history, the pre-publish check, autosave to a server, guided setup, phone editing, the AI assistant surface and proposal mode (Bowerbird has the engine side of the last two: sync and changesets).
 - German editor chrome: the planner and editor UI are in English; site content follows the event's language.
 - Brand fonts: the theme names Manrope and Bricolage Grotesque, which Joy Phone's app loads; this POC doesn't bundle them (they're OFL-licensed, outside the repo's MIT/BSD/Apache rule), so system fonts stand in. The planner shell has no dark scheme; the editor theme has one (`appearance="dark"` or `"auto"`).
