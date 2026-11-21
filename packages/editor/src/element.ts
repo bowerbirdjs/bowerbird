@@ -306,6 +306,8 @@ export class BowerbirdEditor extends LitElement {
   private thumbCss = '';
   private thumbFrame = 0;
   private thumbTimer: ReturnType<typeof setTimeout> | undefined;
+  private thumbPending: unknown[] | undefined;
+  private thumbResize: ResizeObserver | undefined;
   private lastLook: Pick<EditorUI, 'appearance' | 'density'> = {};
   private visibleRows: {
     id: string;
@@ -380,6 +382,8 @@ export class BowerbirdEditor extends LitElement {
   destroy(): void {
     clearTimeout(this.thumbTimer);
     cancelAnimationFrame(this.thumbFrame);
+    this.thumbResize?.disconnect();
+    this.thumbResize = undefined;
     this.canvas?.destroy();
     this.controller?.destroy();
     this.canvasHost?.remove();
@@ -503,13 +507,6 @@ export class BowerbirdEditor extends LitElement {
     this.toggleAttribute('no-inspector', !c.can('inspector'));
   }
 
-  // -------------------------------------------------------------------------------------------
-  // Public API
-
-  /**
-   * Applies ops as the editor's person (one transaction, one undo step). Pass `merge` for edits
-   * made on every key in your own form fields: a burst with the same key undoes as one step.
-   */
   protected override updated(): void {
     this.layoutThumbs();
   }
@@ -545,12 +542,22 @@ export class BowerbirdEditor extends LitElement {
       clearTimeout(this.thumbTimer);
       this.thumbs = { key, value: build() };
     } else if (current.key.some((k, i) => k !== key[i])) {
+      // Wait from the last change to the site, not from the last render: other edits (typing on
+      // the page, an agent at work) re-render without changing what previews show.
+      if (!this.thumbPending || this.thumbPending.some((k, i) => k !== key[i])) {
+        this.thumbPending = key;
+        clearTimeout(this.thumbTimer);
+        this.thumbTimer = setTimeout(() => {
+          this.thumbPending = undefined;
+          if (!this.isConnected || !this.controller) return;
+          this.thumbs = undefined;
+          this.tick++;
+        }, THUMB_DELAY);
+      }
+    } else if (this.thumbPending) {
+      // Changed back before the redraw: nothing to do.
       clearTimeout(this.thumbTimer);
-      this.thumbTimer = setTimeout(() => {
-        if (!this.isConnected || !this.controller) return;
-        this.thumbs = undefined;
-        this.tick++;
-      }, THUMB_DELAY);
+      this.thumbPending = undefined;
     }
     return this.thumbs!.value;
   }
@@ -580,6 +587,11 @@ export class BowerbirdEditor extends LitElement {
   private layoutThumbs(): void {
     const thumbs = this.renderRoot.querySelectorAll<HTMLElement>('.thumb');
     if (!thumbs.length) return;
+    // Cards change width with the panel (a window resize) without any render of ours.
+    if (!this.thumbResize && typeof ResizeObserver === 'function') {
+      this.thumbResize = new ResizeObserver(() => this.layoutThumbs());
+      this.thumbResize.observe(this);
+    }
     const fit = () => {
       for (const thumb of thumbs) {
         const page = thumb.firstElementChild as HTMLElement | null;
@@ -599,6 +611,13 @@ export class BowerbirdEditor extends LitElement {
     this.thumbFrame = requestAnimationFrame(fit);
   }
 
+  // -------------------------------------------------------------------------------------------
+  // Public API
+
+  /**
+   * Applies ops as the editor's person (one transaction, one undo step). Pass `merge` for edits
+   * made on every key in your own form fields: a burst with the same key undoes as one step.
+   */
   apply(ops: unknown[], label?: string, options?: { merge?: { key: string; within?: number } }) {
     return this.controller?.apply(ops, label, options);
   }
@@ -1351,13 +1370,16 @@ export class BowerbirdEditor extends LitElement {
 
   private renderInsert(c: EditorController): TemplateResult {
     const f = c.features;
-    const query = c.can('insert.search') ? this.insertQuery.trim() : '';
     const sections = c.symbolView
       ? []
       : c.store.registry.listSections().filter((s) => f.section(s.name));
     const symbols =
       c.symbolView || !f.on('insert.components') ? [] : Object.values(c.doc.symbols ?? {});
     const elements = this.offeredElements(c);
+    // Decided once: without the box there is no way to clear a query, so none applies.
+    const searchable =
+      c.can('insert.search') && sections.length + symbols.length + elements.length > 8;
+    const query = searchable ? this.insertQuery.trim() : '';
     const found = {
       sections: sections.filter((s) =>
         matchesQuery(query, s.name, s.title, s.category, s.description, ...(s.tags ?? [])),
@@ -1381,7 +1403,7 @@ export class BowerbirdEditor extends LitElement {
           : nothing
       }
       ${
-        c.can('insert.search') && sections.length + symbols.length + elements.length > 8
+        searchable
           ? html`<div class="search">
             ${this.icon('search')}
             <input
@@ -1868,11 +1890,10 @@ export class BowerbirdEditor extends LitElement {
       }
       const def = c.store.registry.component(node.type);
       const patch = { [field.key]: value };
-      c.setProps(
-        node.id,
-        def ? withCompanions(def, node.props, patch) : patch,
-        `Edit ${field.label.toLowerCase()}`,
-      );
+      const full = def ? withCompanions(def, node.props, patch) : patch;
+      // What a change brings along (a select's first choices) belongs to every language.
+      const companions = Object.keys(full).filter((key) => key !== field.key);
+      c.setProps(node.id, full, `Edit ${field.label.toLowerCase()}`, companions);
     };
     let control: TemplateResult;
     if (field.kind === 'select') {

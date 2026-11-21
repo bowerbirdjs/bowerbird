@@ -5,17 +5,40 @@
   "prompt": "On mobile, stack the hero's two buttons on top of each other (the row that holds them becomes a column). From the md breakpoint up they sit side by side as now.",
   "checks": [
     {
-      "type": "styleEquals",
-      "id": "hero-1/actions",
-      "prop": "flex-direction",
-      "value": "column"
+      "type": "anyOf",
+      "checks": [
+        {
+          "type": "styleEquals",
+          "id": "hero-1/actions",
+          "prop": "flex-direction",
+          "value": "column"
+        },
+        {
+          "type": "styleEquals",
+          "id": "hero-1/actions",
+          "prop": "flex-flow",
+          "value": ["column", "column nowrap", "column wrap"]
+        }
+      ]
     },
     {
-      "type": "styleEquals",
-      "id": "hero-1/actions",
-      "prop": "flex-direction",
-      "bp": "md",
-      "value": "row"
+      "type": "anyOf",
+      "checks": [
+        {
+          "type": "styleEquals",
+          "id": "hero-1/actions",
+          "prop": "flex-direction",
+          "bp": "md",
+          "value": ["row", "initial", "unset", "revert"]
+        },
+        {
+          "type": "styleEquals",
+          "id": "hero-1/actions",
+          "prop": "flex-flow",
+          "bp": "md",
+          "value": ["row", "row wrap", "row nowrap"]
+        }
+      ]
     },
     {
       "type": "unchangedExcept",

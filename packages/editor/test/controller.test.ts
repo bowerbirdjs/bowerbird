@@ -365,3 +365,38 @@ describe('languages after a reload', () => {
     expect(controller.locale).toBe('de');
   });
 });
+
+describe('changing a field kind while viewing a translation', () => {
+  test('what the change brings along is written for every language', () => {
+    const { store, controller: c } = setup();
+    store.apply({
+      actor: { kind: 'system', id: 'test' },
+      ops: [
+        {
+          op: 'node.insert',
+          parent: 'root-home',
+          node: {
+            type: 'form',
+            props: { action: '/x' },
+            children: [{ type: 'field', props: { name: 'size', label: 'Size' } }],
+          },
+        },
+        { op: 'locale.set', add: ['de'] },
+      ],
+    });
+    c.setLocale('de');
+    const def = store.registry.component('field')!;
+    const toSelect = withCompanions(def, store.doc.nodes['field-1']!.props, { type: 'select' });
+    expect(c.setProps('field-1', toSelect, 'Edit kind', ['options']).ok).toBe(true);
+    expect(store.doc.nodes['field-1']!.props).toMatchObject({
+      type: 'select',
+      options: ['Option 1', 'Option 2'],
+    });
+    const back = withCompanions(def, store.doc.nodes['field-1']!.props, { type: 'email' });
+    expect(c.setProps('field-1', back, 'Edit kind', Object.keys(back)).ok).toBe(true);
+    expect(store.doc.nodes['field-1']!.props.options).toBeUndefined();
+    // A translated label still goes to the language being edited.
+    c.setProps('field-1', { label: 'Größe' });
+    expect(store.doc.nodes['field-1']!.l10n?.de).toEqual({ label: 'Größe' });
+  });
+});

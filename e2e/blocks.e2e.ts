@@ -22,6 +22,58 @@ const FORM = {
 describe.skipIf(!apps)('forms, accordion items and icons in the editor', () => {
   const open = useBrowser();
 
+  test('review fixes: label clicks while editing, Tab in preview, fields kept out of host forms', async () => {
+    const { page, editor, errors } = await open(apps?.vanilla ?? '');
+    await apply(page, [
+      { op: 'section.insert', section: 'hero' },
+      { op: 'node.insert', parent: 'hero-1/content', node: FORM },
+      {
+        op: 'node.insert',
+        parent: 'hero-1/content',
+        node: { type: 'field', props: { name: 'stray', label: 'Stray' } },
+      },
+    ]);
+    const label = page.locator('[data-bb-node="hero-1/field-1"] .bb-field__label');
+    await label.waitFor();
+    // The page's form is a real form element, and a field outside it belongs to no form at all
+    // (so never to a form the host has around the editor).
+    const owners = await page.evaluate(() => {
+      const el = (id: string) => document.querySelector(`[data-bb-node="${id}"]`);
+      const input = (id: string) =>
+        document.querySelector<HTMLInputElement>(`[data-bb-node="${id}"] input`);
+      return {
+        form: el('hero-1/form-1')?.tagName,
+        inside: input('hero-1/field-1')?.form?.tagName,
+        stray: input('hero-1/field-2')?.form ?? null,
+      };
+    });
+    expect(owners).toEqual({ form: 'FORM', inside: 'FORM', stray: null });
+
+    // Placing the caret with a click doesn't end the edit of a label.
+    await label.dblclick();
+    await page.keyboard.press('End');
+    await page.keyboard.type(' address');
+    await label.click();
+    await page.keyboard.press('End');
+    await page.keyboard.type(' please');
+    await page.keyboard.press('Enter');
+    await expect
+      .poll(async () => (await props(page, 'hero-1/field-1'))?.label)
+      .toBe('Email address please');
+
+    // In preview, Tab moves from one field to the next as on the published page.
+    await page.keyboard.press('Escape');
+    await editor.getByRole('button', { name: 'Preview' }).click();
+    await page.locator('[data-bb-node="hero-1/field-1"] input').click();
+    await page.keyboard.press('Tab');
+    expect(
+      await page.evaluate(() =>
+        document.activeElement?.closest('[data-bb-node]')?.getAttribute('data-bb-node'),
+      ),
+    ).toBe('hero-1/field-2');
+    expect(errors).toEqual([]);
+  });
+
   test('form fields are content while editing, and work in preview without sending anything', async () => {
     const { page, editor, errors } = await open(apps?.vanilla ?? '');
     await apply(page, [

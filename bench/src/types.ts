@@ -28,7 +28,8 @@ export type Check =
   /** A page's top-level nodes in order: section names, or node types for other nodes. */
   | { type: 'pageChildren'; page: string; kinds: string[] }
   | { type: 'pageExists'; path: string; title?: string; description?: string }
-  | { type: 'variant'; id: string; variant: Record<string, string> }
+  /** A section root's variant; the root by id, or the first node a query picks. */
+  | { type: 'variant'; id?: string; query?: NodeQuery; variant: Record<string, string> }
   | { type: 'textIncludes'; id: string; anyOf: string[] }
   /** A text prop matches a regular expression (`prop` defaults to `text`). */
   | { type: 'textMatches'; id: string; pattern: string; flags?: string; prop?: string }
@@ -82,7 +83,15 @@ export type Check =
   /** Nodes that are instances of one symbol (optionally by name): the nodes matching each query. */
   | { type: 'linked'; queries: NodeQuery[]; symbolName?: string }
   /** Open proposals: how many, and (optionally) one whose ops include `op` on `id`. */
-  | { type: 'proposals'; count?: Count; op?: string; id?: string; section?: string }
+  | {
+      type: 'proposals';
+      count?: Count;
+      op?: string;
+      id?: string;
+      section?: string;
+      /** Checks that must pass on the page as it would be once a proposal is accepted. */
+      whenAccepted?: Check[];
+    }
   /** Passes if any of the alternatives passes. */
   | { type: 'anyOf'; checks: Check[] };
 

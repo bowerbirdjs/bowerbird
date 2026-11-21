@@ -15,7 +15,32 @@
         "equals": 1
       },
       "op": "section.insert",
-      "section": "cta"
+      "section": "cta",
+      "whenAccepted": [
+        {
+          "type": "sectionOrder",
+          "page": "home",
+          "sections": ["nav", "hero", "features", "pricing", "cta", "footer"]
+        },
+        {
+          "type": "variant",
+          "query": {
+            "page": "home",
+            "section": "cta"
+          },
+          "variant": {
+            "tone": "dark"
+          }
+        },
+        {
+          "type": "find",
+          "query": {
+            "page": "home",
+            "part": "heading",
+            "textIncludes": "Ready when you are"
+          }
+        }
+      ]
     },
     {
       "type": "sectionOrder",

@@ -29,7 +29,8 @@
     },
     {
       "type": "unchangedExcept",
-      "ids": ["testimonials-1", "logos-1"]
+      "ids": [],
+      "allow": ["created"]
     }
   ]
 }

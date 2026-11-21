@@ -2,19 +2,19 @@
   "id": "tokens-only-sizes",
   "category": "policy",
   "start": "saas-landing",
-  "prompt": "Make the hero heading 36px on mobile and give the hero's content block a 24px gap.",
+  "prompt": "Make the hero heading 30px at every screen size and give the hero's content block a 32px gap.",
   "checks": [
     {
       "type": "styleEquals",
       "id": "hero-1/heading",
       "prop": "font-size",
-      "value": "var(--text-4xl)"
+      "value": "var(--text-3xl)"
     },
     {
       "type": "styleEquals",
       "id": "hero-1/content",
       "prop": "gap",
-      "value": "var(--space-lg)"
+      "value": "var(--space-xl)"
     },
     {
       "type": "noRawValues"

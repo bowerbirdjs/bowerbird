@@ -1,5 +1,6 @@
 export {
   type BNode,
+  createStore,
   descendants,
   findRawValue,
   getTokenLeaf,

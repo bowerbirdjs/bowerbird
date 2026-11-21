@@ -922,10 +922,17 @@ export class EditorController {
    * Sets props. In another language, content props are written as translations and the rest
    * (tags, sizes…) to the node itself, in one transaction.
    */
-  setProps(id: string, props: Record<string, unknown>, label = 'Edit') {
+  setProps(
+    id: string,
+    props: Record<string, unknown>,
+    label = 'Edit',
+    /** Props to write for every language even if they are content (they follow a shared prop). */
+    forAll: readonly string[] = [],
+  ) {
     const node = this.node(id);
     if (!this.locale || !node) return this.apply([{ op: 'props.set', id, props }], label);
     const content = new Set(this.store.registry.component(node.type)?.contentProps ?? []);
+    for (const key of forAll) content.delete(key);
     const translated = Object.fromEntries(Object.entries(props).filter(([k]) => content.has(k)));
     const shared = Object.fromEntries(Object.entries(props).filter(([k]) => !content.has(k)));
     return this.apply(

@@ -1,5 +1,6 @@
 import {
   type BNode,
+  createStore,
   deepEqualJson,
   descendants,
   findRawValue,
@@ -20,13 +21,19 @@ import type { Check, CheckResult, Count, NodeQuery } from './types.js';
 function inSubtree(id: string, roots: string[], docs: SiteDoc[]): boolean {
   if (!roots.length) return false;
   const allowed = new Set(roots);
-  return docs.some((doc) => {
-    for (let cur: string | null = id, n = 0; cur && n < 100; n++) {
-      if (allowed.has(cur)) return true;
-      cur = doc.nodes[cur]?.parent ?? null;
-    }
-    return false;
-  });
+  // In every document that has the node: one moved out of (or into) an allowed subtree changed
+  // something outside it.
+  const holding = docs.filter((doc) => doc.nodes[id]);
+  return (
+    holding.length > 0 &&
+    holding.every((doc) => {
+      for (let cur: string | null = id, n = 0; cur && n < 100; n++) {
+        if (allowed.has(cur)) return true;
+        cur = doc.nodes[cur]?.parent ?? null;
+      }
+      return false;
+    })
+  );
 }
 
 const within = (n: number, count: Count = { min: 1 }) =>
@@ -168,7 +175,8 @@ export function runCheck(check: Check, store: Store, start: SiteDoc): CheckResul
       return result(!wrong.length, wrong.length ? wrong.join(', ') : `page ${page.id}`);
     }
     case 'variant': {
-      const actual = doc.nodes[check.id]?.section?.variant;
+      const target = check.id ?? (check.query ? find(store, check.query)[0]?.id : undefined);
+      const actual = target ? doc.nodes[target]?.section?.variant : undefined;
       const ok = !!actual && Object.entries(check.variant).every(([k, v]) => actual[k] === v);
       return result(ok, `variant: ${JSON.stringify(actual ?? null)}`);
     }
@@ -296,9 +304,19 @@ export function runCheck(check: Check, store: Store, start: SiteDoc): CheckResul
           : [],
       );
       for (const id of ids) {
-        if (inSubtree(id, check.ids, [start, doc]) || newPageNodes.has(id)) continue;
         const before = start.nodes[id];
         const after = doc.nodes[id];
+        // An allowed node may change, but not leave for a place outside what is allowed.
+        const movedOut =
+          !!before &&
+          !!after &&
+          before.parent !== after.parent &&
+          !(after.parent && inSubtree(after.parent, check.ids, [doc]));
+        if (movedOut) {
+          changed.push(`${id} (moved)`);
+          continue;
+        }
+        if (inSubtree(id, check.ids, [start, doc]) || newPageNodes.has(id)) continue;
         if (allow.has('created') && !before) continue;
         // Translations are kept on the nodes they translate.
         if (allow.has('locales') && before && after) {
@@ -318,6 +336,8 @@ export function runCheck(check: Check, store: Store, start: SiteDoc): CheckResul
         changed.push('(languages)');
       if (!allow.has('symbols') && !deepEqualJson(start.symbols, doc.symbols))
         changed.push('(linked components)');
+      if (!deepEqualJson(start.data, doc.data)) changed.push('(site data)');
+      if (!deepEqualJson(start.breakpoints, doc.breakpoints)) changed.push('(breakpoints)');
       return result(
         !changed.length,
         changed.length ? `also changed: ${changed.slice(0, 10).join(', ')}` : 'ok',
@@ -433,7 +453,20 @@ export function runCheck(check: Check, store: Store, start: SiteDoc): CheckResul
         });
       const wanted =
         check.op !== undefined || check.id !== undefined || check.section !== undefined;
-      const ok = within(open.length, check.count) && (!wanted || open.some(about));
+      // What the page would be if a person accepted the proposal: tried on a copy.
+      const accepted = (c: (typeof open)[number]): boolean => {
+        if (!check.whenAccepted) return true;
+        const trial = createStore({ registry: store.registry, doc: structuredClone(doc) });
+        const res = trial.apply({
+          actor: { kind: 'user', id: 'reviewer' },
+          ops: c.ops.filter((_, i) => c.status[i] === 'open'),
+        });
+        return res.ok && check.whenAccepted.every((inner) => runCheck(inner, trial, start).passed);
+      };
+      const ok =
+        within(open.length, check.count) &&
+        (!wanted || open.some(about)) &&
+        (!check.whenAccepted || open.some(accepted));
       return result(
         ok,
         `${open.length} open proposal${open.length === 1 ? '' : 's'}${

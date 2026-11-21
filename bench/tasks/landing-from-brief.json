@@ -11,26 +11,37 @@
     },
     {
       "type": "variant",
-      "id": "hero-1",
+      "query": {
+        "page": "home",
+        "section": "hero"
+      },
       "variant": {
         "layout": "split"
       }
     },
     {
       "type": "variant",
-      "id": "cta-1",
+      "query": {
+        "page": "home",
+        "section": "cta"
+      },
       "variant": {
         "tone": "dark"
       }
     },
     {
-      "type": "textIncludes",
-      "id": "nav-1/brand",
-      "anyOf": ["Clockwise"]
+      "type": "find",
+      "query": {
+        "page": "home",
+        "part": "brand",
+        "textIncludes": "Clockwise"
+      }
     },
     {
-      "type": "noPlaceholderText",
-      "ids": ["hero-1/heading", "hero-1/subheading"]
+      "type": "noPlaceholderIn",
+      "page": "home",
+      "sections": ["hero"],
+      "parts": ["heading", "subheading"]
     },
     {
       "type": "noLintErrors"

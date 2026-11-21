@@ -54,8 +54,12 @@ function interrupted(tools: AgentTool[], store: Store, during: Interruption[]): 
           ops: event.ops,
           ...(event.label ? { label: event.label } : {}),
         });
+        // The agent may have removed what the other person was about to change: then their
+        // change simply doesn't happen. The run goes on and the checks decide.
         if (!res.ok)
-          throw new Error(`Task interruption failed to apply: ${JSON.stringify(res.errors)}`);
+          console.error(
+            `note: an interruption could not be applied (${res.errors.map((e) => e.message).join('; ')})`,
+          );
       }
       return tool.run(input);
     },

@@ -102,7 +102,7 @@ describe('PageBench checks catch plausible mistakes', () => {
     const lazy = [apply([{ op: 'section.insert', section: 'hero' }])];
     const result = await run('landing-from-brief', lazy);
     expect(result.passed).toBe(false);
-    expect(result.checks.find((c) => c.check.type === 'noPlaceholderText')?.passed).toBe(false);
+    expect(result.checks.find((c) => c.check.type === 'noPlaceholderIn')?.passed).toBe(false);
     // Sections inserted but not filled in.
     const unfilled = apply(
       ['nav', 'hero', 'schedule', 'team', 'faq', 'newsletter', 'footer'].map((section) => ({
@@ -168,6 +168,44 @@ describe('PageBench checks catch plausible mistakes', () => {
     // Proposing twice because the first answer looked like nothing happened.
     const cta = solutions['review-required']![1]!;
     expect(await failed('review-required', [cta, cta])).toEqual(['proposals']);
+    // A proposal for a call to action that isn't the one asked for (no tone, no heading, wrong place).
+    const bare = {
+      tool: 'apply',
+      input: { ops: [{ op: 'section.insert', section: 'cta', after: 'hero-1' }] },
+    };
+    expect(await failed('review-required', [bare])).toEqual(['proposals']);
+    // Fixing the typos and then moving the paragraph somewhere else is not "leave the rest alone".
+    expect(
+      await failed('fix-typos', [
+        ...solutions['fix-typos']!,
+        {
+          tool: 'apply',
+          input: { ops: [{ op: 'node.move', id: 'hero-1/subheading', parent: 'footer-1' }] },
+        },
+      ]),
+    ).toContain('unchangedExcept');
+    // A correct page whose hero isn't "hero-1" (one was added and removed first) still passes.
+    const detour = {
+      tool: 'apply',
+      input: {
+        ops: [
+          { op: 'page.create', id: 'scratch', path: '/scratch', title: 'Scratch' },
+          { op: 'section.insert', section: 'hero', page: 'scratch' },
+          { op: 'page.remove', id: 'scratch' },
+        ],
+      },
+    };
+    expect(
+      await failed('landing-from-brief', [detour, ...solutions['landing-from-brief']!]),
+    ).toEqual([]);
+    // Other spellings of "side by side from md up" count.
+    const spelled = JSON.parse(
+      JSON.stringify(solutions['stack-buttons']).replace(
+        'flex-direction: row',
+        'flex-flow: row wrap',
+      ),
+    );
+    expect(await failed('stack-buttons', spelled)).toEqual([]);
     // Raw values are refused by the store, so a script that never switches to tokens changes nothing.
     expect(await failed('tokens-only-sizes', solutions['tokens-only-sizes']!.slice(0, 1))).toEqual([
       'styleEquals',

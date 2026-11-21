@@ -506,7 +506,11 @@ export class CanvasView {
     }
     this.pageStyle.textContent = css;
     queueMicrotask(() => this.runPendingEdit());
-    this.content.innerHTML = html;
+    // Parsed apart from the host page: inside a host's own <form>, innerHTML would drop the
+    // page's forms and hand their fields to the host's.
+    const parsed = this.content.ownerDocument.createElement('template');
+    parsed.innerHTML = html;
+    this.content.replaceChildren(parsed.content);
     if (empty) {
       const hint = this.content.ownerDocument.createElement('div');
       hint.className = 'bbx-empty';
@@ -541,7 +545,17 @@ export class CanvasView {
     for (const el of this.content.querySelectorAll<HTMLElement>(
       'a[href], button, input, select, textarea, summary, [tabindex]',
     ))
-      if (!el.hasAttribute('data-bb-add') && el.tabIndex !== -1) el.tabIndex = -1;
+      if (
+        !el.hasAttribute('data-bb-add') &&
+        el.tabIndex !== -1 &&
+        // In preview a form can be tried out with the keyboard, as on the published page.
+        !(c.preview && el.matches(LIVE_IN_PREVIEW))
+      )
+        el.tabIndex = -1;
+    // A field outside any form of the page must not join a form of the host around the editor.
+    for (const el of this.content.querySelectorAll<HTMLElement>('input, select, textarea, button'))
+      if (!el.closest('form') || !this.content.contains(el.closest('form')))
+        el.setAttribute('form', '');
     // Add buttons only where a click would add something (the host may have turned adding off).
     for (const el of this.content.querySelectorAll<HTMLElement>('[data-bb-add]')) {
       const add = readAdd(el);
@@ -1196,7 +1210,8 @@ export class CanvasView {
         const target = e.target as Element;
         if (this.editing && target.closest('[contenteditable]')) {
           // Placing the caret in a summary being edited must not fold its accordion item.
-          if (target.closest('summary')) e.preventDefault();
+          // Nor may a click in a label being edited move focus to its control (ending the edit).
+          if (target.closest('summary, label')) e.preventDefault();
           return;
         }
         // In preview, forms can be tried out and accordion items opened, as on the published
